@@ -46,6 +46,7 @@ var (
 	maxPacketLoss     = flag.Float64("max-packet-loss", 100, "filter packet loss greater than this value(unit: %)")
 	minDownloadSpeed  = flag.Float64("min-download-speed", 5, "filter download speed less than this value(unit: MB/s)")
 	minUploadSpeed    = flag.Float64("min-upload-speed", 2, "filter upload speed less than this value(unit: MB/s, full mode only)")
+	earlyStop         = flag.Int("early-stop", 0, "stop testing after this many results pass filters (0 disables)")
 	renameNodes       = flag.Bool("rename", true, "rename nodes with IP location and speed")
 	renameTemplate    = flag.String("rename-template", "", "name template for renaming (Go text/template). Placeholders: {{.Flag}}, {{.CountryCode}}, {{.Index}}, {{.Direction}}, {{.Speed}}, {{.SpeedUnit}}, {{.LatencyMs}}, {{.DownloadSpeedMBps}}, {{.UploadSpeedMBps}}. Empty = default format")
 	fastMode          = flag.Bool("fast", false, "fast mode (alias for --speed-mode fast)")
@@ -97,6 +98,11 @@ func main() {
 		log.Fatalf("create speed tester failed: %s", err)
 	}
 	effectiveMode := speedTester.Mode()
+	resultFilter := newResultFilter(effectiveMode)
+	stopper, err := newEarlyStopper(*earlyStop, resultFilter)
+	if err != nil {
+		log.Fatalf("create early stopper failed: %s", err)
+	}
 
 	allProxies, err := speedTester.LoadProxies()
 	if err != nil {
@@ -125,11 +131,12 @@ func main() {
 
 		// Start testing in goroutine to send results to channel
 		go func() {
-			speedTester.TestProxies(allProxies, func(result *speedtester.Result) {
+			speedTester.TestProxiesUntil(allProxies, func(result *speedtester.Result) bool {
 				if collectResults {
 					results = append(results, result)
 				}
 				resultChannel <- result
+				return stopper.ShouldContinue(result)
 			})
 			close(resultChannel)
 			close(resultsDone)
@@ -140,7 +147,7 @@ func main() {
 			go func() {
 				<-resultsDone
 				results = output.SortResults(results, effectiveMode)
-				saveResult <- saveConfig(results, effectiveMode)
+				saveResult <- saveConfig(results, resultFilter)
 			}()
 		}
 
@@ -167,7 +174,7 @@ func main() {
 	}
 
 	// TSV mode: collect results synchronously
-	speedTester.TestProxies(allProxies, func(result *speedtester.Result) {
+	speedTester.TestProxiesUntil(allProxies, func(result *speedtester.Result) bool {
 		results = append(results, result)
 
 		if tsvWriter != nil {
@@ -175,12 +182,13 @@ func main() {
 				log.Printf("write TSV row failed: %s", err)
 			}
 		}
+		return stopper.ShouldContinue(result)
 	})
 
 	results = output.SortResults(results, effectiveMode)
 
 	if *outputPath != "" {
-		err = saveConfig(results, effectiveMode)
+		err = saveConfig(results, resultFilter)
 		if err != nil {
 			log.Fatalf("save config file failed: %s", err)
 		}
@@ -188,22 +196,12 @@ func main() {
 	}
 }
 
-func saveConfig(results []*speedtester.Result, mode speedtester.SpeedMode) error {
+func saveConfig(results []*speedtester.Result, filter resultFilter) error {
 	proxies := make([]map[string]any, 0)
 	nameCount := make(map[string]int) // Track name usage to avoid duplicates
 
 	for _, result := range results {
-		if *maxLatency > 0 && result.Latency > *maxLatency {
-			continue
-		}
-		if *maxPacketLoss >= 0 && result.PacketLoss > *maxPacketLoss {
-			continue
-		}
-		// 仅在实际测过下载时按下载速度过滤（fast 模式不测下载，DownloadSpeed 恒为 0）
-		if !mode.IsFast() && *downloadSize > 0 && *minDownloadSpeed > 0 && result.DownloadSpeed < *minDownloadSpeed*1024*1024 {
-			continue
-		}
-		if mode.UploadEnabled() && *minUploadSpeed > 0 && result.UploadSpeed < *minUploadSpeed*1024*1024 {
+		if !filter.Match(result) {
 			continue
 		}
 

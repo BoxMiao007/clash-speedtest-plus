@@ -71,6 +71,8 @@ Usage of clash-speedtest:
         filter speed less than this value(unit: MB/s) (default 5)
   -min-upload-speed float
         filter upload speed less than this value(unit: MB/s, full mode only) (default 2)
+  -early-stop int
+        stop testing after this many results pass filters (0 disables)
   -rename
         rename nodes with IP location and speed
   -fast
@@ -107,8 +109,9 @@ Premium|广港|IEPL|05                        	3.87MB/s    	249.00ms
 > clash-speedtest -c "https://domain.com/api/v1/client/subscribe?token=secret&flag=meta,/home/.config/clash/config.yaml"
 
 # 4. 筛选出延迟低于 800ms 且下载速度大于 5MB/s 的节点，并输出到 filtered.yaml
-> clash-speedtest -c "https://domain.com/api/v1/client/subscribe?token=secret&flag=meta" -output filtered.yaml -max-latency 800ms -min-speed 5
+> clash-speedtest -c "https://domain.com/api/v1/client/subscribe?token=secret&flag=meta" -output filtered.yaml -max-latency 800ms -min-download-speed 5
 # 筛选后的配置文件可以直接粘贴到 Clash/Mihomo 中使用，或是贴到 Github\Gist 上通过 Proxy Provider 引用。
+# 如果只需要前 20 个满足筛选条件的节点，可以加 -early-stop 20，达到数量后会停止继续测速。
 
 # 5. 使用 -rename 选项按照 IP 地区和下载速度重命名节点
 > clash-speedtest -c config.yaml -output result.yaml -rename
