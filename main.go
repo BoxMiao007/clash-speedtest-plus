@@ -72,7 +72,7 @@ func main() {
 	if !*fastMode {
 		requestedMode, err = speedtester.ParseSpeedMode(*speedMode)
 		if err != nil {
-			log.Fatalln("parse speed mode failed: %s", err)
+			log.Fatalf("parse speed mode failed: %s", err)
 		}
 	}
 
@@ -94,13 +94,13 @@ func main() {
 		UserAgent:        *userAgent,
 	})
 	if err != nil {
-		log.Fatalln("create speed tester failed: %s", err)
+		log.Fatalf("create speed tester failed: %s", err)
 	}
 	effectiveMode := speedTester.Mode()
 
 	allProxies, err := speedTester.LoadProxies()
 	if err != nil {
-		log.Fatalln("load proxies failed: %s", err)
+		log.Fatalf("load proxies failed: %s", err)
 	}
 
 	outputMode := output.DetermineOutputMode(output.IsTerminalFile)
@@ -110,7 +110,7 @@ func main() {
 		var err error
 		tsvWriter, err = output.NewTSVWriter(os.Stdout, effectiveMode)
 		if err != nil {
-			log.Fatalln("create TSV writer failed: %s", err)
+			log.Fatalf("create TSV writer failed: %s", err)
 		}
 	}
 
@@ -151,7 +151,7 @@ func main() {
 			tea.WithMouseAllMotion(),
 		)
 		if _, err := p.Run(); err != nil {
-			log.Fatalln("TUI failed: %s", err)
+			log.Fatalf("TUI failed: %s", err)
 		}
 
 		if !collectResults {
@@ -160,7 +160,7 @@ func main() {
 
 		err = <-saveResult
 		if err != nil {
-			log.Fatalln("save config file failed: %s", err)
+			log.Fatalf("save config file failed: %s", err)
 		}
 		fmt.Printf("\nsave config file to: %s\n", *outputPath)
 		return
@@ -182,7 +182,7 @@ func main() {
 	if *outputPath != "" {
 		err = saveConfig(results, effectiveMode)
 		if err != nil {
-			log.Fatalln("save config file failed: %s", err)
+			log.Fatalf("save config file failed: %s", err)
 		}
 		fmt.Printf("\nsave config file to: %s\n", *outputPath)
 	}
