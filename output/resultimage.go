@@ -37,6 +37,7 @@ type ImageRow struct {
 // ImageSpec 描述一张结果表图。
 type ImageSpec struct {
 	Mode     speedtester.SpeedMode
+	Source   string
 	Summary  string
 	Headers  []string
 	Rows     []ImageRow
@@ -203,11 +204,15 @@ func RenderResultImage(spec ImageSpec, fontFace imageFont) ([]byte, string, erro
 		lineHeight = resultImageFontSize + 4
 	}
 	rowHeight := lineHeight + resultImageRowPadY*2
-	headerRows := 1
-	if spec.Summary != "" {
-		headerRows = 2
+	source := sourceLabel(spec.Source)
+	titleRows := 0
+	if source != "" {
+		titleRows++
 	}
-	height := (headerRows+len(rows))*rowHeight + resultImageLineGap
+	if spec.Summary != "" {
+		titleRows++
+	}
+	height := (titleRows+1+len(rows))*rowHeight + resultImageLineGap
 	width := sumWidths(colWidths) + resultImageRowPadX
 	if width < 200 {
 		width = 200
@@ -216,8 +221,12 @@ func RenderResultImage(spec ImageSpec, fontFace imageFont) ([]byte, string, erro
 	fill(img, color.NRGBA{255, 255, 255, 255})
 
 	y := 0
+	if source != "" {
+		drawRow(img, fontFace, y, rowHeight, colWidths, []string{source}, color.NRGBA{255, 255, 255, 255}, color.NRGBA{15, 23, 42, 255}, false)
+		y += rowHeight
+	}
 	if spec.Summary != "" {
-		drawRow(img, fontFace, y, rowHeight, colWidths, []string{spec.Summary}, color.NRGBA{255, 255, 255, 255}, color.NRGBA{30, 41, 59, 255}, false)
+		drawRow(img, fontFace, y, rowHeight, colWidths, []string{spec.Summary}, color.NRGBA{255, 255, 255, 255}, color.NRGBA{71, 85, 105, 255}, false)
 		y += rowHeight
 	}
 	drawHeaderRow(img, fontFace, y, rowHeight, colWidths, headers)
@@ -227,6 +236,7 @@ func RenderResultImage(spec ImageSpec, fontFace imageFont) ([]byte, string, erro
 		drawDataRow(img, fontFace, y, rowHeight, colWidths, spec.Mode, row, maxSpeed)
 		y += rowHeight
 	}
+	drawGrid(img, titleRows, rowHeight, colWidths)
 
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
@@ -369,15 +379,14 @@ func drawRow(img *image.NRGBA, faces imageFont, y, height int, colWidths []int, 
 }
 
 func drawHeaderRow(img *image.NRGBA, faces imageFont, y, height int, colWidths []int, headers []string) {
+	fillRect(img, 0, y, img.Bounds().Dx(), height, color.NRGBA{226, 232, 240, 255})
 	x := 0
 	for i, width := range colWidths {
 		text := ""
 		if i < len(headers) {
 			text = headers[i]
 		}
-		bg, fg := headerColors(text)
-		fillRect(img, x, y, width, height, bg)
-		drawText(img, faces, x+resultImageRowPadX/2, y, height, text, fg)
+		drawCentered(img, faces, x, y, width, height, text, color.NRGBA{15, 23, 42, 255})
 		x += width
 	}
 }
@@ -396,12 +405,10 @@ func drawDataRow(img *image.NRGBA, faces imageFont, y, height int, colWidths []i
 			continue
 		}
 		switch kindOfColumn(i, mode) {
-		case colType:
-			drawChip(img, faces, x, y, width, height, text, typeChipColor(text))
-		case colLatency:
-			drawChip(img, faces, x, y, width, height, text, latencyChipColor(row.Result, i))
-		case colSpeed:
-			drawSpeedBar(img, faces, x, y, width, height, text, speedRatio(row.Result, i, mode, maxSpeed))
+		case colMetric:
+			bg, fg := metricColors(row.Result, i, mode, maxSpeed, text)
+			fillRect(img, x, y, width, height, bg)
+			drawCentered(img, faces, x, y, width, height, text, fg)
 		default:
 			drawText(img, faces, x+resultImageRowPadX/2, y, height, text, color.NRGBA{30, 41, 59, 255})
 		}
@@ -413,70 +420,112 @@ type columnKind int
 
 const (
 	colPlain columnKind = iota
-	colType
-	colLatency
-	colSpeed
+	colMetric
 )
 
 func kindOfColumn(index int, mode speedtester.SpeedMode) columnKind {
-	switch index {
-	case 2:
-		return colType
-	case 3:
-		return colLatency
+	if index == 3 {
+		return colMetric
 	}
 	if mode.IsFast() {
 		return colPlain
 	}
-	if index == 6 || (mode.UploadEnabled() && index == 7) {
-		return colSpeed
+	if index == 4 || index == 5 || index == 6 || (mode.UploadEnabled() && index == 7) {
+		return colMetric
 	}
 	return colPlain
 }
 
-func headerColors(header string) (color.NRGBA, color.NRGBA) {
-	white := color.NRGBA{255, 255, 255, 255}
-	switch {
-	case header == "序号":
-		return color.NRGBA{244, 114, 182, 255}, white
-	case header == "节点名称":
-		return color.NRGBA{251, 146, 60, 255}, white
-	case header == "类型":
-		return color.NRGBA{56, 189, 248, 255}, white
-	case strings.Contains(header, "延迟"), header == "抖动":
-		return color.NRGBA{45, 212, 191, 255}, white
-	case header == "丢包率":
-		return color.NRGBA{167, 139, 250, 255}, white
-	case strings.Contains(header, "速度"):
-		return color.NRGBA{244, 114, 182, 255}, white
+func metricColors(result *speedtester.Result, index int, mode speedtester.SpeedMode, maxSpeed float64, text string) (color.NRGBA, color.NRGBA) {
+	if result == nil || text == "" || text == "N/A" || text == "测试中" {
+		return color.NRGBA{254, 226, 226, 255}, color.NRGBA{153, 27, 27, 255}
+	}
+	score := metricScore(result, index, mode, maxSpeed)
+	return scoreColor(score), scoreText(score)
+}
+
+func metricScore(result *speedtester.Result, index int, mode speedtester.SpeedMode, maxSpeed float64) float64 {
+	switch index {
+	case 3:
+		return durationScore(result.Latency)
+	case 4:
+		return durationScore(result.Jitter)
+	case 5:
+		return 1 - clamp01(result.PacketLoss/30)
 	default:
-		return color.NRGBA{148, 163, 184, 255}, white
+		return speedRatio(result, index, mode, maxSpeed)
 	}
 }
 
-func drawChip(img *image.NRGBA, faces imageFont, x, y, width, height int, text string, bg color.NRGBA) {
-	pad := 3
-	fillRect(img, x+pad, y+pad, max(1, width-pad*2), max(1, height-pad*2), bg)
-	drawCentered(img, faces, x, y, width, height, text, color.NRGBA{255, 255, 255, 255})
+func durationScore(value time.Duration) float64 {
+	if value <= 0 {
+		return 0
+	}
+	ms := value.Seconds() * 1000
+	return 1 - clamp01(ms/800)
 }
 
-func drawSpeedBar(img *image.NRGBA, faces imageFont, x, y, width, height int, text string, ratio float64) {
-	if ratio < 0 {
-		ratio = 0
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
 	}
-	if ratio > 1 {
-		ratio = 1
+	if v > 1 {
+		return 1
 	}
-	barW := int(float64(width-8) * ratio)
-	textW := textWidth(faces.face, text) + 16
-	if text != "" && text != "N/A" && barW < textW {
-		barW = textW
+	return v
+}
+
+func scoreColor(score float64) color.NRGBA {
+	score = clamp01(score)
+	// 0 深红，0.5 黄，1 深绿。
+	var r, g, b uint8
+	if score < 0.5 {
+		t := score / 0.5
+		r = uint8(254 - t*14)
+		g = uint8(202 + t*38)
+		b = uint8(202 - t*82)
+	} else {
+		t := (score - 0.5) / 0.5
+		r = uint8(240 - t*153)
+		g = uint8(240 - t*43)
+		b = uint8(120 + t*67)
 	}
-	if barW < 0 {
-		barW = 0
+	return color.NRGBA{r, g, b, 255}
+}
+
+func scoreText(score float64) color.NRGBA {
+	if score < 0.25 || score > 0.8 {
+		return color.NRGBA{255, 255, 255, 255}
 	}
-	fillRect(img, x+2, y+3, barW, max(1, height-6), color.NRGBA{244, 114, 182, 255})
-	drawCentered(img, faces, x, y, width, height, text, color.NRGBA{255, 255, 255, 255})
+	return color.NRGBA{15, 23, 42, 255}
+}
+
+func drawGrid(img *image.NRGBA, titleRows, rowHeight int, colWidths []int) {
+	line := color.NRGBA{203, 213, 225, 255}
+	width := img.Bounds().Dx()
+	height := img.Bounds().Dy()
+	top := titleRows * rowHeight
+	for y := top; y < height; y += rowHeight {
+		for x := 0; x < width; x++ {
+			img.SetNRGBA(x, y, line)
+		}
+	}
+	for y := height - 1; y >= top && y < height; y++ {
+		break
+	}
+	for x := 0; x < width; x++ {
+		img.SetNRGBA(x, height-1, line)
+	}
+	x := 0
+	for _, w := range colWidths {
+		for y := top; y < height; y++ {
+			img.SetNRGBA(x, y, line)
+		}
+		x += w
+	}
+	for y := top; y < height; y++ {
+		img.SetNRGBA(width-1, y, line)
+	}
 }
 
 func drawCentered(img *image.NRGBA, faces imageFont, x, y, width, height int, text string, fg color.NRGBA) {
@@ -515,46 +564,6 @@ func fillRect(img *image.NRGBA, x, y, w, h int, c color.NRGBA) {
 	}
 }
 
-func typeChipColor(text string) color.NRGBA {
-	switch strings.ToLower(text) {
-	case "vmess":
-		return color.NRGBA{59, 130, 246, 255}
-	case "vless":
-		return color.NRGBA{14, 165, 233, 255}
-	case "trojan":
-		return color.NRGBA{16, 185, 129, 255}
-	case "ss", "shadowsocks":
-		return color.NRGBA{139, 92, 246, 255}
-	case "hysteria2", "hy2":
-		return color.NRGBA{244, 63, 94, 255}
-	default:
-		return color.NRGBA{100, 116, 139, 255}
-	}
-}
-
-func latencyChipColor(result *speedtester.Result, index int) color.NRGBA {
-	if result == nil {
-		return color.NRGBA{148, 163, 184, 255}
-	}
-	value := result.Latency
-	if index == 4 {
-		value = result.Jitter
-	}
-	if value <= 0 {
-		return color.NRGBA{239, 68, 68, 255}
-	}
-	if value < 100*time.Millisecond {
-		return color.NRGBA{34, 197, 94, 255}
-	}
-	if value < 200*time.Millisecond {
-		return color.NRGBA{45, 212, 191, 255}
-	}
-	if value < 400*time.Millisecond {
-		return color.NRGBA{250, 204, 21, 255}
-	}
-	return color.NRGBA{249, 115, 22, 255}
-}
-
 func speedRatio(result *speedtester.Result, index int, mode speedtester.SpeedMode, maxSpeed float64) float64 {
 	speed := cellSpeed(result, index, mode)
 	if speed <= 0 || maxSpeed <= 0 {
@@ -587,37 +596,6 @@ func cellSpeed(result *speedtester.Result, index int, mode speedtester.SpeedMode
 		return result.UploadSpeed
 	}
 	return result.DownloadSpeed
-}
-
-func latencyColor(value time.Duration) color.NRGBA {
-	if value > 0 && value < 800*time.Millisecond {
-		return color.NRGBA{22, 163, 74, 255}
-	}
-	if value > 0 && value < 1500*time.Millisecond {
-		return color.NRGBA{202, 138, 4, 255}
-	}
-	return color.NRGBA{220, 38, 38, 255}
-}
-
-func lossColor(value float64) color.NRGBA {
-	if value < 10 {
-		return color.NRGBA{22, 163, 74, 255}
-	}
-	if value < 20 {
-		return color.NRGBA{202, 138, 4, 255}
-	}
-	return color.NRGBA{220, 38, 38, 255}
-}
-
-func speedColor(bytesPerSecond float64, greenMB, yellowMB float64) color.NRGBA {
-	mb := bytesPerSecond / (1024 * 1024)
-	if mb >= greenMB {
-		return color.NRGBA{22, 163, 74, 255}
-	}
-	if mb >= yellowMB {
-		return color.NRGBA{202, 138, 4, 255}
-	}
-	return color.NRGBA{220, 38, 38, 255}
 }
 
 // RemovePartialImages 删除导出目录里未完成的结果图临时文件。
@@ -739,6 +717,36 @@ func BuildImageRows(results []*speedtester.Result, mode speedtester.SpeedMode) [
 		})
 	}
 	return rows
+}
+
+// SourceLabel 把配置路径或订阅地址收成顶部标题，不带查询参数。
+func SourceLabel(raw string) string {
+	return sourceLabel(raw)
+}
+
+func sourceLabel(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parts := strings.Split(raw, ",")
+	labels := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if i := strings.IndexAny(part, "?#"); i >= 0 {
+			part = part[:i]
+		}
+		part = strings.TrimRight(part, "/")
+		if strings.Contains(part, "://") {
+			labels = append(labels, part)
+			continue
+		}
+		labels = append(labels, filepath.Base(part))
+	}
+	return strings.Join(labels, "，")
 }
 
 // SummaryLine 是结果表图顶部一行：时间、模式、状态、已完成/总数。

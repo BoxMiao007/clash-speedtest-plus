@@ -182,6 +182,7 @@ func main() {
 		// Create and run TUI
 		model := tui.NewTUIModelWithEngine(effectiveMode, len(allProxies), resultChannel, speedTester, progressChannel, earlyStopSignal)
 		model.SetImageExport(".", !*noImage)
+		model.SetImageSource(*configPathsConfig)
 		if collectResults {
 			model.SetConfigSaver(func(done []*speedtester.Result) (string, error) {
 				sorted := output.SortResults(append([]*speedtester.Result(nil), done...), effectiveMode)
@@ -280,6 +281,7 @@ func writeNonInteractiveImage(ctx context.Context, results []*speedtester.Result
 	}
 	spec := output.ImageSpec{
 		Mode:    mode,
+		Source:  *configPathsConfig,
 		Summary: output.SummaryLine(time.Now(), mode, status, len(results), total),
 		Headers: output.GetHeaders(mode),
 		Rows:    output.BuildImageRows(results, mode),

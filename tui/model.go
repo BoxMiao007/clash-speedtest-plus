@@ -111,6 +111,7 @@ type tuiModel struct {
 	// 结果表图：-no-image 只关自动导出，s 仍可手动保存。
 	autoImage     bool
 	imageDir      string
+	imageSource   string
 	savingImage   bool
 	statusText    string
 	statusUntil   time.Time
@@ -236,6 +237,11 @@ func (m *tuiModel) SetImageExport(dir string, auto bool) {
 		m.imageDir = dir
 	}
 	m.autoImage = auto
+}
+
+// SetImageSource 记录配置文件名或订阅地址，画在结果图顶部。
+func (m *tuiModel) SetImageSource(source string) {
+	m.imageSource = source
 }
 
 // SetConfigSaver 在整轮结束时写本地 yaml。gist/仓库上传由调用方自行后台处理。
@@ -725,6 +731,7 @@ func (m tuiModel) imageSpec(finished bool) output.ImageSpec {
 	rows = append(rows, output.BuildImageRows(m.results, m.mode)...)
 	return output.ImageSpec{
 		Mode:    m.mode,
+		Source:  m.imageSource,
 		Summary: output.SummaryLine(time.Now(), m.mode, status, m.currentProxy, m.totalProxies),
 		Headers: m.baseHeaders,
 		Rows:    rows,
