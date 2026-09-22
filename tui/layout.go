@@ -70,17 +70,18 @@ func (m tuiModel) testingElapsed() time.Duration {
 	return elapsed
 }
 
-// stateLabel 返回进度行状态文案；提前结束到达后即使拓尾未收完也保持「已提前结束」。
+// stateLabel 返回进度行状态文案；全部测完优先于暂停（暂停中拓尾收完也算已完成），
+// 提前结束到达后即使拓尾未收完也保持「已提前结束」。
 func (m tuiModel) stateLabel() string {
 	switch {
 	case m.earlyStopped:
 		return "已提前结束"
+	case !m.testing:
+		return "已完成"
 	case m.paused:
 		return "已暂停"
-	case m.testing:
-		return "测试中"
 	default:
-		return "已完成"
+		return "测试中"
 	}
 }
 

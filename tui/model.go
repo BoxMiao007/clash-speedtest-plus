@@ -337,6 +337,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.testing = false
 		m.flushScheduled = false
 		m.flushResultsIfDirty()
+		// 全部测完后空格无效果，帮助条隐藏空格项。
+		m.help.setEarlyStopped(true)
+		m.help.setPaused(false)
 		progressCmd := m.progress.SetPercent(1.0)
 		return m, progressCmd
 
@@ -405,10 +408,12 @@ func (m tuiModel) waitForEarlyStop() tea.Cmd {
 	}
 }
 
-// applyProgress 更新在测节点快照；收到同一节点的后续事件时覆盖，保持钉顶顺序。
+// applyProgress 更新在测节点快照；收到同一节点的后续事件时覆盖快照并重绘，
+// 保证延迟与瞬时速度随事件刷新。
 func (m *tuiModel) applyProgress(p speedtester.Progress) {
 	if node, ok := m.inFlight[p.Name]; ok {
 		node.latest = p
+		m.updateTableRows()
 		return
 	}
 	node := &inFlightNode{name: p.Name, proxyType: p.Type, latest: p}
