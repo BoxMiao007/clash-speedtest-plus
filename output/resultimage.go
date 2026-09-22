@@ -460,7 +460,10 @@ func metricColors(result *speedtester.Result, index int, mode speedtester.SpeedM
 		return color.NRGBA{254, 226, 226, 255}, color.NRGBA{153, 27, 27, 255}
 	}
 	score := metricScore(result, index, mode, maxSpeed)
-	return scoreColor(score), scoreText(score)
+	if index == 6 || index == 7 {
+		return redScale(score), scoreText(score)
+	}
+	return greenScale(score), scoreText(score)
 }
 
 func metricScore(result *speedtester.Result, index int, mode speedtester.SpeedMode, maxSpeed float64) float64 {
@@ -494,22 +497,33 @@ func clamp01(v float64) float64 {
 	return v
 }
 
-func scoreColor(score float64) color.NRGBA {
+func greenScale(score float64) color.NRGBA {
+	return paletteColor(score, []color.NRGBA{
+		{0xfe, 0xf9, 0xc3, 0xff},
+		{0xfd, 0xe0, 0x47, 0xff},
+		{0x38, 0xcf, 0x9b, 0xff},
+		{0x05, 0x95, 0x6a, 0xff},
+	})
+}
+
+func redScale(score float64) color.NRGBA {
+	return paletteColor(score, []color.NRGBA{
+		{0xfa, 0xdf, 0xe4, 0xff},
+		{0xfd, 0x47, 0x7d, 0xff},
+		{0xfa, 0x0b, 0x55, 0xff},
+	})
+}
+
+func paletteColor(score float64, palette []color.NRGBA) color.NRGBA {
 	score = clamp01(score)
-	// 0 深红，0.5 琥珀，1 深绿，避免过浅。
-	var r, g, b uint8
-	if score < 0.5 {
-		t := score / 0.5
-		r = uint8(185 + t*32)
-		g = uint8(28 + t*95)
-		b = uint8(28 + t*12)
-	} else {
-		t := (score - 0.5) / 0.5
-		r = uint8(217 - t*175)
-		g = uint8(123 + t*32)
-		b = uint8(40 - t*16)
+	index := int(score*float64(len(palette)-1) + 0.5)
+	if index < 0 {
+		index = 0
 	}
-	return color.NRGBA{r, g, b, 255}
+	if index >= len(palette) {
+		index = len(palette) - 1
+	}
+	return palette[index]
 }
 
 func scoreText(score float64) color.NRGBA {
@@ -554,19 +568,37 @@ func drawCellText(img *image.NRGBA, faces imageFont, x, y, width, height int, te
 
 func drawNameCell(img *image.NRGBA, faces imageFont, x, y, height int, text string, fg color.NRGBA) {
 	left := x + 8
-	code, rest, ok := splitLeadingFlag(text)
-	if ok {
-		if flag := flagImage(code); flag != nil {
-			h := flag.Bounds().Dy()
-			w := flag.Bounds().Dx()
-			top := y + (height-h)/2
-			dst := image.Rect(left, top, left+w, top+h)
-			draw.Draw(img, dst, flag, flag.Bounds().Min, draw.Over)
-			left += w + 6
+	code, rest, strip := leadingFlag(text)
+	if flag := flagImage(code); flag != nil {
+		h := flag.Bounds().Dy()
+		w := flag.Bounds().Dx()
+		top := y + (height-h)/2
+		dst := image.Rect(left, top, left+w, top+h)
+		draw.Draw(img, dst, flag, flag.Bounds().Min, draw.Over)
+		left += w + 6
+		if strip {
+			text = strings.TrimSpace(rest)
 		}
-		text = strings.TrimSpace(rest)
 	}
 	drawText(img, faces, left, y, height, text, fg)
+}
+
+// leadingFlag 优先识别名字开头的国旗符号；没有时再认 JP、HK 这类国家码。
+func leadingFlag(text string) (code, rest string, strip bool) {
+	if code, rest, ok := splitLeadingFlag(text); ok {
+		return code, rest, true
+	}
+	upper := strings.ToUpper(text)
+	for _, token := range []string{"JP", "HK", "TW", "CN", "US", "SG", "KR", "GB", "UK", "DE", "FR"} {
+		if strings.HasPrefix(upper, token) {
+			code = strings.ToLower(token)
+			if code == "uk" {
+				code = "gb"
+			}
+			return code, text, false
+		}
+	}
+	return "", text, false
 }
 
 func splitLeadingFlag(text string) (code, rest string, ok bool) {
