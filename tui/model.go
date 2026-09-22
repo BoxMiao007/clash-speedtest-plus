@@ -292,6 +292,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.quittingAfterSave {
 				m.forceQuit = true
 				m.quitting = true
+				if err := output.RemovePartialImages(m.imageDir); err != nil {
+					m.saveFailed = true
+					m.statusText = "删除半截图失败: " + err.Error()
+				}
 				return m, tea.Quit
 			}
 			if m.roundFinished() {
@@ -304,7 +308,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.savingImage = true
 				return m, m.saveImageCmd(true, true)
 			}
-			// 本轮尚未结束：丢掉在测节点，不写 yaml 和自动图。
+			// 本轮尚未结束：丢掉在测节点，不写 yaml 和自动图，并删掉半截图。
+			if stopper, ok := m.pauseCtl.(interface{ Stop() }); ok {
+				stopper.Stop()
+			}
+			if err := output.RemovePartialImages(m.imageDir); err != nil {
+				m.saveFailed = true
+				m.statusText = "删除半截图失败: " + err.Error()
+			}
 			m.quitting = true
 			return m, tea.Quit
 		case "s":

@@ -336,6 +336,29 @@ func speedColor(bytesPerSecond float64, greenMB, yellowMB float64) color.NRGBA {
 	return color.NRGBA{220, 38, 38, 255}
 }
 
+// RemovePartialImages 删除导出目录里未完成的结果图临时文件。
+func RemovePartialImages(dir string) error {
+	clean, err := safeImageDir(dir)
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(clean)
+	if err != nil {
+		return err
+	}
+	var first error
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, ".clash-speedtest-") || !strings.HasSuffix(name, ".png.part") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(clean, name)); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
 func safeImageDir(dir string) (string, error) {
 	if dir == "" {
 		dir = "."
