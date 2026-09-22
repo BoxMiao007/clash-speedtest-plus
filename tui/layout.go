@@ -34,6 +34,9 @@ func (m *tuiModel) updateTableLayout() {
 }
 
 func (m tuiModel) progressLine() string {
+	if m.statusText != "" && (m.statusUntil.IsZero() || time.Now().Before(m.statusUntil)) {
+		return m.statusText
+	}
 	// 暂停时已用时与剩余冻结：总耗时扣除历史及当前暂停时长。
 	elapsed := m.testingElapsed()
 	state := m.stateLabel()

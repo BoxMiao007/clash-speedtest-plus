@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -36,6 +37,13 @@ type nodeProgressMsg struct {
 // earlyStopMsg 表示过筛数量达到限额，不再派发新节点。
 type earlyStopMsg struct{}
 
+// imageSavedMsg 是结果表图写完后的提示。
+type imageSavedMsg struct {
+	text string
+}
+
+const statusHold = 3 * time.Second
+
 // PauseController 由测速引擎实现，TUI 通过它在暂停/继续时控制节点派发。
 type PauseController interface {
 	Pause()
@@ -44,30 +52,30 @@ type PauseController interface {
 
 // inFlightNode 保存一个在测节点的最新进度快照，随 200ms 进度事件刷新。
 type inFlightNode struct {
-	name     string
+	name      string
 	proxyType string
-	latest   speedtester.Progress
+	latest    speedtester.Progress
 }
 
 // tuiModel represents the Bubble Tea model for the TUI
 type tuiModel struct {
-	mode           speedtester.SpeedMode
-	totalProxies   int
-	currentProxy   int
-	results        []*speedtester.Result
-	sequence       map[*speedtester.Result]int
-	nextSequence   int
-	baseHeaders    []string
-	testing        bool
-	quitting       bool
-	progress       progress.Model
-	table          table.Model
-	help           helpState
-	resultChannel  chan *speedtester.Result
-	sortColumn     int
-	sortAscending  bool
-	detailVisible  bool
-	detailResult   *speedtester.Result
+	mode          speedtester.SpeedMode
+	totalProxies  int
+	currentProxy  int
+	results       []*speedtester.Result
+	sequence      map[*speedtester.Result]int
+	nextSequence  int
+	baseHeaders   []string
+	testing       bool
+	quitting      bool
+	progress      progress.Model
+	table         table.Model
+	help          helpState
+	resultChannel chan *speedtester.Result
+	sortColumn    int
+	sortAscending bool
+	detailVisible bool
+	detailResult  *speedtester.Result
 	// detailInFlight 非空表示详情面板当前展示的是在测节点占位详情。
 	detailInFlight *inFlightNode
 	selectedIndex  int
@@ -90,6 +98,14 @@ type tuiModel struct {
 	// pauseStartedAt 记录本次暂停起点；pausedElapsed 累计历史暂停时长，用于冻结已用时。
 	pauseStartedAt time.Time
 	pausedElapsed  time.Duration
+
+	// 结果表图：-no-image 只关自动导出，s 仍可手动保存。
+	autoImage     bool
+	imageDir      string
+	savingImage   bool
+	statusText    string
+	statusUntil   time.Time
+	autoImageDone bool
 }
 
 const (
@@ -187,11 +203,21 @@ func newTUIModel(
 		detailHeight:   0,
 		perf:           newPerfTracker(),
 
-		pauseCtl:      pauseCtl,
-		progressCh:    progressCh,
-		earlyStopCh:   earlyStopCh,
-		inFlight:      make(map[string]*inFlightNode),
+		pauseCtl:    pauseCtl,
+		progressCh:  progressCh,
+		earlyStopCh: earlyStopCh,
+		inFlight:    make(map[string]*inFlightNode),
+		autoImage:   true,
+		imageDir:    ".",
 	}
+}
+
+// SetImageExport 配置结果表图目录。auto 为 false 时只关自动导出。
+func (m *tuiModel) SetImageExport(dir string, auto bool) {
+	if dir != "" {
+		m.imageDir = dir
+	}
+	m.autoImage = auto
 }
 
 // Init initializes the TUI model
@@ -249,6 +275,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
+		case "s":
+			if m.savingImage {
+				m.setStatus("正在保存")
+				return m, nil
+			}
+			m.savingImage = true
+			m.setStatus("正在保存")
+			return m, m.saveImageCmd(false)
 		case " ":
 			// 空格切换暂停/继续；详情开着时仍是暂停，不关详情。
 			// 已完成或已提前结束时空格无效。
@@ -341,7 +375,17 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.setEarlyStopped(true)
 		m.help.setPaused(false)
 		progressCmd := m.progress.SetPercent(1.0)
-		return m, progressCmd
+		var cmds []tea.Cmd
+		if progressCmd != nil {
+			cmds = append(cmds, progressCmd)
+		}
+		if m.autoImage && !m.autoImageDone && !m.savingImage {
+			m.autoImageDone = true
+			m.savingImage = true
+			m.setStatus("正在保存")
+			cmds = append(cmds, m.saveImageCmd(true))
+		}
+		return m, tea.Batch(cmds...)
 
 	case nodeProgressMsg:
 		m.applyProgress(msg.progress)
@@ -365,7 +409,16 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, cmd
 
+	case imageSavedMsg:
+		m.savingImage = false
+		m.setStatus(msg.text)
+		return m, nil
+
 	case timerTickMsg:
+		if !m.statusUntil.IsZero() && time.Now().After(m.statusUntil) {
+			m.statusText = ""
+			m.statusUntil = time.Time{}
+		}
 		return m, timerTickCmd()
 
 	case flushResultsMsg:
@@ -451,6 +504,85 @@ func (m *tuiModel) findResultByName(name string) *speedtester.Result {
 		}
 	}
 	return nil
+}
+
+func (m *tuiModel) setStatus(text string) {
+	m.statusText = text
+	m.statusUntil = time.Now().Add(statusHold)
+}
+
+// saveImageCmd 用按下或触发那一瞬的快照编码结果表图。
+func (m tuiModel) saveImageCmd(finished bool) tea.Cmd {
+	spec := m.imageSpec(finished)
+	dir := m.imageDir
+	return func() tea.Msg {
+		path, warning, err := output.WriteResultImage(dir, spec)
+		if err != nil {
+			return imageSavedMsg{text: "保存失败: " + err.Error()}
+		}
+		return imageSavedMsg{text: output.JoinStatus("已保存 "+path, warning)}
+	}
+}
+
+func (m tuiModel) imageSpec(finished bool) output.ImageSpec {
+	status := m.stateLabel()
+	if finished {
+		if m.earlyStopped {
+			status = "已提前结束"
+		} else {
+			status = "已完成"
+		}
+	}
+	rows := make([]output.ImageRow, 0, m.inFlightCount()+len(m.results))
+	for _, name := range m.inFlightOrder {
+		node := m.inFlight[name]
+		if node == nil {
+			continue
+		}
+		rows = append(rows, output.ImageRow{
+			Cells:    plainInFlightCells(m.mode, node),
+			InFlight: true,
+		})
+	}
+	rows = append(rows, output.BuildImageRows(m.results, m.mode)...)
+	return output.ImageSpec{
+		Mode:    m.mode,
+		Summary: output.SummaryLine(time.Now(), m.mode, status, m.currentProxy, m.totalProxies),
+		Headers: m.baseHeaders,
+		Rows:    rows,
+		Now:     time.Now(),
+	}
+}
+
+func plainInFlightCells(mode speedtester.SpeedMode, node *inFlightNode) []string {
+	p := node.latest
+	latency := "测试中"
+	if p.Latency > 0 {
+		latency = p.Latency.Round(time.Millisecond).String()
+	}
+	if mode.IsFast() {
+		return []string{"…", node.name, node.proxyType, latency}
+	}
+	jitter, loss, download, upload := "", "", "", ""
+	if p.Latency > 0 {
+		jitter = p.Jitter.Round(time.Millisecond).String()
+		loss = formatLoss(p.PacketLoss)
+	}
+	if p.Phase >= speedtester.PhaseDownload {
+		download = speedtester.FormatSpeed(p.DownloadSpeed)
+	}
+	if p.Phase >= speedtester.PhaseUpload {
+		upload = speedtester.FormatSpeed(p.UploadSpeed)
+	}
+	row := []string{"…", node.name, node.proxyType, latency, jitter, loss, download}
+	if mode.UploadEnabled() {
+		row = append(row, upload)
+	}
+	return row
+}
+
+func formatLoss(value float64) string {
+	return fmt.Sprintf("%.1f%%", value)
 }
 
 // View renders the TUI

@@ -37,6 +37,7 @@ var (
 	timeout           = flag.Duration("timeout", time.Second*5, "timeout for testing proxies")
 	concurrent        = flag.Int("concurrent", 4, "download concurrent size")
 	parallel          = flag.Int("parallel", 1, "number of nodes to test at once")
+	noImage           = flag.Bool("no-image", false, "disable automatic result image export")
 	outputPath        = flag.String("output", "", "output config file path")
 	gistToken         = flag.String("gist-token", "", "github gist token for updating output")
 	gistAddress       = flag.String("gist-address", "", "github gist address or id for updating output (filename uses output basename)")
@@ -123,9 +124,9 @@ func main() {
 		}
 	}
 
-results := make([]*speedtester.Result, 0, len(allProxies))
+	results := make([]*speedtester.Result, 0, len(allProxies))
 
-if outputMode == output.OutputModeInteractive {
+	if outputMode == output.OutputModeInteractive {
 		collectResults := *outputPath != ""
 		// Run TUI for Interactive mode
 		resultChannel := make(chan *speedtester.Result, len(allProxies))
@@ -182,8 +183,10 @@ if outputMode == output.OutputModeInteractive {
 		}
 
 		// Create and run TUI
+		model := tui.NewTUIModelWithEngine(effectiveMode, len(allProxies), resultChannel, speedTester, progressChannel, earlyStopSignal)
+		model.SetImageExport(".", !*noImage)
 		p := tea.NewProgram(
-			tui.NewTUIModelWithEngine(effectiveMode, len(allProxies), resultChannel, speedTester, progressChannel, earlyStopSignal),
+			model,
 			tea.WithAltScreen(),
 			tea.WithMouseAllMotion(),
 		)
@@ -226,6 +229,30 @@ if outputMode == output.OutputModeInteractive {
 		// 非交互模式路径走 stderr，stdout 保留给 TSV/管道输出。
 		fmt.Fprintf(os.Stderr, "已保存配置: %s\n", *outputPath)
 	}
+	if !*noImage {
+		exportNonInteractiveImage(results, effectiveMode, len(allProxies))
+	}
+}
+
+func exportNonInteractiveImage(results []*speedtester.Result, mode speedtester.SpeedMode, total int) {
+	fmt.Fprintf(os.Stderr, "正在保存\n")
+	status := "已完成"
+	if *earlyStop > 0 && len(results) < total {
+		status = "已提前结束"
+	}
+	spec := output.ImageSpec{
+		Mode:    mode,
+		Summary: output.SummaryLine(time.Now(), mode, status, len(results), total),
+		Headers: output.GetHeaders(mode),
+		Rows:    output.BuildImageRows(results, mode),
+		Now:     time.Now(),
+	}
+	path, warning, err := output.WriteResultImage(".", spec)
+	if err != nil {
+		log.Printf("保存结果图失败: %s", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%s\n", output.JoinStatus("已保存 "+path, warning))
 }
 
 func saveConfig(results []*speedtester.Result, filter resultFilter) error {

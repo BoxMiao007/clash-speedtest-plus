@@ -16,6 +16,7 @@ type helpKeyMap struct {
 	Quit        key.Binding
 	CloseDetail key.Binding
 	TogglePause key.Binding
+	SaveImage   key.Binding
 	Table       table.KeyMap
 }
 
@@ -35,6 +36,10 @@ func newHelpState(tableKeys table.KeyMap) helpState {
 			TogglePause: key.NewBinding(
 				key.WithKeys(" "),
 				key.WithHelp("空格", "暂停"),
+			),
+			SaveImage: key.NewBinding(
+				key.WithKeys("s"),
+				key.WithHelp("s", "保存结果图"),
 			),
 		},
 	}
@@ -83,6 +88,7 @@ func (km helpKeyMap) ShortHelp() []key.Binding {
 		km.Table.LineUp,
 		km.Table.LineDown,
 		km.TogglePause,
+		km.SaveImage,
 		km.Quit,
 		km.CloseDetail,
 	}
@@ -92,6 +98,6 @@ func (km helpKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{km.Table.LineUp, km.Table.LineDown, km.Table.GotoTop, km.Table.GotoBottom},
 		{km.Table.PageUp, km.Table.PageDown, km.Table.HalfPageUp, km.Table.HalfPageDown},
-		{km.TogglePause, km.CloseDetail, km.Quit},
+		{km.TogglePause, km.SaveImage, km.CloseDetail, km.Quit},
 	}
 }
