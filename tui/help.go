@@ -104,6 +104,12 @@ func (h helpState) height() int {
 }
 
 func (km helpKeyMap) ShortHelp() []key.Binding {
+	if !km.Quit.Enabled() {
+		return nil
+	}
+	if km.Quit.Help().Key == "再按 q 或 Ctrl+C" {
+		return []key.Binding{km.Quit}
+	}
 	return []key.Binding{
 		km.Table.LineUp,
 		km.Table.LineDown,

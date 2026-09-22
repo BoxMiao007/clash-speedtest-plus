@@ -34,6 +34,9 @@ func (m *tuiModel) updateTableLayout() {
 }
 
 func (m tuiModel) progressLine() string {
+	if m.quittingAfterSave {
+		return m.savingProgressLine()
+	}
 	if m.statusText != "" && (m.statusUntil.IsZero() || time.Now().Before(m.statusUntil)) {
 		return m.statusText
 	}
@@ -59,6 +62,14 @@ func (m tuiModel) progressLine() string {
 	progressModel.Width = barWidth
 	bar := progressModel.View()
 	return fmt.Sprintf("%s %s | %s", info, bar, metrics)
+}
+
+func (m tuiModel) savingProgressLine() string {
+	info := fmt.Sprintf("正在保存 %d/%d", m.currentProxy, m.totalProxies)
+	if inFlight := m.inFlightCount(); inFlight > 0 {
+		info += fmt.Sprintf("，%d 在测", inFlight)
+	}
+	return info + " | 已用时 " + formatDuration(m.testingElapsed())
 }
 
 // testingElapsed 返回扣除暂停时段后的已测时长；暂停中冻结在当前值。

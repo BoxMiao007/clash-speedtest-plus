@@ -193,6 +193,7 @@ func main() {
 		}
 		if uploadNeeded() {
 			uploadCtx, cancelUpload := context.WithCancel(context.Background())
+			defer cancelUpload()
 			model.SetUploader(func() string {
 				uploadConfig(uploadCtx)
 				if uploadCtx.Err() != nil {
