@@ -199,7 +199,8 @@ if outputMode == output.OutputModeInteractive {
 		if err != nil {
 			log.Fatalf("save config file failed: %s", err)
 		}
-		fmt.Printf("\nsave config file to: %s\n", *outputPath)
+		// 离开 TUI 后向 stderr 打一行已保存路径，方便复制；路径不进 stdout。
+		fmt.Fprintf(os.Stderr, "已保存配置: %s\n", *outputPath)
 		return
 	}
 
@@ -222,7 +223,8 @@ if outputMode == output.OutputModeInteractive {
 		if err != nil {
 			log.Fatalf("save config file failed: %s", err)
 		}
-		fmt.Printf("\nsave config file to: %s\n", *outputPath)
+		// 非交互模式路径走 stderr，stdout 保留给 TSV/管道输出。
+		fmt.Fprintf(os.Stderr, "已保存配置: %s\n", *outputPath)
 	}
 }
 
