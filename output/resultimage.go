@@ -13,6 +13,7 @@ import (
 
 	"github.com/faceair/clash-speedtest/speedtester"
 	"golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 )
@@ -65,7 +66,11 @@ func LoadImageFont(path string) (imageFont, error) {
 		path = findCJKFont()
 	}
 	if path == "" {
-		return imageFont{face: basicFallbackFace(), fallback: true, emojiMissing: true}, nil
+		face, err := openEmbeddedFace()
+		if err != nil {
+			return imageFont{}, err
+		}
+		return imageFont{face: face, fallback: true, emojiMissing: findEmojiFont() == ""}, nil
 	}
 	face, err := openFontFace(path)
 	if err != nil {
@@ -120,6 +125,13 @@ func findEmojiFont() string {
 }
 
 func findCJKFont() string {
+	windir := os.Getenv("WINDIR")
+	if windir == "" {
+		windir = os.Getenv("SystemRoot")
+	}
+	if windir == "" {
+		windir = `C:\Windows`
+	}
 	return firstExistingFont([]string{
 		"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
 		"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -127,6 +139,26 @@ func findCJKFont() string {
 		"/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
 		"/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
 		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/mnt/c/Windows/Fonts/msyh.ttc",
+		"/mnt/c/Windows/Fonts/simhei.ttf",
+		"/mnt/c/Windows/Fonts/simsun.ttc",
+		filepath.Join(windir, "Fonts", "msyh.ttc"),
+		filepath.Join(windir, "Fonts", "msyh.ttf"),
+		filepath.Join(windir, "Fonts", "simhei.ttf"),
+		filepath.Join(windir, "Fonts", "simsun.ttc"),
+		filepath.Join(windir, "Fonts", "arial.ttf"),
+	})
+}
+
+func openEmbeddedFace() (font.Face, error) {
+	parsed, err := opentype.Parse(goregular.TTF)
+	if err != nil {
+		return nil, err
+	}
+	return opentype.NewFace(parsed, &opentype.FaceOptions{
+		Size:    resultImageFontSize,
+		DPI:     96,
+		Hinting: font.HintingFull,
 	})
 }
 
