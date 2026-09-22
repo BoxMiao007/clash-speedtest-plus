@@ -131,7 +131,6 @@ func main() {
 		// Run TUI for Interactive mode
 		resultChannel := make(chan *speedtester.Result, len(allProxies))
 		resultsDone := make(chan struct{})
-		saveResult := make(chan error, 1)
 
 		// 进度事件通道：把节点开始/阶段变化/瞬时速度转发给 TUI 在测行。
 		progressChannel := make(chan speedtester.Progress, 256)
@@ -173,18 +172,18 @@ func main() {
 			close(resultsDone)
 		}()
 
-		if collectResults {
-			// Save results once all tests finish, without blocking the TUI loop.
-			go func() {
-				<-resultsDone
-				results = output.SortResults(results, effectiveMode)
-				saveResult <- saveConfig(results, resultFilter)
-			}()
-		}
-
 		// Create and run TUI
 		model := tui.NewTUIModelWithEngine(effectiveMode, len(allProxies), resultChannel, speedTester, progressChannel, earlyStopSignal)
 		model.SetImageExport(".", !*noImage)
+		if collectResults {
+			model.SetConfigSaver(func(done []*speedtester.Result) (string, error) {
+				sorted := output.SortResults(append([]*speedtester.Result(nil), done...), effectiveMode)
+				if err := saveConfig(sorted, resultFilter); err != nil {
+					return "", err
+				}
+				return *outputPath, nil
+			})
+		}
 		p := tea.NewProgram(
 			model,
 			tea.WithAltScreen(),
@@ -199,21 +198,6 @@ func main() {
 		if status != "" {
 			fmt.Fprintf(os.Stderr, "%s\n", status)
 		}
-
-		if !collectResults {
-			if failed {
-				os.Exit(1)
-			}
-			return
-		}
-
-		err = <-saveResult
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "保存配置失败: %s\n", err)
-			os.Exit(1)
-		}
-		// 离开 TUI 后向 stderr 打一行已保存路径，方便复制；路径不进 stdout。
-		fmt.Fprintf(os.Stderr, "已保存配置: %s\n", *outputPath)
 		if failed {
 			os.Exit(1)
 		}

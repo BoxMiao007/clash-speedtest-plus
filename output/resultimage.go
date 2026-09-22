@@ -336,6 +336,28 @@ func speedColor(bytesPerSecond float64, greenMB, yellowMB float64) color.NRGBA {
 	return color.NRGBA{220, 38, 38, 255}
 }
 
+func safeImageDir(dir string) (string, error) {
+	if dir == "" {
+		dir = "."
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	clean := filepath.Clean(dir)
+	if !filepath.IsAbs(clean) {
+		clean = filepath.Join(cwd, clean)
+	}
+	rel, err := filepath.Rel(cwd, clean)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("image directory escapes working directory")
+	}
+	return clean, nil
+}
+
 // ImageFileName 生成本地时间戳文件名；同一秒冲突则加 -1、-2。
 func ImageFileName(dir string, now time.Time) (string, error) {
 	base := now.Format("20060102-150405")
@@ -354,6 +376,7 @@ func ImageFileName(dir string, now time.Time) (string, error) {
 }
 
 // WriteResultImage 编码并写入 PNG。返回路径与缺字体警告（可为空）。
+// 先写临时文件，编码或写入失败时删除半截，成功后再改成正式文件名。
 func WriteResultImage(dir string, spec ImageSpec) (string, string, error) {
 	face, err := LoadImageFont(spec.FontPath)
 	if err != nil {
@@ -367,11 +390,30 @@ func WriteResultImage(dir string, spec ImageSpec) (string, string, error) {
 	if spec.Now.IsZero() {
 		spec.Now = time.Now()
 	}
+	dir, err = safeImageDir(dir)
+	if err != nil {
+		return "", warning, err
+	}
 	path, err := ImageFileName(dir, spec.Now)
 	if err != nil {
 		return "", warning, err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	tmp, err := os.CreateTemp(dir, ".clash-speedtest-*.png.part")
+	if err != nil {
+		return "", warning, err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return "", warning, err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", warning, err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
 		return "", warning, err
 	}
 	return path, warning, nil

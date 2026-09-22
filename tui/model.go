@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -112,6 +113,10 @@ type tuiModel struct {
 	quittingAfterSave bool
 	forceQuit         bool
 	saveFailed        bool
+	configSaver       func([]*speedtester.Result) (string, error)
+	configSaved       bool
+	configPath        string
+	configErr         string
 }
 
 const (
@@ -224,6 +229,11 @@ func (m *tuiModel) SetImageExport(dir string, auto bool) {
 		m.imageDir = dir
 	}
 	m.autoImage = auto
+}
+
+// SetConfigSaver 在整轮结束时写本地 yaml。gist/仓库上传由调用方自行后台处理。
+func (m *tuiModel) SetConfigSaver(save func([]*speedtester.Result) (string, error)) {
+	m.configSaver = save
 }
 
 // Init initializes the TUI model
@@ -401,7 +411,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if progressCmd != nil {
 			cmds = append(cmds, progressCmd)
 		}
-		if m.autoImage && !m.autoImageDone && !m.savingImage {
+		if (m.autoImage || m.configSaver != nil) && !m.autoImageDone && !m.savingImage {
 			m.autoImageDone = true
 			m.savingImage = true
 			m.setStatus("正在保存")
@@ -433,6 +443,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case imageSavedMsg:
 		m.savingImage = false
+		if strings.Contains(msg.text, "已保存配置") {
+			m.configSaved = true
+		}
 		if msg.error {
 			m.saveFailed = true
 		}
@@ -544,12 +557,39 @@ func (m *tuiModel) setStatus(text string) {
 func (m tuiModel) saveImageCmd(finished bool, quit bool) tea.Cmd {
 	spec := m.imageSpec(finished)
 	dir := m.imageDir
+	saver := m.configSaver
+	results := append([]*speedtester.Result(nil), m.results...)
+	writeConfig := finished && saver != nil && !m.configSaved
+	writeImage := m.autoImage || !finished
+	if quit {
+		writeImage = m.autoImage || m.savingImage
+	}
 	return func() tea.Msg {
-		path, warning, err := output.WriteResultImage(dir, spec)
-		if err != nil {
-			return imageSavedMsg{text: "保存失败: " + err.Error(), quit: quit, error: true}
+		var parts []string
+		failed := false
+		if writeConfig {
+			path, err := saver(results)
+			if err != nil {
+				failed = true
+				parts = append(parts, "保存配置失败: "+err.Error())
+			} else if path != "" {
+				parts = append(parts, "已保存配置 "+path)
+			}
 		}
-		return imageSavedMsg{text: output.JoinStatus("已保存 "+path, warning), quit: quit}
+		if writeImage {
+			path, warning, err := output.WriteResultImage(dir, spec)
+			if err != nil {
+				failed = true
+				parts = append(parts, "保存结果图失败: "+err.Error())
+			} else {
+				parts = append(parts, output.JoinStatus("已保存 "+path, warning))
+			}
+		}
+		text := "已保存"
+		if len(parts) > 0 {
+			text = strings.Join(parts, "；")
+		}
+		return imageSavedMsg{text: text, quit: quit, error: failed}
 	}
 }
 
