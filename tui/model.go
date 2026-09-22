@@ -169,6 +169,7 @@ func newTUIModel(
 	// Initialize progress bar
 	p := progress.New(
 		progress.WithDefaultGradient(),
+		progress.WithFillCharacters('=', '-'),
 		progress.WithWidth(40),
 	)
 
@@ -433,8 +434,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recordSequence(msg.result)
 		m.finishInFlight(msg.result.ProxyName)
 		m.resultsDirty = true
-		progressCmd := m.progress.SetPercent(float64(m.currentProxy) / float64(m.totalProxies))
-		cmds := []tea.Cmd{progressCmd, m.waitForResult()}
+		m.progress.SetPercent(float64(m.currentProxy) / float64(m.totalProxies))
+		cmds := []tea.Cmd{m.waitForResult()}
 		if !m.flushScheduled {
 			m.flushScheduled = true
 			cmds = append(cmds, scheduleFlushCmd())
@@ -451,11 +452,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// 全部测完后空格无效果，帮助条隐藏空格项。
 		m.help.setEarlyStopped(true)
 		m.help.setPaused(false)
-		progressCmd := m.progress.SetPercent(1.0)
+		m.progress.SetPercent(1.0)
 		var cmds []tea.Cmd
-		if progressCmd != nil {
-			cmds = append(cmds, progressCmd)
-		}
 		if cmd := m.startFinalSave(false); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

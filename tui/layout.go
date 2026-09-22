@@ -43,9 +43,14 @@ func (m tuiModel) progressLine() string {
 	// 暂停时已用时与剩余冻结：总耗时扣除历史及当前暂停时长。
 	elapsed := m.testingElapsed()
 	state := m.stateLabel()
-	info := state + " " + fmt.Sprintf("%d/%d", m.currentProxy, m.totalProxies)
-	if inFlight := m.inFlightCount(); inFlight > 0 {
-		info += fmt.Sprintf("，%d 在测", inFlight)
+	done, active := m.currentProxy, m.inFlightCount()
+	seen := done + active
+	if seen > m.totalProxies {
+		seen = m.totalProxies
+	}
+	info := state + " " + fmt.Sprintf("%d/%d", seen, m.totalProxies)
+	if active > 0 {
+		info += fmt.Sprintf("，%d 在测", active)
 	}
 	metrics := fmt.Sprintf("已用时 %s", formatDuration(elapsed))
 	// 只在还打算继续派发新节点时显示剩余；暂停时随已用时一起冻结。
@@ -60,8 +65,12 @@ func (m tuiModel) progressLine() string {
 	}
 	progressModel := m.progress
 	progressModel.Width = barWidth
-	// 用目标比例直接画，避免弹簧动画把整行刷成闪烁。
-	bar := progressModel.ViewAs(progressModel.Percent())
+	percent := 0.0
+	if m.totalProxies > 0 {
+		percent = float64(seen) / float64(m.totalProxies)
+	}
+	// 等宽字符直接按比例画，避免方块字符把后面的数字挤歪，也不跟动画逐帧重绘。
+	bar := progressModel.ViewAs(percent)
 	return fmt.Sprintf("%s %s | %s", info, bar, metrics)
 }
 
