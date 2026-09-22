@@ -425,8 +425,10 @@ func drawDataRow(img *image.NRGBA, faces imageFont, y, height int, colWidths []i
 		}
 		switch kindOfColumn(i, mode) {
 		case colMetric:
-			bg, _ := metricColors(row.Result, i, mode, maxSpeed, text)
-			fillRect(img, x, y, width, height, bg)
+			if !plainMetricCell(row.Result, i, text) {
+				bg, _ := metricColors(row.Result, i, mode, maxSpeed, text)
+				fillRect(img, x, y, width, height, bg)
+			}
 			drawCellText(img, faces, x, y, width, height, text, fg, left)
 		default:
 			drawCellText(img, faces, x, y, width, height, text, fg, left)
@@ -453,6 +455,14 @@ func kindOfColumn(index int, mode speedtester.SpeedMode) columnKind {
 		return colMetric
 	}
 	return colPlain
+}
+
+// plainMetricCell 表示 N/A 和 100% 丢包不铺底色。
+func plainMetricCell(result *speedtester.Result, index int, text string) bool {
+	if text == "" || text == "N/A" || text == "测试中" {
+		return true
+	}
+	return index == 5 && result != nil && result.PacketLoss >= 100
 }
 
 func metricColors(result *speedtester.Result, index int, mode speedtester.SpeedMode, maxSpeed float64, text string) (color.NRGBA, color.NRGBA) {
@@ -502,31 +512,19 @@ func clamp01(v float64) float64 {
 }
 
 func greenScale(score float64) color.NRGBA {
-	return paletteColor(score, []color.NRGBA{
-		{0xc0, 0xeb, 0xf2, 0xff},
-		{0x97, 0xe1, 0xe8, 0xff},
-		{0x64, 0xc4, 0xcc, 0xff},
-	})
+	return lerpColor(score, color.NRGBA{0xc0, 0xeb, 0xf2, 0xff}, color.NRGBA{0x64, 0xc4, 0xcc, 0xff})
 }
 
 func redScale(score float64) color.NRGBA {
-	return paletteColor(score, []color.NRGBA{
-		{0xfa, 0xdf, 0xe4, 0xff},
-		{0xfd, 0x47, 0x7d, 0xff},
-		{0xfa, 0x0b, 0x55, 0xff},
-	})
+	return lerpColor(score, color.NRGBA{0xfa, 0xdf, 0xe4, 0xff}, color.NRGBA{0xfa, 0x0b, 0x55, 0xff})
 }
 
-func paletteColor(score float64, palette []color.NRGBA) color.NRGBA {
+func lerpColor(score float64, light, dark color.NRGBA) color.NRGBA {
 	score = clamp01(score)
-	index := int(score*float64(len(palette)-1) + 0.5)
-	if index < 0 {
-		index = 0
+	mix := func(a, b uint8) uint8 {
+		return uint8(float64(a) + score*float64(int(b)-int(a)))
 	}
-	if index >= len(palette) {
-		index = len(palette) - 1
-	}
-	return palette[index]
+	return color.NRGBA{mix(light.R, dark.R), mix(light.G, dark.G), mix(light.B, dark.B), 0xff}
 }
 
 func scoreText(score float64) color.NRGBA {
