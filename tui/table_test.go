@@ -8,6 +8,27 @@ import (
 	"github.com/faceair/clash-speedtest/speedtester"
 )
 
+func TestInFlightRowMatchesDownloadColumns(t *testing.T) {
+	resultChannel := make(chan *speedtester.Result, 1)
+	model := NewTUIModel(speedtester.SpeedModeDownload, 1, resultChannel)
+	model.windowWidth = 120
+	model.windowHeight = 30
+	model.updateTableLayout()
+	model.applyProgress(speedtester.Progress{
+		Name:  "日本712ms",
+		Type:  "Vmess",
+		Phase: speedtester.PhaseLatency,
+	})
+
+	if got, want := len(model.table.Rows()[0]), len(model.table.Columns()); got != want {
+		t.Fatalf("在测行列数 = %d，表头列数 = %d", got, want)
+	}
+	view := model.table.View()
+	if !strings.Contains(view, "日本712ms") {
+		t.Fatalf("表格未渲染在测节点: %q", view)
+	}
+}
+
 // TestTUIModelColorizeRow tests the colorizeRow function
 func TestTUIModelColorizeRow(t *testing.T) {
 	resultChannel := make(chan *speedtester.Result, 10)

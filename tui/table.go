@@ -17,11 +17,12 @@ func (m *tuiModel) updateTableRows() {
 	inFlightCount := m.inFlightCount()
 	rows := make([]table.Row, 0, inFlightCount+len(m.results))
 	// 在测行钉在表顶，序号列写 …；完成后从表顶移除。
+	columns := len(m.table.Columns())
 	for i, name := range m.inFlightOrder {
-		rows = append(rows, m.inFlightRow(m.inFlight[name], i == m.table.Cursor()))
+		rows = append(rows, fitRowWidth(m.inFlightRow(m.inFlight[name], i == m.table.Cursor()), columns))
 	}
 	for i, result := range m.results {
-		rows = append(rows, output.FormatRow(result, m.mode, i))
+		rows = append(rows, fitRowWidth(output.FormatRow(result, m.mode, i), columns))
 	}
 	m.table.SetRows(rows)
 	m.syncSelection()
@@ -57,7 +58,23 @@ func (m *tuiModel) inFlightRow(node *inFlightNode, selected bool) table.Row {
 	if p.Phase >= speedtester.PhaseUpload {
 		uploadStr = speedtester.FormatSpeed(p.UploadSpeed)
 	}
-	return m.styleInFlight(table.Row{idStr, name, pxyType, latencyStr, jitterStr, lossStr, downloadStr, uploadStr}, selected)
+	row := table.Row{idStr, name, pxyType, latencyStr, jitterStr, lossStr, downloadStr}
+	if m.mode.UploadEnabled() {
+		row = append(row, uploadStr)
+	}
+	return m.styleInFlight(row, selected)
+}
+
+// fitRowWidth 保证行单元格数不超过表头列数，避免 bubbles table 按下标渲染时越界。
+func fitRowWidth(row table.Row, columns int) table.Row {
+	if columns <= 0 || len(row) == columns {
+		return row
+	}
+	fitted := make(table.Row, columns)
+	for i := 0; i < columns && i < len(row); i++ {
+		fitted[i] = row[i]
+	}
+	return fitted
 }
 
 // styleInFlight 未选中时暗色斜体；选中时保持纯文本，交给表格选中样式。
