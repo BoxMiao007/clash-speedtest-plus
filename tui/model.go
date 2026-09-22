@@ -28,6 +28,27 @@ type timerTickMsg struct{}
 
 type flushResultsMsg struct{}
 
+// nodeProgressMsg 携带测速引擎的单个进度事件快照。
+type nodeProgressMsg struct {
+	progress speedtester.Progress
+}
+
+// earlyStopMsg 表示过筛数量达到限额，不再派发新节点。
+type earlyStopMsg struct{}
+
+// PauseController 由测速引擎实现，TUI 通过它在暂停/继续时控制节点派发。
+type PauseController interface {
+	Pause()
+	Resume()
+}
+
+// inFlightNode 保存一个在测节点的最新进度快照，随 200ms 进度事件刷新。
+type inFlightNode struct {
+	name     string
+	proxyType string
+	latest   speedtester.Progress
+}
+
 // tuiModel represents the Bubble Tea model for the TUI
 type tuiModel struct {
 	mode           speedtester.SpeedMode
@@ -47,6 +68,8 @@ type tuiModel struct {
 	sortAscending  bool
 	detailVisible  bool
 	detailResult   *speedtester.Result
+	// detailInFlight 非空表示详情面板当前展示的是在测节点占位详情。
+	detailInFlight *inFlightNode
 	selectedIndex  int
 	windowWidth    int
 	windowHeight   int
@@ -55,6 +78,18 @@ type tuiModel struct {
 	flushScheduled bool
 	detailHeight   int
 	perf           *perfTracker
+
+	// 测试循环状态：暂停/提前结束由外部信号驱动。
+	pauseCtl      PauseController
+	progressCh    <-chan speedtester.Progress
+	earlyStopCh   <-chan struct{}
+	paused        bool
+	earlyStopped  bool
+	inFlight      map[string]*inFlightNode
+	inFlightOrder []string
+	// pauseStartedAt 记录本次暂停起点；pausedElapsed 累计历史暂停时长，用于冻结已用时。
+	pauseStartedAt time.Time
+	pausedElapsed  time.Duration
 }
 
 const (
@@ -72,6 +107,31 @@ var selectedRowStyle = lipgloss.NewStyle().
 
 // NewTUIModel creates a new TUI model
 func NewTUIModel(mode speedtester.SpeedMode, totalProxies int, resultChannel chan *speedtester.Result) tuiModel {
+	return newTUIModel(mode, totalProxies, resultChannel, nil, nil, nil)
+}
+
+// NewTUIModelWithEngine 接入测速引擎的暂停控制、进度事件与提前结束信号，
+// 供交互模式使用；非交互模式仍用 NewTUIModel。
+func NewTUIModelWithEngine(
+	mode speedtester.SpeedMode,
+	totalProxies int,
+	resultChannel chan *speedtester.Result,
+	pauseCtl PauseController,
+	progressCh <-chan speedtester.Progress,
+	earlyStopCh <-chan struct{},
+) tuiModel {
+	return newTUIModel(mode, totalProxies, resultChannel, pauseCtl, progressCh, earlyStopCh)
+}
+
+// newTUIModel 支持注入暂停控制、进度事件与提前结束信号，便于测试与 main 接线。
+func newTUIModel(
+	mode speedtester.SpeedMode,
+	totalProxies int,
+	resultChannel chan *speedtester.Result,
+	pauseCtl PauseController,
+	progressCh <-chan speedtester.Progress,
+	earlyStopCh <-chan struct{},
+) tuiModel {
 	// Initialize progress bar
 	p := progress.New(
 		progress.WithDefaultGradient(),
@@ -126,15 +186,23 @@ func NewTUIModel(mode speedtester.SpeedMode, totalProxies int, resultChannel cha
 		flushScheduled: false,
 		detailHeight:   0,
 		perf:           newPerfTracker(),
+
+		pauseCtl:      pauseCtl,
+		progressCh:    progressCh,
+		earlyStopCh:   earlyStopCh,
+		inFlight:      make(map[string]*inFlightNode),
 	}
 }
 
 // Init initializes the TUI model
 func (m tuiModel) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		timerTickCmd(),
 		m.waitForResult(),
-	)
+		m.waitForProgress(),
+		m.waitForEarlyStop(),
+	}
+	return tea.Batch(cmds...)
 }
 
 // waitForResult waits for results from the channel
@@ -181,6 +249,24 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
+		case " ":
+			// 空格切换暂停/继续；详情开着时仍是暂停，不关详情。
+			// 已完成或已提前结束时空格无效。
+			if !m.testing || m.earlyStopped || m.pauseCtl == nil {
+				return m, nil
+			}
+			if m.paused {
+				m.pausedElapsed += time.Since(m.pauseStartedAt)
+				m.paused = false
+				m.pauseCtl.Resume()
+			} else {
+				m.pauseStartedAt = time.Now()
+				m.paused = true
+				m.pauseCtl.Pause()
+			}
+			m.help.setPaused(m.paused)
+			m.help.setEarlyStopped(m.earlyStopped)
+			return m, nil
 		}
 
 		m.table, cmd = m.table.Update(msg)
@@ -215,8 +301,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if rowIndex, ok := m.rowAtY(msg.Y); ok {
-				m.toggleDetail(m.results[rowIndex])
-				m.setSelection(rowIndex)
+				if rowIndex < 0 {
+					// 负偏移索引在测行：打开测试中占位详情，再点同一行则关掉。
+					m.toggleInFlightDetail(m.inFlightOrder[m.tableRowCount()+rowIndex])
+				} else {
+					m.toggleDetail(m.results[rowIndex])
+					m.setSelection(rowIndex)
+				}
 				return m, nil
 			}
 		}
@@ -232,6 +323,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentProxy++
 		m.results = append(m.results, msg.result)
 		m.recordSequence(msg.result)
+		m.finishInFlight(msg.result.ProxyName)
 		m.resultsDirty = true
 		progressCmd := m.progress.SetPercent(float64(m.currentProxy) / float64(m.totalProxies))
 		cmds := []tea.Cmd{progressCmd, m.waitForResult()}
@@ -247,6 +339,16 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.flushResultsIfDirty()
 		progressCmd := m.progress.SetPercent(1.0)
 		return m, progressCmd
+
+	case nodeProgressMsg:
+		m.applyProgress(msg.progress)
+		return m, m.waitForProgress()
+
+	case earlyStopMsg:
+		m.earlyStopped = true
+		m.help.setEarlyStopped(true)
+		m.help.setPaused(false)
+		return m, nil
 
 	case progressMsg:
 		m.currentProxy = msg.current
@@ -275,6 +377,75 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd = progressCmd
 
 	return m, cmd
+}
+
+// waitForProgress 等待测速引擎的进度事件（节点开始、阶段变化、瞬时速度）。
+// progressCh 为 nil 时返回 nil，避免空转。
+func (m tuiModel) waitForProgress() tea.Cmd {
+	if m.progressCh == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		p, ok := <-m.progressCh
+		if !ok {
+			return nil
+		}
+		return nodeProgressMsg{progress: p}
+	}
+}
+
+// waitForEarlyStop 等待提前结束信号（channel 关闭）。
+func (m tuiModel) waitForEarlyStop() tea.Cmd {
+	if m.earlyStopCh == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		<-m.earlyStopCh
+		return earlyStopMsg{}
+	}
+}
+
+// applyProgress 更新在测节点快照；收到同一节点的后续事件时覆盖，保持钉顶顺序。
+func (m *tuiModel) applyProgress(p speedtester.Progress) {
+	if node, ok := m.inFlight[p.Name]; ok {
+		node.latest = p
+		return
+	}
+	node := &inFlightNode{name: p.Name, proxyType: p.Type, latest: p}
+	m.inFlight[p.Name] = node
+	m.inFlightOrder = append(m.inFlightOrder, p.Name)
+	m.updateTableRows()
+}
+
+// finishInFlight 在节点结果上表后移除在测状态；若占位详情开着则切换为完成详情。
+func (m *tuiModel) finishInFlight(name string) {
+	node, ok := m.inFlight[name]
+	if !ok {
+		return
+	}
+	delete(m.inFlight, name)
+	for i, n := range m.inFlightOrder {
+		if n == name {
+			m.inFlightOrder = append(m.inFlightOrder[:i], m.inFlightOrder[i+1:]...)
+			break
+		}
+	}
+	if m.detailInFlight == node {
+		m.detailInFlight = nil
+		if m.detailVisible {
+			m.detailResult = m.findResultByName(name)
+			m.refreshDetailHeight()
+		}
+	}
+}
+
+func (m *tuiModel) findResultByName(name string) *speedtester.Result {
+	for _, result := range m.results {
+		if result.ProxyName == name {
+			return result
+		}
+	}
+	return nil
 }
 
 // View renders the TUI

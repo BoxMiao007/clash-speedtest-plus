@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/charmbracelet/bubbles/table"
@@ -13,12 +14,60 @@ import (
 func (m *tuiModel) updateTableRows() {
 	start := time.Now()
 	defer m.perf.record(perfEventRows, len(m.results), start)
-	rows := make([]table.Row, len(m.results))
+	inFlightCount := m.inFlightCount()
+	rows := make([]table.Row, 0, inFlightCount+len(m.results))
+	// 在测行钉在表顶，序号列写 …；完成后从表顶移除。
+	for _, name := range m.inFlightOrder {
+		rows = append(rows, m.inFlightRow(m.inFlight[name]))
+	}
 	for i, result := range m.results {
-		rows[i] = output.FormatRow(result, m.mode, i)
+		rows = append(rows, output.FormatRow(result, m.mode, i))
 	}
 	m.table.SetRows(rows)
 	m.syncSelection()
+}
+
+// inFlightRow 渲染一个在测行：延迟阶段显示「测试中」，下载/上传进行中显示阶段瞬时速度，
+// 已结束的阶段列定格。未选中时暗色斜体；选中样式由 table 的 Selected 样式接管。
+func (m *tuiModel) inFlightRow(node *inFlightNode) table.Row {
+	p := node.latest
+	idStr := "…"
+	name := node.name
+	pxyType := node.proxyType
+
+	latencyStr := "测试中"
+	if p.Latency > 0 {
+		latencyStr = fmt.Sprintf("%dms", p.Latency.Milliseconds())
+	}
+	if m.mode.IsFast() {
+		return m.dimInFlight(table.Row{idStr, name, pxyType, latencyStr})
+	}
+
+	jitterStr := ""
+	lossStr := ""
+	downloadStr := ""
+	uploadStr := ""
+	if p.Latency > 0 {
+		jitterStr = fmt.Sprintf("%dms", p.Jitter.Milliseconds())
+		lossStr = fmt.Sprintf("%.1f%%", p.PacketLoss)
+	}
+	if p.Phase >= speedtester.PhaseDownload {
+		downloadStr = speedtester.FormatSpeed(p.DownloadSpeed)
+	}
+	if p.Phase >= speedtester.PhaseUpload {
+		uploadStr = speedtester.FormatSpeed(p.UploadSpeed)
+	}
+	return m.dimInFlight(table.Row{idStr, name, pxyType, latencyStr, jitterStr, lossStr, downloadStr, uploadStr})
+}
+
+// dimInFlight 给在测行套上暗色斜体样式；fast 模式列数不同时截齐。
+func (m *tuiModel) dimInFlight(row table.Row) table.Row {
+	style := lipgloss.NewStyle().Faint(true).Italic(true)
+	out := make(table.Row, len(row))
+	for i, cell := range row {
+		out[i] = style.Render(cell)
+	}
+	return out
 }
 
 func (m *tuiModel) updateTableHeaders() {
@@ -187,10 +236,20 @@ func (m tuiModel) rowAtY(y int) (int, bool) {
 	}
 	start := tableStartIndex(m.table.Cursor(), m.table.Height())
 	absoluteIndex := start + rowIndex
-	if absoluteIndex < 0 || absoluteIndex >= len(m.results) {
+	if absoluteIndex < 0 || absoluteIndex >= m.tableRowCount() {
 		return 0, false
 	}
-	return absoluteIndex, true
+	// 前 inFlightCount 行是在测行，返回结果给调用方前去掉偏移：
+	// 调用方用返回值索引 m.results，在测行用负偏移标记。
+	if absoluteIndex < m.inFlightCount() {
+		return absoluteIndex - m.tableRowCount(), true
+	}
+	return absoluteIndex - m.inFlightCount(), true
+}
+
+// tableRowCount 返回表格总行数：在测行 + 完成行。
+func (m tuiModel) tableRowCount() int {
+	return m.inFlightCount() + len(m.results)
 }
 
 func (m tuiModel) tableHeaderY() int {
@@ -216,7 +275,8 @@ func (m *tuiModel) setSelection(index int) {
 		m.detailResult = m.results[index]
 	}
 	m.selectedIndex = index
-	m.table.SetCursor(index)
+	// cursor 位于在测行之后的完成区。
+	m.table.SetCursor(index + m.inFlightCount())
 	m.table.Focus()
 }
 
@@ -237,20 +297,28 @@ func (m *tuiModel) syncSelection() {
 		m.table.Blur()
 		return
 	}
-	m.table.SetCursor(m.selectedIndex)
+	m.table.SetCursor(m.selectedIndex + m.inFlightCount())
 	m.table.Focus()
 }
 
 func (m *tuiModel) syncSelectionFromCursor() {
 	cursor := m.table.Cursor()
-	if cursor < 0 || cursor >= len(m.results) {
+	if cursor < 0 || cursor >= m.tableRowCount() {
 		return
 	}
-	m.selectedIndex = cursor
+	inFlightCount := m.inFlightCount()
+	if cursor < inFlightCount {
+		// 点击/滚动到在测行：仅高亮，不更新完成区选中索引。
+		m.highlightInFlight(m.inFlightOrder[cursor])
+		return
+	}
+	resultIndex := cursor - inFlightCount
+	m.detailInFlight = nil
+	m.selectedIndex = resultIndex
 	if m.detailVisible {
-		if m.detailResult != m.results[cursor] {
+		if m.detailResult != m.results[resultIndex] {
 			previousHeight := m.detailHeight
-			m.detailResult = m.results[cursor]
+			m.detailResult = m.results[resultIndex]
 			m.refreshDetailHeight()
 			if m.detailHeight != previousHeight {
 				// Keep layout in sync when detail content height changes on scroll.
@@ -259,6 +327,27 @@ func (m *tuiModel) syncSelectionFromCursor() {
 		}
 	}
 	m.table.Focus()
+}
+
+// highlightInFlight 把在测行映射为临时选中索引；详情面板仍显示该节点已有的进度。
+// 结果上表后 finishInFlight 会把占位详情切换为完成详情。
+func (m *tuiModel) highlightInFlight(name string) {
+	node, ok := m.inFlight[name]
+	if !ok {
+		return
+	}
+	// 负值索引表示选中在测行，避免与完成区索引冲突。
+	m.selectedIndex = -(m.inFlightCount() + 1)
+	m.table.Focus()
+	if m.detailVisible {
+		previousHeight := m.detailHeight
+		m.detailInFlight = node
+		m.detailResult = nil
+		m.refreshDetailHeight()
+		if m.detailHeight != previousHeight {
+			m.updateTableLayout()
+		}
+	}
 }
 
 func tableStartIndex(cursor int, height int) int {
