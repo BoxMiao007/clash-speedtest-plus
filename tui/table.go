@@ -17,8 +17,8 @@ func (m *tuiModel) updateTableRows() {
 	inFlightCount := m.inFlightCount()
 	rows := make([]table.Row, 0, inFlightCount+len(m.results))
 	// 在测行钉在表顶，序号列写 …；完成后从表顶移除。
-	for _, name := range m.inFlightOrder {
-		rows = append(rows, m.inFlightRow(m.inFlight[name]))
+	for i, name := range m.inFlightOrder {
+		rows = append(rows, m.inFlightRow(m.inFlight[name], i == m.table.Cursor()))
 	}
 	for i, result := range m.results {
 		rows = append(rows, output.FormatRow(result, m.mode, i))
@@ -28,8 +28,8 @@ func (m *tuiModel) updateTableRows() {
 }
 
 // inFlightRow 渲染一个在测行：延迟阶段显示「测试中」，下载/上传进行中显示阶段瞬时速度，
-// 已结束的阶段列定格。未选中时暗色斜体；选中样式由 table 的 Selected 样式接管。
-func (m *tuiModel) inFlightRow(node *inFlightNode) table.Row {
+// 已结束的阶段列定格。未选中时暗色斜体；选中时不加斜体，让表格亮底优先。
+func (m *tuiModel) inFlightRow(node *inFlightNode, selected bool) table.Row {
 	p := node.latest
 	idStr := "…"
 	name := node.name
@@ -40,7 +40,7 @@ func (m *tuiModel) inFlightRow(node *inFlightNode) table.Row {
 		latencyStr = fmt.Sprintf("%dms", p.Latency.Milliseconds())
 	}
 	if m.mode.IsFast() {
-		return m.dimInFlight(table.Row{idStr, name, pxyType, latencyStr})
+		return m.styleInFlight(table.Row{idStr, name, pxyType, latencyStr}, selected)
 	}
 
 	jitterStr := ""
@@ -57,11 +57,14 @@ func (m *tuiModel) inFlightRow(node *inFlightNode) table.Row {
 	if p.Phase >= speedtester.PhaseUpload {
 		uploadStr = speedtester.FormatSpeed(p.UploadSpeed)
 	}
-	return m.dimInFlight(table.Row{idStr, name, pxyType, latencyStr, jitterStr, lossStr, downloadStr, uploadStr})
+	return m.styleInFlight(table.Row{idStr, name, pxyType, latencyStr, jitterStr, lossStr, downloadStr, uploadStr}, selected)
 }
 
-// dimInFlight 给在测行套上暗色斜体样式；fast 模式列数不同时截齐。
-func (m *tuiModel) dimInFlight(row table.Row) table.Row {
+// styleInFlight 未选中时暗色斜体；选中时保持纯文本，交给表格选中样式。
+func (m *tuiModel) styleInFlight(row table.Row, selected bool) table.Row {
+	if selected {
+		return row
+	}
 	style := lipgloss.NewStyle().Faint(true).Italic(true)
 	out := make(table.Row, len(row))
 	for i, cell := range row {
@@ -305,6 +308,9 @@ func (m *tuiModel) syncSelectionFromCursor() {
 	cursor := m.table.Cursor()
 	if cursor < 0 || cursor >= m.tableRowCount() {
 		return
+	}
+	if m.inFlightCount() > 0 {
+		m.updateTableRows()
 	}
 	inFlightCount := m.inFlightCount()
 	if cursor < inFlightCount {
