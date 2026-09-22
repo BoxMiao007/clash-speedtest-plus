@@ -43,39 +43,59 @@ type ImageSpec struct {
 }
 
 type imageFont struct {
-	face     font.Face
-	fallback bool
+	face         font.Face
+	emoji        font.Face
+	fallback     bool
+	emojiMissing bool
 }
 
 func (f imageFont) close() {
 	if f.face != nil {
 		_ = f.face.Close()
 	}
+	if f.emoji != nil {
+		_ = f.emoji.Close()
+	}
 }
 
-// LoadImageFont 优先加载系统 CJK 字体。找不到时用基本拉丁字体并标记 fallback。
+// LoadImageFont 优先加载系统 CJK 字体，并尽量附上 emoji 备用字体。
+// 找不到 CJK 时用基本拉丁字体并标记 fallback。
 func LoadImageFont(path string) (imageFont, error) {
 	if path == "" {
 		path = findCJKFont()
 	}
 	if path == "" {
-		face := basicFallbackFace()
-		return imageFont{face: face, fallback: true}, nil
+		return imageFont{face: basicFallbackFace(), fallback: true, emojiMissing: true}, nil
 	}
+	face, err := openFontFace(path)
+	if err != nil {
+		return imageFont{}, err
+	}
+	emojiPath := findEmojiFont()
+	if emojiPath == "" {
+		return imageFont{face: face, emojiMissing: true}, nil
+	}
+	emoji, err := openFontFace(emojiPath)
+	if err != nil {
+		return imageFont{face: face, emojiMissing: true}, nil
+	}
+	return imageFont{face: face, emoji: emoji}, nil
+}
+
+func openFontFace(path string) (font.Face, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return imageFont{}, fmt.Errorf("read font %s: %w", path, err)
+		return nil, fmt.Errorf("read font %s: %w", path, err)
 	}
 	parsed, err := opentype.Parse(data)
 	if err != nil {
-		// TTC 集合取第一个 face。
 		collection, collErr := opentype.ParseCollection(data)
 		if collErr != nil {
-			return imageFont{}, fmt.Errorf("parse font %s: %w", path, err)
+			return nil, fmt.Errorf("parse font %s: %w", path, err)
 		}
 		parsed, err = collection.Font(0)
 		if err != nil {
-			return imageFont{}, fmt.Errorf("font face %s: %w", path, err)
+			return nil, fmt.Errorf("font face %s: %w", path, err)
 		}
 	}
 	face, err := opentype.NewFace(parsed, &opentype.FaceOptions{
@@ -84,20 +104,33 @@ func LoadImageFont(path string) (imageFont, error) {
 		Hinting: font.HintingFull,
 	})
 	if err != nil {
-		return imageFont{}, fmt.Errorf("new face %s: %w", path, err)
+		return nil, fmt.Errorf("new face %s: %w", path, err)
 	}
-	return imageFont{face: face}, nil
+	return face, nil
+}
+
+func findEmojiFont() string {
+	candidates := []string{
+		"/usr/share/fonts/noto/NotoColorEmoji.ttf",
+		"/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+		"/usr/share/fonts/noto-emoji/NotoColorEmoji.ttf",
+		"/usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf",
+	}
+	return firstExistingFont(candidates)
 }
 
 func findCJKFont() string {
-	candidates := []string{
+	return firstExistingFont([]string{
 		"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
 		"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
 		"/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
 		"/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
 		"/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
 		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-	}
+	})
+}
+
+func firstExistingFont(candidates []string) string {
 	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {
 			return path
@@ -147,9 +180,9 @@ func RenderResultImage(spec ImageSpec, fontFace imageFont) ([]byte, string, erro
 	fill(img, color.NRGBA{255, 255, 255, 255})
 
 	y := 0
-	drawRow(img, fontFace.face, y, rowHeight, colWidths, []string{spec.Summary}, color.NRGBA{245, 247, 250, 255}, color.NRGBA{30, 41, 59, 255}, false)
+	drawRow(img, fontFace, y, rowHeight, colWidths, []string{spec.Summary}, color.NRGBA{245, 247, 250, 255}, color.NRGBA{30, 41, 59, 255}, false)
 	y += rowHeight
-	drawRow(img, fontFace.face, y, rowHeight, colWidths, headers, color.NRGBA{226, 232, 240, 255}, color.NRGBA{15, 23, 42, 255}, true)
+	drawRow(img, fontFace, y, rowHeight, colWidths, headers, color.NRGBA{226, 232, 240, 255}, color.NRGBA{15, 23, 42, 255}, true)
 	y += rowHeight
 	for i, row := range rows {
 		bg := color.NRGBA{255, 255, 255, 255}
@@ -160,9 +193,9 @@ func RenderResultImage(spec ImageSpec, fontFace imageFont) ([]byte, string, erro
 		if row.InFlight {
 			fg = color.NRGBA{148, 163, 184, 255}
 		}
-		drawRow(img, fontFace.face, y, rowHeight, colWidths, row.Cells, bg, fg, false)
+		drawRow(img, fontFace, y, rowHeight, colWidths, row.Cells, bg, fg, false)
 		if !row.InFlight && row.Result != nil {
-			paintThresholds(img, fontFace.face, y, rowHeight, colWidths, spec.Mode, row)
+			paintThresholds(img, fontFace, y, rowHeight, colWidths, spec.Mode, row)
 		}
 		y += rowHeight
 	}
@@ -171,11 +204,14 @@ func RenderResultImage(spec ImageSpec, fontFace imageFont) ([]byte, string, erro
 	if err := png.Encode(&buf, img); err != nil {
 		return nil, "", err
 	}
-	warning := ""
+	var warnings []string
 	if fontFace.fallback {
-		warning = "缺少中文字体，节点名可能显示为方框"
+		warnings = append(warnings, "缺少中文字体，节点名可能显示为方框")
 	}
-	return buf.Bytes(), warning, nil
+	if fontFace.emojiMissing {
+		warnings = append(warnings, "缺少 emoji 字体，表情符号已降级")
+	}
+	return buf.Bytes(), strings.Join(warnings, "；"), nil
 }
 
 func measureColumns(face font.Face, headers []string, rows []ImageRow) []int {
@@ -230,6 +266,29 @@ func textWidth(face font.Face, text string) int {
 	return font.MeasureString(face, text).Ceil()
 }
 
+func faceForRune(primary, emoji font.Face, r rune) font.Face {
+	if primary == nil {
+		return emoji
+	}
+	if glyphAdvance, ok := primary.GlyphAdvance(r); ok && glyphAdvance > 0 {
+		return primary
+	}
+	if emoji == nil {
+		return primary
+	}
+	if glyphAdvance, ok := emoji.GlyphAdvance(r); ok && glyphAdvance > 0 {
+		return emoji
+	}
+	return primary
+}
+
+func drawFallbackString(drawer *font.Drawer, primary, emoji font.Face, text string) {
+	for _, r := range text {
+		drawer.Face = faceForRune(primary, emoji, r)
+		drawer.DrawString(string(r))
+	}
+}
+
 func sumWidths(widths []int) int {
 	total := 0
 	for _, w := range widths {
@@ -246,7 +305,7 @@ func fill(img *image.NRGBA, c color.NRGBA) {
 	}
 }
 
-func drawRow(img *image.NRGBA, face font.Face, y, height int, colWidths []int, cells []string, bg, fg color.NRGBA, bold bool) {
+func drawRow(img *image.NRGBA, faces imageFont, y, height int, colWidths []int, cells []string, bg, fg color.NRGBA, bold bool) {
 	for x := 0; x < img.Bounds().Dx(); x++ {
 		for dy := 0; dy < height && y+dy < img.Bounds().Dy(); dy++ {
 			img.SetNRGBA(x, y+dy, bg)
@@ -255,7 +314,7 @@ func drawRow(img *image.NRGBA, face font.Face, y, height int, colWidths []int, c
 	drawer := &font.Drawer{
 		Dst:  img,
 		Src:  image.NewUniform(fg),
-		Face: face,
+		Face: faces.face,
 	}
 	x := resultImageRowPadX / 2
 	baseline := y + height - resultImageRowPadY
@@ -268,30 +327,30 @@ func drawRow(img *image.NRGBA, face font.Face, y, height int, colWidths []int, c
 			_ = bold
 		}
 		drawer.Dot = fixed.P(x, baseline)
-		drawer.DrawString(text)
+		drawFallbackString(drawer, faces.face, faces.emoji, text)
 		x += width
 	}
 }
 
-func paintThresholds(img *image.NRGBA, face font.Face, y, height int, colWidths []int, mode speedtester.SpeedMode, row ImageRow) {
+func paintThresholds(img *image.NRGBA, faces imageFont, y, height int, colWidths []int, mode speedtester.SpeedMode, row ImageRow) {
 	result := row.Result
 	if result == nil || len(row.Cells) < 4 {
 		return
 	}
 	// 列顺序与 GetHeaders 一致：序号、名称、类型、延迟、抖动、丢包、下载、上传。
-	paintCell(img, face, y, height, colWidths, 3, row.Cells[3], latencyColor(result.Latency))
+	paintCell(img, faces, y, height, colWidths, 3, row.Cells[3], latencyColor(result.Latency))
 	if mode.IsFast() || len(row.Cells) < 7 {
 		return
 	}
-	paintCell(img, face, y, height, colWidths, 4, row.Cells[4], latencyColor(result.Jitter))
-	paintCell(img, face, y, height, colWidths, 5, row.Cells[5], lossColor(result.PacketLoss))
-	paintCell(img, face, y, height, colWidths, 6, row.Cells[6], speedColor(result.DownloadSpeed, 10, 5))
+	paintCell(img, faces, y, height, colWidths, 4, row.Cells[4], latencyColor(result.Jitter))
+	paintCell(img, faces, y, height, colWidths, 5, row.Cells[5], lossColor(result.PacketLoss))
+	paintCell(img, faces, y, height, colWidths, 6, row.Cells[6], speedColor(result.DownloadSpeed, 10, 5))
 	if mode.UploadEnabled() && len(row.Cells) > 7 {
-		paintCell(img, face, y, height, colWidths, 7, row.Cells[7], speedColor(result.UploadSpeed, 5, 2))
+		paintCell(img, faces, y, height, colWidths, 7, row.Cells[7], speedColor(result.UploadSpeed, 5, 2))
 	}
 }
 
-func paintCell(img *image.NRGBA, face font.Face, y, height int, colWidths []int, index int, text string, fg color.NRGBA) {
+func paintCell(img *image.NRGBA, faces imageFont, y, height int, colWidths []int, index int, text string, fg color.NRGBA) {
 	x := resultImageRowPadX / 2
 	for i := 0; i < index && i < len(colWidths); i++ {
 		x += colWidths[i]
@@ -299,10 +358,10 @@ func paintCell(img *image.NRGBA, face font.Face, y, height int, colWidths []int,
 	drawer := &font.Drawer{
 		Dst:  img,
 		Src:  image.NewUniform(fg),
-		Face: face,
+		Face: faces.face,
 		Dot:  fixed.P(x, y+height-resultImageRowPadY),
 	}
-	drawer.DrawString(text)
+	drawFallbackString(drawer, faces.face, faces.emoji, text)
 }
 
 func latencyColor(value time.Duration) color.NRGBA {
