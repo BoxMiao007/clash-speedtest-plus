@@ -69,7 +69,7 @@ func (m tuiModel) progressLine() string {
 	if m.totalProxies > 0 {
 		percent = float64(seen) / float64(m.totalProxies)
 	}
-	// 等宽字符直接按比例画，避免方块字符把后面的数字挤歪，也不跟动画逐帧重绘。
+	// 保留原来的渐变方块，按已派发比例直接画，不跟逐帧动画重绘。
 	bar := progressModel.ViewAs(percent)
 	return fmt.Sprintf("%s %s | %s", info, bar, metrics)
 }

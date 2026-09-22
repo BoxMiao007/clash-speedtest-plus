@@ -169,7 +169,6 @@ func newTUIModel(
 	// Initialize progress bar
 	p := progress.New(
 		progress.WithDefaultGradient(),
-		progress.WithFillCharacters('=', '-'),
 		progress.WithWidth(40),
 	)
 
