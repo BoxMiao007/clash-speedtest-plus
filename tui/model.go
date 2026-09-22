@@ -103,6 +103,7 @@ type tuiModel struct {
 	earlyStopped  bool
 	inFlight      map[string]*inFlightNode
 	inFlightOrder []string
+	finishedNames map[string]struct{}
 	// pauseStartedAt 记录本次暂停起点；pausedElapsed 累计历史暂停时长，用于冻结已用时。
 	pauseStartedAt time.Time
 	pausedElapsed  time.Duration
@@ -219,12 +220,13 @@ func newTUIModel(
 		detailHeight:   0,
 		perf:           newPerfTracker(),
 
-		pauseCtl:    pauseCtl,
-		progressCh:  progressCh,
-		earlyStopCh: earlyStopCh,
-		inFlight:    make(map[string]*inFlightNode),
-		autoImage:   true,
-		imageDir:    ".",
+		pauseCtl:      pauseCtl,
+		progressCh:    progressCh,
+		earlyStopCh:   earlyStopCh,
+		inFlight:      make(map[string]*inFlightNode),
+		finishedNames: make(map[string]struct{}),
+		autoImage:     true,
+		imageDir:      ".",
 	}
 }
 
@@ -431,6 +433,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flushScheduled = true
 			cmds = append(cmds, scheduleFlushCmd())
 		}
+		if cmd := m.startFinalSave(false); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		return m, tea.Batch(cmds...)
 
 	case doneMsg:
@@ -445,11 +450,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if progressCmd != nil {
 			cmds = append(cmds, progressCmd)
 		}
-		if (m.autoImage || m.configSaver != nil) && !m.autoImageDone && !m.savingImage {
-			m.autoImageDone = true
-			m.savingImage = true
-			m.setStatus("正在保存")
-			cmds = append(cmds, m.saveImageCmd(true, false))
+		if cmd := m.startFinalSave(false); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
 
@@ -555,6 +557,9 @@ func (m tuiModel) waitForEarlyStop() tea.Cmd {
 // applyProgress 更新在测节点快照；收到同一节点的后续事件时覆盖快照并重绘，
 // 保证延迟与瞬时速度随事件刷新。
 func (m *tuiModel) applyProgress(p speedtester.Progress) {
+	if _, done := m.finishedNames[p.Name]; done {
+		return
+	}
 	if node, ok := m.inFlight[p.Name]; ok {
 		node.latest = p
 		m.updateTableRows()
@@ -568,6 +573,10 @@ func (m *tuiModel) applyProgress(p speedtester.Progress) {
 
 // finishInFlight 在节点结果上表后移除在测状态；若占位详情开着则切换为完成详情。
 func (m *tuiModel) finishInFlight(name string) {
+	if m.finishedNames == nil {
+		m.finishedNames = make(map[string]struct{})
+	}
+	m.finishedNames[name] = struct{}{}
 	node, ok := m.inFlight[name]
 	if !ok {
 		return
@@ -617,6 +626,26 @@ func (m *tuiModel) findResultByName(name string) *speedtester.Result {
 func (m *tuiModel) setStatus(text string) {
 	m.statusText = text
 	m.statusUntil = time.Now().Add(statusHold)
+}
+
+// startFinalSave 等拓尾收完后再写 yaml 和自动结果图，避免图里重复在测行。
+func (m *tuiModel) startFinalSave(quit bool) tea.Cmd {
+	if m.testing && !m.earlyStopped {
+		return nil
+	}
+	if m.inFlightCount() > 0 {
+		return nil
+	}
+	if m.autoImageDone || m.savingImage {
+		return nil
+	}
+	if !m.autoImage && m.configSaver == nil {
+		return nil
+	}
+	m.autoImageDone = true
+	m.savingImage = true
+	m.setStatus("正在保存")
+	return m.saveImageCmd(true, quit)
 }
 
 // saveImageCmd 用按下或触发那一瞬的快照编码结果表图。
