@@ -411,7 +411,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if rowIndex, ok := m.rowAtY(msg.Y); ok {
 				if rowIndex < 0 {
 					// 负偏移索引在测行：打开测试中占位详情，再点同一行则关掉。
-					m.toggleInFlightDetail(m.inFlightOrder[m.tableRowCount()+rowIndex])
+					m.toggleInFlightDetail(m.inFlightOrder[-rowIndex-1])
 				} else {
 					m.toggleDetail(m.results[rowIndex])
 					m.setSelection(rowIndex)
@@ -588,8 +588,8 @@ func (m *tuiModel) finishInFlight(name string) {
 		return
 	}
 	selectedName := ""
-	if cursor := m.table.Cursor(); cursor >= 0 && cursor < len(m.inFlightOrder) {
-		selectedName = m.inFlightOrder[cursor]
+	if cursor := m.table.Cursor(); cursor >= len(m.results) && cursor-len(m.results) < len(m.inFlightOrder) {
+		selectedName = m.inFlightOrder[cursor-len(m.results)]
 	}
 	delete(m.inFlight, name)
 	for i, n := range m.inFlightOrder {

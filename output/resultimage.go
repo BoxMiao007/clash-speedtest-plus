@@ -2,9 +2,11 @@ package output
 
 import (
 	"bytes"
+	"embed"
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -18,13 +20,17 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
+//go:embed flags/*.png
+var flagFiles embed.FS
+
 const (
-	resultImageMaxWidth = 4000
-	resultImageFontSize = 16
-	resultImageRowPadX  = 12
-	resultImageRowPadY  = 6
-	resultImageLineGap  = 0
-	resultImageBarWidth = 120
+	resultImageMaxWidth  = 4000
+	resultImageFontSize  = 16
+	resultImageRowPadX   = 28
+	resultImageRowPadY   = 6
+	resultImageLineGap   = 0
+	resultImageBarWidth  = 120
+	resultImageNameExtra = 80
 )
 
 // ImageRow 是结果表图的一行。InFlight 为真时整行灰色，不走阈值配色。
@@ -117,7 +123,11 @@ func openFontFace(path string) (font.Face, error) {
 }
 
 func findEmojiFont() string {
+	home, _ := os.UserHomeDir()
 	candidates := []string{
+		filepath.Join(home, ".local/share/fonts/NotoEmoji.ttf"),
+		"/usr/share/fonts/noto/NotoEmoji-Regular.ttf",
+		"/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf",
 		"/usr/share/fonts/noto/NotoColorEmoji.ttf",
 		"/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
 		"/usr/share/fonts/noto-emoji/NotoColorEmoji.ttf",
@@ -183,8 +193,11 @@ func RenderResultImage(spec ImageSpec, fontFace imageFont) ([]byte, string, erro
 	if len(headers) == 0 {
 		headers = GetHeaders(spec.Mode)
 	}
-	rows := spec.Rows
+	rows := stripIndexDots(spec.Rows)
 	colWidths := measureColumns(fontFace.face, headers, rows)
+	if len(colWidths) > 1 {
+		colWidths[1] += resultImageNameExtra
+	}
 	nameIndex := 1
 	total := sumWidths(colWidths) + resultImageRowPadX*2
 	if total > resultImageMaxWidth && nameIndex < len(colWidths) {
@@ -213,7 +226,7 @@ func RenderResultImage(spec ImageSpec, fontFace imageFont) ([]byte, string, erro
 		titleRows++
 	}
 	height := (titleRows+1+len(rows))*rowHeight + resultImageLineGap
-	width := sumWidths(colWidths) + resultImageRowPadX
+	width := sumWidths(colWidths)
 	if width < 200 {
 		width = 200
 	}
@@ -366,13 +379,17 @@ func fill(img *image.NRGBA, c color.NRGBA) {
 
 func drawRow(img *image.NRGBA, faces imageFont, y, height int, colWidths []int, cells []string, bg, fg color.NRGBA, bold bool) {
 	fillRect(img, 0, y, img.Bounds().Dx(), height, bg)
-	x := resultImageRowPadX / 2
+	x := 0
 	for i, width := range colWidths {
 		text := ""
 		if i < len(cells) {
 			text = cells[i]
 		}
-		drawText(img, faces, x, y, height, text, fg)
+		if i == 0 && len(cells) == 1 {
+			drawText(img, faces, resultImageRowPadX/2, y, height, text, fg)
+		} else {
+			drawCentered(img, faces, x, y, width, height, text, fg)
+		}
 		_ = bold
 		x += width
 	}
@@ -386,7 +403,7 @@ func drawHeaderRow(img *image.NRGBA, faces imageFont, y, height int, colWidths [
 		if i < len(headers) {
 			text = headers[i]
 		}
-		drawCentered(img, faces, x, y, width, height, text, color.NRGBA{15, 23, 42, 255})
+		drawCellText(img, faces, x, y, width, height, text, color.NRGBA{0, 0, 0, 255}, i == 1)
 		x += width
 	}
 }
@@ -399,18 +416,20 @@ func drawDataRow(img *image.NRGBA, faces imageFont, y, height int, colWidths []i
 		if i < len(row.Cells) {
 			text = row.Cells[i]
 		}
+		fg := color.NRGBA{0, 0, 0, 255}
+		left := i == 1
 		if row.InFlight {
-			drawText(img, faces, x+resultImageRowPadX/2, y, height, text, color.NRGBA{148, 163, 184, 255})
+			drawCellText(img, faces, x, y, width, height, text, fg, left)
 			x += width
 			continue
 		}
 		switch kindOfColumn(i, mode) {
 		case colMetric:
-			bg, fg := metricColors(row.Result, i, mode, maxSpeed, text)
+			bg, _ := metricColors(row.Result, i, mode, maxSpeed, text)
 			fillRect(img, x, y, width, height, bg)
-			drawCentered(img, faces, x, y, width, height, text, fg)
+			drawCellText(img, faces, x, y, width, height, text, fg, left)
 		default:
-			drawText(img, faces, x+resultImageRowPadX/2, y, height, text, color.NRGBA{30, 41, 59, 255})
+			drawCellText(img, faces, x, y, width, height, text, fg, left)
 		}
 		x += width
 	}
@@ -477,27 +496,24 @@ func clamp01(v float64) float64 {
 
 func scoreColor(score float64) color.NRGBA {
 	score = clamp01(score)
-	// 0 深红，0.5 黄，1 深绿。
+	// 0 深红，0.5 琥珀，1 深绿，避免过浅。
 	var r, g, b uint8
 	if score < 0.5 {
 		t := score / 0.5
-		r = uint8(254 - t*14)
-		g = uint8(202 + t*38)
-		b = uint8(202 - t*82)
+		r = uint8(185 + t*32)
+		g = uint8(28 + t*95)
+		b = uint8(28 + t*12)
 	} else {
 		t := (score - 0.5) / 0.5
-		r = uint8(240 - t*153)
-		g = uint8(240 - t*43)
-		b = uint8(120 + t*67)
+		r = uint8(217 - t*175)
+		g = uint8(123 + t*32)
+		b = uint8(40 - t*16)
 	}
 	return color.NRGBA{r, g, b, 255}
 }
 
 func scoreText(score float64) color.NRGBA {
-	if score < 0.25 || score > 0.8 {
-		return color.NRGBA{255, 255, 255, 255}
-	}
-	return color.NRGBA{15, 23, 42, 255}
+	return color.NRGBA{0, 0, 0, 255}
 }
 
 func drawGrid(img *image.NRGBA, titleRows, rowHeight int, colWidths []int) {
@@ -528,23 +544,95 @@ func drawGrid(img *image.NRGBA, titleRows, rowHeight int, colWidths []int) {
 	}
 }
 
-func drawCentered(img *image.NRGBA, faces imageFont, x, y, width, height int, text string, fg color.NRGBA) {
-	tw := textWidth(faces.face, text)
-	left := x + (width-tw)/2
-	if left < x {
-		left = x
+func drawCellText(img *image.NRGBA, faces imageFont, x, y, width, height int, text string, fg color.NRGBA, left bool) {
+	if left {
+		drawNameCell(img, faces, x, y, height, text, fg)
+		return
+	}
+	drawCentered(img, faces, x, y, width, height, text, fg)
+}
+
+func drawNameCell(img *image.NRGBA, faces imageFont, x, y, height int, text string, fg color.NRGBA) {
+	left := x + 8
+	code, rest, ok := splitLeadingFlag(text)
+	if ok {
+		if flag := flagImage(code); flag != nil {
+			h := flag.Bounds().Dy()
+			w := flag.Bounds().Dx()
+			top := y + (height-h)/2
+			dst := image.Rect(left, top, left+w, top+h)
+			draw.Draw(img, dst, flag, flag.Bounds().Min, draw.Over)
+			left += w + 6
+		}
+		text = strings.TrimSpace(rest)
 	}
 	drawText(img, faces, left, y, height, text, fg)
 }
 
+func splitLeadingFlag(text string) (code, rest string, ok bool) {
+	runes := []rune(text)
+	if len(runes) < 2 || !isRegionalIndicator(runes[0]) || !isRegionalIndicator(runes[1]) {
+		return "", text, false
+	}
+	code = string([]byte{byte(runes[0] - 0x1F1E6 + 'a'), byte(runes[1] - 0x1F1E6 + 'a')})
+	return code, string(runes[2:]), true
+}
+
+func isRegionalIndicator(r rune) bool {
+	return r >= 0x1F1E6 && r <= 0x1F1FF
+}
+
+func flagImage(code string) image.Image {
+	data, err := flagFiles.ReadFile("flags/" + code + ".png")
+	if err != nil {
+		return nil
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil
+	}
+	return img
+}
+
+func drawCentered(img *image.NRGBA, faces imageFont, x, y, width, height int, text string, fg color.NRGBA) {
+	tw := textWidth(faces.face, text)
+	left := x + (width-tw)/2
+	if left < x+4 {
+		left = x + 4
+	}
+	metrics := faces.face.Metrics()
+	baseline := y + (height+metrics.Ascent.Ceil()-metrics.Descent.Ceil())/2
+	drawTextAt(img, faces, left, baseline, text, fg)
+}
+
 func drawText(img *image.NRGBA, faces imageFont, x, y, height int, text string, fg color.NRGBA) {
+	metrics := faces.face.Metrics()
+	baseline := y + (height+metrics.Ascent.Ceil()-metrics.Descent.Ceil())/2
+	drawTextAt(img, faces, x, baseline, text, fg)
+}
+
+func drawTextAt(img *image.NRGBA, faces imageFont, x, baseline int, text string, fg color.NRGBA) {
 	drawer := &font.Drawer{
 		Dst:  img,
 		Src:  image.NewUniform(fg),
 		Face: faces.face,
-		Dot:  fixed.P(x, y+height-resultImageRowPadY),
+		Dot:  fixed.P(x, baseline),
 	}
 	drawFallbackString(drawer, faces.face, faces.emoji, text)
+}
+
+func stripIndexDots(rows []ImageRow) []ImageRow {
+	out := make([]ImageRow, len(rows))
+	for i, row := range rows {
+		out[i] = row
+		if len(row.Cells) == 0 {
+			continue
+		}
+		cells := append([]string(nil), row.Cells...)
+		cells[0] = strings.TrimSuffix(cells[0], ".")
+		out[i].Cells = cells
+	}
+	return out
 }
 
 func fillRect(img *image.NRGBA, x, y, w, h int, c color.NRGBA) {

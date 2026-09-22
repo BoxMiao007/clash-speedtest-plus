@@ -16,13 +16,13 @@ func (m *tuiModel) updateTableRows() {
 	defer m.perf.record(perfEventRows, len(m.results), start)
 	inFlightCount := m.inFlightCount()
 	rows := make([]table.Row, 0, inFlightCount+len(m.results))
-	// 在测行钉在表顶，序号列写 …；完成后从表顶移除。
+	// 已完成行在上，在测行排在下面。
 	columns := len(m.table.Columns())
-	for i, name := range m.inFlightOrder {
-		rows = append(rows, fitRowWidth(m.inFlightRow(m.inFlight[name], i == m.table.Cursor()), columns))
-	}
 	for i, result := range m.results {
 		rows = append(rows, fitRowWidth(output.FormatRow(result, m.mode, i), columns))
+	}
+	for i, name := range m.inFlightOrder {
+		rows = append(rows, fitRowWidth(m.inFlightRow(m.inFlight[name], m.table.Cursor() == len(m.results)+i), columns))
 	}
 	m.table.SetRows(rows)
 	m.syncSelection()
@@ -259,12 +259,11 @@ func (m tuiModel) rowAtY(y int) (int, bool) {
 	if absoluteIndex < 0 || absoluteIndex >= m.tableRowCount() {
 		return 0, false
 	}
-	// 前 inFlightCount 行是在测行，返回结果给调用方前去掉偏移：
-	// 调用方用返回值索引 m.results，在测行用负偏移标记。
-	if absoluteIndex < m.inFlightCount() {
-		return absoluteIndex - m.tableRowCount(), true
+	// 完成行在上。超出完成区的是在测行，用负偏移标记。
+	if absoluteIndex >= len(m.results) {
+		return len(m.results) - absoluteIndex - 1, true
 	}
-	return absoluteIndex - m.inFlightCount(), true
+	return absoluteIndex, true
 }
 
 // tableRowCount 返回表格总行数：在测行 + 完成行。
@@ -295,8 +294,8 @@ func (m *tuiModel) setSelection(index int) {
 		m.detailResult = m.results[index]
 	}
 	m.selectedIndex = index
-	// cursor 位于在测行之后的完成区。
-	m.table.SetCursor(index + m.inFlightCount())
+	// 完成行排在在测行前面。
+	m.table.SetCursor(index)
 	m.table.Focus()
 }
 
@@ -317,7 +316,7 @@ func (m *tuiModel) syncSelection() {
 		m.table.Blur()
 		return
 	}
-	m.table.SetCursor(m.selectedIndex + m.inFlightCount())
+	m.table.SetCursor(m.selectedIndex)
 	m.table.Focus()
 }
 
@@ -329,13 +328,12 @@ func (m *tuiModel) syncSelectionFromCursor() {
 	if m.inFlightCount() > 0 {
 		m.updateTableRows()
 	}
-	inFlightCount := m.inFlightCount()
-	if cursor < inFlightCount {
-		// 点击/滚动到在测行：仅高亮，不更新完成区选中索引。
-		m.highlightInFlight(m.inFlightOrder[cursor])
+	if cursor >= len(m.results) {
+		// 点击/滚动到表尾在测行：仅高亮，不更新完成区选中索引。
+		m.highlightInFlight(m.inFlightOrder[cursor-len(m.results)])
 		return
 	}
-	resultIndex := cursor - inFlightCount
+	resultIndex := cursor
 	m.detailInFlight = nil
 	m.selectedIndex = resultIndex
 	if m.detailVisible {
