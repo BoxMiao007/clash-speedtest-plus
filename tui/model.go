@@ -45,6 +45,11 @@ type imageSavedMsg struct {
 	error bool
 }
 
+// uploadStatusMsg 是后台 gist/仓库上传结束后的提示。
+type uploadStatusMsg struct {
+	text string
+}
+
 const statusHold = 3 * time.Second
 
 // PauseController 由测速引擎实现，TUI 通过它在暂停/继续时控制节点派发。
@@ -115,8 +120,8 @@ type tuiModel struct {
 	saveFailed        bool
 	configSaver       func([]*speedtester.Result) (string, error)
 	configSaved       bool
-	configPath        string
-	configErr         string
+	uploadFunc        func() string
+	uploadCancel      func()
 }
 
 const (
@@ -236,6 +241,12 @@ func (m *tuiModel) SetConfigSaver(save func([]*speedtester.Result) (string, erro
 	m.configSaver = save
 }
 
+// SetUploader 在本地 yaml 写完后后台上传。返回的文字会盖住状态行。
+func (m *tuiModel) SetUploader(upload func() string, cancel func()) {
+	m.uploadFunc = upload
+	m.uploadCancel = cancel
+}
+
 // Init initializes the TUI model
 func (m tuiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
@@ -279,6 +290,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.quittingAfterSave && msg.String() != "q" && msg.String() != "ctrl+c" {
+			return m, nil
+		}
 		switch msg.String() {
 		case "esc":
 			if m.detailVisible {
@@ -292,6 +306,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.quittingAfterSave {
 				m.forceQuit = true
 				m.quitting = true
+				if m.uploadCancel != nil {
+					m.uploadCancel()
+				}
 				if err := output.RemovePartialImages(m.imageDir); err != nil {
 					m.saveFailed = true
 					m.statusText = "删除半截图失败: " + err.Error()
@@ -311,6 +328,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// 本轮尚未结束：丢掉在测节点，不写 yaml 和自动图，并删掉半截图。
 			if stopper, ok := m.pauseCtl.(interface{ Stop() }); ok {
 				stopper.Stop()
+			}
+			if m.uploadCancel != nil {
+				m.uploadCancel()
 			}
 			if err := output.RemovePartialImages(m.imageDir); err != nil {
 				m.saveFailed = true
@@ -351,6 +371,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.MouseMsg:
+		if m.quittingAfterSave {
+			return m, nil
+		}
 		if msg.Button == tea.MouseButtonWheelUp {
 			m.table.MoveUp(1)
 			m.syncSelectionFromCursor()
@@ -465,6 +488,19 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
+		if m.configSaved && m.uploadFunc != nil {
+			upload := m.uploadFunc
+			m.uploadFunc = nil
+			return m, func() tea.Msg {
+				return uploadStatusMsg{text: upload()}
+			}
+		}
+		return m, nil
+
+	case uploadStatusMsg:
+		if msg.text != "" {
+			m.setStatus(msg.text)
+		}
 		return m, nil
 
 	case timerTickMsg:
@@ -534,6 +570,10 @@ func (m *tuiModel) finishInFlight(name string) {
 	if !ok {
 		return
 	}
+	selectedName := ""
+	if cursor := m.table.Cursor(); cursor >= 0 && cursor < len(m.inFlightOrder) {
+		selectedName = m.inFlightOrder[cursor]
+	}
 	delete(m.inFlight, name)
 	for i, n := range m.inFlightOrder {
 		if n == name {
@@ -541,11 +581,24 @@ func (m *tuiModel) finishInFlight(name string) {
 			break
 		}
 	}
-	if m.detailInFlight == node {
+	if m.detailInFlight == node || selectedName == name {
 		m.detailInFlight = nil
+		m.detailResult = m.findResultByName(name)
+		m.selectResult(m.detailResult)
 		if m.detailVisible {
-			m.detailResult = m.findResultByName(name)
 			m.refreshDetailHeight()
+		}
+	}
+}
+
+func (m *tuiModel) selectResult(result *speedtester.Result) {
+	if result == nil {
+		return
+	}
+	for i, item := range m.results {
+		if item == result {
+			m.selectedIndex = i
+			return
 		}
 	}
 }

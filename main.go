@@ -191,6 +191,16 @@ func main() {
 				return *outputPath, nil
 			})
 		}
+		if uploadNeeded() {
+			uploadCtx, cancelUpload := context.WithCancel(context.Background())
+			model.SetUploader(func() string {
+				uploadConfig(uploadCtx)
+				if uploadCtx.Err() != nil {
+					return "上传已中断"
+				}
+				return "上传已结束"
+			}, cancelUpload)
+		}
 		p := tea.NewProgram(
 			model,
 			tea.WithAltScreen(),
@@ -207,11 +217,6 @@ func main() {
 		}
 		if failed {
 			os.Exit(1)
-		}
-		if uploadNeeded() {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			go uploadConfig(ctx)
 		}
 		return
 	}
