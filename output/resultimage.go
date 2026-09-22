@@ -456,11 +456,15 @@ func kindOfColumn(index int, mode speedtester.SpeedMode) columnKind {
 }
 
 func metricColors(result *speedtester.Result, index int, mode speedtester.SpeedMode, maxSpeed float64, text string) (color.NRGBA, color.NRGBA) {
+	speedColumn := index == 6 || index == 7
 	if result == nil || text == "" || text == "N/A" || text == "测试中" {
-		return color.NRGBA{254, 226, 226, 255}, color.NRGBA{153, 27, 27, 255}
+		if speedColumn {
+			return redScale(0), scoreText(0)
+		}
+		return greenScale(0), scoreText(0)
 	}
 	score := metricScore(result, index, mode, maxSpeed)
-	if index == 6 || index == 7 {
+	if speedColumn {
 		return redScale(score), scoreText(score)
 	}
 	return greenScale(score), scoreText(score)
@@ -499,9 +503,9 @@ func clamp01(v float64) float64 {
 
 func greenScale(score float64) color.NRGBA {
 	return paletteColor(score, []color.NRGBA{
-		{0x97, 0xfb, 0xe6, 0xff},
-		{0x74, 0xf2, 0xe3, 0xff},
-		{0x21, 0xde, 0xde, 0xff},
+		{0xc0, 0xeb, 0xf2, 0xff},
+		{0x97, 0xe1, 0xe8, 0xff},
+		{0x64, 0xc4, 0xcc, 0xff},
 	})
 }
 

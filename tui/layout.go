@@ -60,7 +60,8 @@ func (m tuiModel) progressLine() string {
 	}
 	progressModel := m.progress
 	progressModel.Width = barWidth
-	bar := progressModel.View()
+	// 用目标比例直接画，避免弹簧动画把整行刷成闪烁。
+	bar := progressModel.ViewAs(progressModel.Percent())
 	return fmt.Sprintf("%s %s | %s", info, bar, metrics)
 }
 
