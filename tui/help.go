@@ -76,8 +76,16 @@ func (h *helpState) setSaving(saving bool) {
 	h.keyMap.TogglePause.SetEnabled(!saving)
 	h.keyMap.SaveImage.SetEnabled(!saving)
 	h.keyMap.CloseDetail.SetEnabled(!saving)
+	h.keyMap.Table.LineUp.SetEnabled(!saving)
+	h.keyMap.Table.LineDown.SetEnabled(!saving)
+	h.keyMap.Table.PageUp.SetEnabled(!saving)
+	h.keyMap.Table.PageDown.SetEnabled(!saving)
+	h.keyMap.Table.HalfPageUp.SetEnabled(!saving)
+	h.keyMap.Table.HalfPageDown.SetEnabled(!saving)
+	h.keyMap.Table.GotoTop.SetEnabled(!saving)
+	h.keyMap.Table.GotoBottom.SetEnabled(!saving)
 	if saving {
-		h.keyMap.Quit.SetHelp("q/ctrl+c", "强制退出")
+		h.keyMap.Quit.SetHelp("再按 q 或 Ctrl+C", "强制退出")
 	} else {
 		h.keyMap.Quit.SetHelp("q/ctrl+c", "退出")
 	}

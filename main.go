@@ -236,9 +236,10 @@ func main() {
 	results = output.SortResults(results, effectiveMode)
 
 	if *outputPath != "" {
-		err = saveConfig(results, resultFilter)
+		err = saveConfigInterruptible(results, resultFilter)
 		if err != nil {
-			log.Fatalf("保存配置失败: %s", err)
+			fmt.Fprintf(os.Stderr, "保存配置失败: %s\n", err)
+			os.Exit(1)
 		}
 		// 非交互模式路径走 stderr，stdout 保留给 TSV/管道输出。
 		fmt.Fprintf(os.Stderr, "已保存配置: %s\n", *outputPath)
@@ -290,6 +291,25 @@ func writeNonInteractiveImage(ctx context.Context, results []*speedtester.Result
 		return
 	}
 	fmt.Fprintf(os.Stderr, "%s\n", output.JoinStatus("已保存 "+path, warning))
+}
+
+func saveConfigInterruptible(results []*speedtester.Result, filter resultFilter) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	errCh := make(chan error, 1)
+	go func() {
+		if ctx.Err() != nil {
+			errCh <- ctx.Err()
+			return
+		}
+		errCh <- saveConfig(results, filter)
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func saveConfig(results []*speedtester.Result, filter resultFilter) error {
