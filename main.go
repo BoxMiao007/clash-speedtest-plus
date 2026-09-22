@@ -250,6 +250,27 @@ func main() {
 }
 
 func exportNonInteractiveImage(results []*speedtester.Result, mode speedtester.SpeedMode, total int) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		writeNonInteractiveImage(ctx, results, mode, total)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		if err := output.RemovePartialImages("."); err != nil {
+			fmt.Fprintf(os.Stderr, "删除半截图失败: %s\n", err)
+		}
+		os.Exit(1)
+	}
+}
+
+func writeNonInteractiveImage(ctx context.Context, results []*speedtester.Result, mode speedtester.SpeedMode, total int) {
+	if ctx.Err() != nil {
+		return
+	}
 	fmt.Fprintf(os.Stderr, "正在保存\n")
 	status := "已完成"
 	if *earlyStop > 0 && len(results) < total {
