@@ -157,25 +157,25 @@ func (m tuiModel) calculateDetailHeight() int {
 
 func buildDetailContent(result *speedtester.Result, width int, mode speedtester.SpeedMode) string {
 	lines := []string{
-		fmt.Sprintf("Node: %s", result.ProxyName),
-		fmt.Sprintf("Type: %s", result.ProxyType),
+		fmt.Sprintf("节点: %s", result.ProxyName),
+		fmt.Sprintf("类型: %s", result.ProxyType),
 		"",
-		fmt.Sprintf("Latency: %s", result.FormatLatency()),
+		fmt.Sprintf("延迟: %s", result.FormatLatency()),
 	}
 	if !mode.IsFast() {
 		lines = append(lines,
-			fmt.Sprintf("Jitter: %s", result.FormatJitter()),
-			fmt.Sprintf("Packet Loss: %s", result.FormatPacketLoss()),
+			fmt.Sprintf("抖动: %s", result.FormatJitter()),
+			fmt.Sprintf("丢包率: %s", result.FormatPacketLoss()),
 			"",
-			fmt.Sprintf("Download: %s", result.FormatDownloadSpeedValue()),
+			fmt.Sprintf("下载: %s", result.FormatDownloadSpeedValue()),
 		)
-		lines = appendWrappedValue(lines, "Download Error:", result.FormatDownloadError(), width)
+		lines = appendWrappedValue(lines, "下载错误:", result.FormatDownloadError(), width)
 		if mode.UploadEnabled() {
-			lines = append(lines, "", fmt.Sprintf("Upload: %s", result.FormatUploadSpeedValue()))
-			lines = appendWrappedValue(lines, "Upload Error:", result.FormatUploadError(), width)
+			lines = append(lines, "", fmt.Sprintf("上传: %s", result.FormatUploadSpeedValue()))
+			lines = appendWrappedValue(lines, "上传错误:", result.FormatUploadError(), width)
 		}
 	}
-	lines = append(lines, "", "Press ESC to close details.")
+	lines = append(lines, "", "按 ESC 关闭详情。")
 	return strings.Join(lines, "\n")
 }
 

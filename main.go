@@ -27,37 +27,41 @@ var (
 )
 
 var (
-	configPathsConfig = flag.String("c", "", "config file path, also support http(s) url")
-	filterRegexConfig = flag.String("f", ".+", "filter proxies by name, use regexp")
-	blockKeywords     = flag.String("b", "", "block proxies by keywords, use | to separate multiple keywords (example: -b 'rate|x1|1x')")
-	serverURL         = flag.String("server-url", "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg", "server url or direct download url")
-	speedMode         = flag.String("speed-mode", "download", "speed test mode: fast, download, full")
-	downloadSize      = flag.Int("download-size", 50*1024*1024, "download size for testing proxies")
-	uploadSize        = flag.Int("upload-size", 20*1024*1024, "upload size for testing proxies (full mode only)")
-	timeout           = flag.Duration("timeout", time.Second*5, "timeout for testing proxies")
-	concurrent        = flag.Int("concurrent", 4, "download concurrent size")
-	parallel          = flag.Int("parallel", 1, "number of nodes to test at once")
-	noImage           = flag.Bool("no-image", false, "disable automatic result image export")
-	outputPath        = flag.String("output", "", "output config file path")
-	gistToken         = flag.String("gist-token", "", "github gist token for updating output")
-	gistAddress       = flag.String("gist-address", "", "github gist address or id for updating output (filename uses output basename)")
-	repoToken         = flag.String("repo-token", "", "github token for updating repository file")
-	repoAddress       = flag.String("repo-address", "", "github repository address or owner/repo for updating output")
-	repoFilePath      = flag.String("repo-file-path", "", "repository file path for uploading output (default: output basename)")
-	repoBranch        = flag.String("repo-branch", "", "repository branch for uploading output (default: repository default branch)")
-	maxLatency        = flag.Duration("max-latency", time.Second, "filter latency greater than this value")
-	maxPacketLoss     = flag.Float64("max-packet-loss", 100, "filter packet loss greater than this value(unit: %)")
-	minDownloadSpeed  = flag.Float64("min-download-speed", 5, "filter download speed less than this value(unit: MB/s)")
-	minUploadSpeed    = flag.Float64("min-upload-speed", 2, "filter upload speed less than this value(unit: MB/s, full mode only)")
-	earlyStop         = flag.Int("early-stop", 0, "stop testing after this many results pass filters (0 disables)")
-	renameNodes       = flag.Bool("rename", true, "rename nodes with IP location and speed")
-	renameTemplate    = flag.String("rename-template", "", "name template for renaming (Go text/template). Placeholders: {{.Flag}}, {{.CountryCode}}, {{.Index}}, {{.Direction}}, {{.Speed}}, {{.SpeedUnit}}, {{.LatencyMs}}, {{.DownloadSpeedMBps}}, {{.UploadSpeedMBps}}. Empty = default format")
-	fastMode          = flag.Bool("fast", false, "fast mode (alias for --speed-mode fast)")
-	versionFlag       = flag.Bool("v", false, "show version information")
-	userAgent         = flag.String("ua", "", "User-Agent for fetching config from http(s) URL (default: mihomo kernel UA, e.g. mihomo/1.10.0)")
+	configPathsConfig = flag.String("c", "", "配置文件路径，也支持 http(s) 地址")
+	filterRegexConfig = flag.String("f", ".+", "按节点名过滤，使用正则")
+	blockKeywords     = flag.String("b", "", "按关键字屏蔽节点，多个关键字用 | 分隔（例如 -b 'rate|x1|1x'）")
+	serverURL         = flag.String("server-url", "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg", "测速服务器地址或直接下载地址")
+	speedMode         = flag.String("speed-mode", "download", "测速模式：fast、download、full")
+	downloadSize      = flag.Int("download-size", 50*1024*1024, "下载测试大小")
+	uploadSize        = flag.Int("upload-size", 20*1024*1024, "上传测试大小（仅完整模式）")
+	timeout           = flag.Duration("timeout", time.Second*5, "单个请求超时")
+	concurrent        = flag.Int("concurrent", 4, "同一节点的下载并发连接数")
+	parallel          = flag.Int("parallel", 1, "同时测试的节点数")
+	noImage           = flag.Bool("no-image", false, "关闭自动导出结果表图，仍可按 s 手动保存")
+	outputPath        = flag.String("output", "", "输出配置文件路径")
+	gistToken         = flag.String("gist-token", "", "用于更新 Gist 的 GitHub token")
+	gistAddress       = flag.String("gist-address", "", "要更新的 Gist 地址或 ID（文件名使用输出文件名）")
+	repoToken         = flag.String("repo-token", "", "用于更新仓库文件的 GitHub token")
+	repoAddress       = flag.String("repo-address", "", "仓库地址或 owner/repo")
+	repoFilePath      = flag.String("repo-file-path", "", "仓库中的文件路径（默认使用输出文件名）")
+	repoBranch        = flag.String("repo-branch", "", "仓库分支（默认使用仓库默认分支）")
+	maxLatency        = flag.Duration("max-latency", time.Second, "过滤高于该值的延迟")
+	maxPacketLoss     = flag.Float64("max-packet-loss", 100, "过滤高于该值的丢包率（单位：%）")
+	minDownloadSpeed  = flag.Float64("min-download-speed", 5, "过滤低于该值的下载速度（单位：MB/s）")
+	minUploadSpeed    = flag.Float64("min-upload-speed", 2, "过滤低于该值的上传速度（单位：MB/s，仅完整模式）")
+	earlyStop         = flag.Int("early-stop", 0, "过筛结果达到该数量后提前结束（0 为关闭）")
+	renameNodes       = flag.Bool("rename", true, "用 IP 位置和速度重命名输出节点")
+	renameTemplate    = flag.String("rename-template", "", "重命名模板（Go text/template）。占位符：{{.Flag}}、{{.CountryCode}}、{{.Index}}、{{.Direction}}、{{.Speed}}、{{.SpeedUnit}}、{{.LatencyMs}}、{{.DownloadSpeedMBps}}、{{.UploadSpeedMBps}}。空为默认格式")
+	fastMode          = flag.Bool("fast", false, "快速模式（等同 --speed-mode fast）")
+	versionFlag       = flag.Bool("v", false, "显示版本信息")
+	userAgent         = flag.String("ua", "", "拉取 http(s) 配置时使用的 User-Agent（默认使用 mihomo 内核 UA）")
 )
 
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "用法：clash-speedtest [选项]\n")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 	mihomolog.SetLevel(mihomolog.SILENT)
 
@@ -68,7 +72,7 @@ func main() {
 	}
 
 	if *configPathsConfig == "" {
-		log.Fatalln("please specify the configuration file")
+		log.Fatalln("请指定配置文件")
 	}
 
 	var err error
@@ -76,7 +80,7 @@ func main() {
 	if !*fastMode {
 		requestedMode, err = speedtester.ParseSpeedMode(*speedMode)
 		if err != nil {
-			log.Fatalf("parse speed mode failed: %s", err)
+			log.Fatalf("解析测速模式失败: %s", err)
 		}
 	}
 
@@ -99,18 +103,18 @@ func main() {
 		UserAgent:        *userAgent,
 	})
 	if err != nil {
-		log.Fatalf("create speed tester failed: %s", err)
+		log.Fatalf("创建测速器失败: %s", err)
 	}
 	effectiveMode := speedTester.Mode()
 	resultFilter := newResultFilter(effectiveMode)
 	stopper, err := newEarlyStopper(*earlyStop, resultFilter)
 	if err != nil {
-		log.Fatalf("create early stopper failed: %s", err)
+		log.Fatalf("创建提前结束失败: %s", err)
 	}
 
 	allProxies, err := speedTester.LoadProxies()
 	if err != nil {
-		log.Fatalf("load proxies failed: %s", err)
+		log.Fatalf("加载节点失败: %s", err)
 	}
 
 	outputMode := output.DetermineOutputMode(output.IsTerminalFile)
@@ -120,7 +124,7 @@ func main() {
 		var err error
 		tsvWriter, err = output.NewTSVWriter(os.Stdout, effectiveMode)
 		if err != nil {
-			log.Fatalf("create TSV writer failed: %s", err)
+			log.Fatalf("创建 TSV 输出失败: %s", err)
 		}
 	}
 
@@ -191,7 +195,7 @@ func main() {
 		)
 		finalModel, err := p.Run()
 		if err != nil {
-			log.Fatalf("TUI failed: %s", err)
+			log.Fatalf("界面运行失败: %s", err)
 		}
 		finished, _ := finalModel.(tui.Model)
 		status, failed := finished.ExitStatus()
@@ -210,7 +214,7 @@ func main() {
 
 		if tsvWriter != nil {
 			if err := tsvWriter.WriteRow(result, len(results)-1); err != nil {
-				log.Printf("write TSV row failed: %s", err)
+				log.Printf("写入 TSV 行失败: %s", err)
 			}
 		}
 		return stopper.ShouldContinue(result)
@@ -221,7 +225,7 @@ func main() {
 	if *outputPath != "" {
 		err = saveConfig(results, resultFilter)
 		if err != nil {
-			log.Fatalf("save config file failed: %s", err)
+			log.Fatalf("保存配置失败: %s", err)
 		}
 		// 非交互模式路径走 stderr，stdout 保留给 TSV/管道输出。
 		fmt.Fprintf(os.Stderr, "已保存配置: %s\n", *outputPath)
@@ -274,7 +278,7 @@ func saveConfig(results []*speedtester.Result, filter resultFilter) error {
 			}
 			name, err := ip.GenerateNodeNameFromTemplate(*renameTemplate, location.CountryCode, result.Latency, result.DownloadSpeed, result.UploadSpeed, nameCount)
 			if err != nil {
-				log.Printf("rename template parse error: %s, use default name", err)
+				log.Printf("重命名模板解析失败: %s，改用默认名称", err)
 				name = ip.GenerateNodeName(location.CountryCode, result.Latency, result.DownloadSpeed, result.UploadSpeed, nameCount)
 			}
 			proxyConfig["name"] = name
@@ -298,7 +302,7 @@ func saveConfig(results []*speedtester.Result, filter resultFilter) error {
 	if *gistToken != "" && *gistAddress != "" {
 		uploader := gist.NewUploader(nil)
 		if err := uploader.UpdateFile(*gistToken, *gistAddress, outputFilename, yamlData); err != nil {
-			log.Printf("update gist failed: %s", err)
+			log.Printf("更新 Gist 失败: %s", err)
 		}
 	}
 
@@ -309,7 +313,7 @@ func saveConfig(results []*speedtester.Result, filter resultFilter) error {
 			repositoryFilePath = outputFilename
 		}
 		if err := uploader.UpdateRepoFile(*repoToken, *repoAddress, repositoryFilePath, *repoBranch, yamlData); err != nil {
-			log.Printf("update repo file failed: %s", err)
+			log.Printf("更新仓库文件失败: %s", err)
 		}
 	}
 
