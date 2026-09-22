@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -205,6 +208,11 @@ func main() {
 		if failed {
 			os.Exit(1)
 		}
+		if uploadNeeded() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go uploadConfig(ctx)
+		}
 		return
 	}
 
@@ -233,6 +241,7 @@ func main() {
 	if !*noImage {
 		exportNonInteractiveImage(results, effectiveMode, len(allProxies))
 	}
+	waitForUpload()
 }
 
 func exportNonInteractiveImage(results []*speedtester.Result, mode speedtester.SpeedMode, total int) {
@@ -297,25 +306,63 @@ func saveConfig(results []*speedtester.Result, filter resultFilter) error {
 	if err := os.WriteFile(*outputPath, yamlData, 0o644); err != nil {
 		return err
 	}
-	outputFilename := filepath.Base(filepath.Clean(*outputPath))
+	return nil
+}
 
+// uploadConfig 把已写好的 yaml 同步到 Gist 或仓库。失败只记日志，不影响退出码。
+func uploadConfig(ctx context.Context) {
+	if *outputPath == "" {
+		return
+	}
+	data, err := os.ReadFile(*outputPath)
+	if err != nil {
+		log.Printf("读取待上传配置失败: %s", err)
+		return
+	}
+	outputFilename := filepath.Base(filepath.Clean(*outputPath))
+	uploader := gist.NewUploader(nil)
 	if *gistToken != "" && *gistAddress != "" {
-		uploader := gist.NewUploader(nil)
-		if err := uploader.UpdateFile(*gistToken, *gistAddress, outputFilename, yamlData); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := uploader.UpdateFile(*gistToken, *gistAddress, outputFilename, data); err != nil {
 			log.Printf("更新 Gist 失败: %s", err)
 		}
 	}
-
 	if *repoToken != "" && *repoAddress != "" {
-		uploader := gist.NewUploader(nil)
+		if ctx.Err() != nil {
+			return
+		}
 		repositoryFilePath := strings.TrimSpace(*repoFilePath)
 		if repositoryFilePath == "" {
 			repositoryFilePath = outputFilename
 		}
-		if err := uploader.UpdateRepoFile(*repoToken, *repoAddress, repositoryFilePath, *repoBranch, yamlData); err != nil {
+		if err := uploader.UpdateRepoFile(*repoToken, *repoAddress, repositoryFilePath, *repoBranch, data); err != nil {
 			log.Printf("更新仓库文件失败: %s", err)
 		}
 	}
+}
 
-	return nil
+func uploadNeeded() bool {
+	return (*gistToken != "" && *gistAddress != "") || (*repoToken != "" && *repoAddress != "")
+}
+
+// waitForUpload 非交互等待上传。Ctrl+C 立刻中断，并在 stderr 写正在上传。
+func waitForUpload() {
+	if !uploadNeeded() || *outputPath == "" {
+		return
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	fmt.Fprintf(os.Stderr, "正在上传\n")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		uploadConfig(ctx)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		fmt.Fprintf(os.Stderr, "上传已中断\n")
+	}
 }
