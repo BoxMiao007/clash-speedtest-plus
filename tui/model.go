@@ -461,6 +461,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.earlyStopped = true
 		m.help.setEarlyStopped(true)
 		m.help.setPaused(false)
+		m.statusText = ""
+		m.statusUntil = time.Time{}
 		return m, nil
 
 	case progressMsg:
