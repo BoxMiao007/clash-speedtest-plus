@@ -39,7 +39,9 @@ type earlyStopMsg struct{}
 
 // imageSavedMsg 是结果表图写完后的提示。
 type imageSavedMsg struct {
-	text string
+	text  string
+	quit  bool
+	error bool
 }
 
 const statusHold = 3 * time.Second
@@ -106,6 +108,10 @@ type tuiModel struct {
 	statusText    string
 	statusUntil   time.Time
 	autoImageDone bool
+	// quittingAfterSave 表示整轮已结束，第一次退出正在等本地产物。
+	quittingAfterSave bool
+	forceQuit         bool
+	saveFailed        bool
 }
 
 const (
@@ -273,6 +279,22 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "q", "ctrl+c":
+			if m.quittingAfterSave {
+				m.forceQuit = true
+				m.quitting = true
+				return m, tea.Quit
+			}
+			if m.roundFinished() {
+				m.quittingAfterSave = true
+				m.help.setSaving(true)
+				m.setStatus("正在保存")
+				if m.savingImage {
+					return m, nil
+				}
+				m.savingImage = true
+				return m, m.saveImageCmd(true, true)
+			}
+			// 本轮尚未结束：丢掉在测节点，不写 yaml 和自动图。
 			m.quitting = true
 			return m, tea.Quit
 		case "s":
@@ -282,7 +304,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.savingImage = true
 			m.setStatus("正在保存")
-			return m, m.saveImageCmd(false)
+			return m, m.saveImageCmd(false, false)
 		case " ":
 			// 空格切换暂停/继续；详情开着时仍是暂停，不关详情。
 			// 已完成或已提前结束时空格无效。
@@ -383,7 +405,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.autoImageDone = true
 			m.savingImage = true
 			m.setStatus("正在保存")
-			cmds = append(cmds, m.saveImageCmd(true))
+			cmds = append(cmds, m.saveImageCmd(true, false))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -411,7 +433,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case imageSavedMsg:
 		m.savingImage = false
+		if msg.error {
+			m.saveFailed = true
+		}
 		m.setStatus(msg.text)
+		if msg.quit || m.quittingAfterSave {
+			m.quitting = true
+			return m, tea.Quit
+		}
 		return m, nil
 
 	case timerTickMsg:
@@ -512,16 +541,30 @@ func (m *tuiModel) setStatus(text string) {
 }
 
 // saveImageCmd 用按下或触发那一瞬的快照编码结果表图。
-func (m tuiModel) saveImageCmd(finished bool) tea.Cmd {
+func (m tuiModel) saveImageCmd(finished bool, quit bool) tea.Cmd {
 	spec := m.imageSpec(finished)
 	dir := m.imageDir
 	return func() tea.Msg {
 		path, warning, err := output.WriteResultImage(dir, spec)
 		if err != nil {
-			return imageSavedMsg{text: "保存失败: " + err.Error()}
+			return imageSavedMsg{text: "保存失败: " + err.Error(), quit: quit, error: true}
 		}
-		return imageSavedMsg{text: output.JoinStatus("已保存 "+path, warning)}
+		return imageSavedMsg{text: output.JoinStatus("已保存 "+path, warning), quit: quit}
 	}
+}
+
+func (m tuiModel) roundFinished() bool {
+	return !m.testing || m.earlyStopped
+}
+
+// ExitStatus 供进程离开时决定退出码和 stderr 提示。
+func (m tuiModel) ExitStatus() (string, bool) {
+	return m.statusText, m.saveFailed || m.forceQuit
+}
+
+// Model 是交互模式结束后可读取的结果。
+type Model interface {
+	ExitStatus() (string, bool)
 }
 
 func (m tuiModel) imageSpec(finished bool) output.ImageSpec {

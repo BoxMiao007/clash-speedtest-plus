@@ -190,20 +190,33 @@ func main() {
 			tea.WithAltScreen(),
 			tea.WithMouseAllMotion(),
 		)
-		if _, err := p.Run(); err != nil {
+		finalModel, err := p.Run()
+		if err != nil {
 			log.Fatalf("TUI failed: %s", err)
+		}
+		finished, _ := finalModel.(tui.Model)
+		status, failed := finished.ExitStatus()
+		if status != "" {
+			fmt.Fprintf(os.Stderr, "%s\n", status)
 		}
 
 		if !collectResults {
+			if failed {
+				os.Exit(1)
+			}
 			return
 		}
 
 		err = <-saveResult
 		if err != nil {
-			log.Fatalf("save config file failed: %s", err)
+			fmt.Fprintf(os.Stderr, "保存配置失败: %s\n", err)
+			os.Exit(1)
 		}
 		// 离开 TUI 后向 stderr 打一行已保存路径，方便复制；路径不进 stdout。
 		fmt.Fprintf(os.Stderr, "已保存配置: %s\n", *outputPath)
+		if failed {
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -249,7 +262,8 @@ func exportNonInteractiveImage(results []*speedtester.Result, mode speedtester.S
 	}
 	path, warning, err := output.WriteResultImage(".", spec)
 	if err != nil {
-		log.Printf("保存结果图失败: %s", err)
+		fmt.Fprintf(os.Stderr, "保存结果图失败: %s\n", err)
+		os.Exit(1)
 		return
 	}
 	fmt.Fprintf(os.Stderr, "%s\n", output.JoinStatus("已保存 "+path, warning))

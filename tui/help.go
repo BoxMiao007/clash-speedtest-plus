@@ -71,6 +71,18 @@ func (h *helpState) setEarlyStopped(stopped bool) {
 	h.keyMap.TogglePause.SetEnabled(!stopped)
 }
 
+// setSaving 等待落盘时帮助条只留强制退出。
+func (h *helpState) setSaving(saving bool) {
+	h.keyMap.TogglePause.SetEnabled(!saving)
+	h.keyMap.SaveImage.SetEnabled(!saving)
+	h.keyMap.CloseDetail.SetEnabled(!saving)
+	if saving {
+		h.keyMap.Quit.SetHelp("q/ctrl+c", "强制退出")
+	} else {
+		h.keyMap.Quit.SetHelp("q/ctrl+c", "退出")
+	}
+}
+
 func (h helpState) view() string {
 	return h.model.View(h.keyMap)
 }
