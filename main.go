@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -35,6 +36,7 @@ var (
 	uploadSize        = flag.Int("upload-size", 20*1024*1024, "upload size for testing proxies (full mode only)")
 	timeout           = flag.Duration("timeout", time.Second*5, "timeout for testing proxies")
 	concurrent        = flag.Int("concurrent", 4, "download concurrent size")
+	parallel          = flag.Int("parallel", 1, "number of nodes to test at once")
 	outputPath        = flag.String("output", "", "output config file path")
 	gistToken         = flag.String("gist-token", "", "github gist token for updating output")
 	gistAddress       = flag.String("gist-address", "", "github gist address or id for updating output (filename uses output basename)")
@@ -86,6 +88,7 @@ func main() {
 		UploadSize:       *uploadSize,
 		Timeout:          *timeout,
 		Concurrent:       *concurrent,
+		Parallel:         *parallel,
 		MaxPacketLoss:    *maxPacketLoss,
 		MaxLatency:       *maxLatency,
 		MinDownloadSpeed: *minDownloadSpeed * 1024 * 1024,
@@ -120,23 +123,50 @@ func main() {
 		}
 	}
 
-	results := make([]*speedtester.Result, 0, len(allProxies))
+results := make([]*speedtester.Result, 0, len(allProxies))
 
-	if outputMode == output.OutputModeInteractive {
+if outputMode == output.OutputModeInteractive {
 		collectResults := *outputPath != ""
 		// Run TUI for Interactive mode
 		resultChannel := make(chan *speedtester.Result, len(allProxies))
 		resultsDone := make(chan struct{})
 		saveResult := make(chan error, 1)
 
+		// 进度事件通道：把节点开始/阶段变化/瞬时速度转发给 TUI 在测行。
+		progressChannel := make(chan speedtester.Progress, 256)
+		speedTester.SetProgressFunc(func(p speedtester.Progress) {
+			// TUI 退出后不再消费，非阻塞丢弃避免测试 goroutine 卡死。
+			select {
+			case progressChannel <- p:
+			default:
+			}
+		})
+
+		// 提前结束信号：过筛数达到限额后关闸，TUI 收到后隐藏空格、停止显示剩余。
+		earlyStopSignal := make(chan struct{})
+		var earlyStopOnce sync.Once
+		notifyEarlyStop := func() {
+			earlyStopOnce.Do(func() { close(earlyStopSignal) })
+		}
+
 		// Start testing in goroutine to send results to channel
 		go func() {
-			speedTester.TestProxiesUntil(allProxies, func(result *speedtester.Result) bool {
+			onStart := func(name, proxyType string) {
+				select {
+				case progressChannel <- speedtester.Progress{Name: name, Type: proxyType, Phase: speedtester.PhaseLatency}:
+				default:
+				}
+			}
+			speedTester.TestProxiesUntil(allProxies, onStart, func(result *speedtester.Result) bool {
 				if collectResults {
 					results = append(results, result)
 				}
 				resultChannel <- result
-				return stopper.ShouldContinue(result)
+				if !stopper.ShouldContinue(result) {
+					notifyEarlyStop()
+					return false
+				}
+				return true
 			})
 			close(resultChannel)
 			close(resultsDone)
@@ -153,7 +183,7 @@ func main() {
 
 		// Create and run TUI
 		p := tea.NewProgram(
-			tui.NewTUIModel(effectiveMode, len(allProxies), resultChannel),
+			tui.NewTUIModelWithEngine(effectiveMode, len(allProxies), resultChannel, speedTester, progressChannel, earlyStopSignal),
 			tea.WithAltScreen(),
 			tea.WithMouseAllMotion(),
 		)
@@ -174,7 +204,7 @@ func main() {
 	}
 
 	// TSV mode: collect results synchronously
-	speedTester.TestProxiesUntil(allProxies, func(result *speedtester.Result) bool {
+	speedTester.TestProxiesUntil(allProxies, nil, func(result *speedtester.Result) bool {
 		results = append(results, result)
 
 		if tsvWriter != nil {
