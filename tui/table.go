@@ -300,6 +300,10 @@ func (m *tuiModel) setSelection(index int) {
 }
 
 func (m *tuiModel) syncSelection() {
+	if m.detailVisible {
+		// 详情打开时保留用户滚动到的行，避免刷新把光标拉回详情行。
+		return
+	}
 	if m.selectedIndex < 0 {
 		return
 	}
