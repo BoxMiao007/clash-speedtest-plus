@@ -324,6 +324,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			if m.roundFinished() {
+				// 整轮结束通常已自动保存过产物，直接退出，避免退出时重复出图。
+				if m.autoImageDone && !m.savingImage && !m.saveFailed {
+					m.quitting = true
+					if m.uploadCancel != nil {
+						m.uploadCancel()
+					}
+					return m, tea.Quit
+				}
 				m.quittingAfterSave = true
 				m.help.setSaving(true)
 				m.setStatus("正在保存")
