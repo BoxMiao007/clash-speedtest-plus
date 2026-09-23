@@ -6,6 +6,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -214,6 +215,51 @@ func centeredIn(span pixelSpan, x, width int) bool {
 		delta = -delta
 	}
 	return delta <= 8
+}
+
+func TestTruncateName64(t *testing.T) {
+	exactly := strings.Repeat("名", 64)
+	if got := truncateName64(exactly); got != exactly {
+		t.Fatalf("64 字符名字不应截断: got %d runes", len([]rune(got)))
+	}
+	long := strings.Repeat("名", 65)
+	got := truncateName64(long)
+	if len([]rune(got)) != 65 {
+		t.Fatalf("65 字符应截断为 64 字符 + 省略号: got %d runes", len([]rune(got)))
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("截断后应带省略号: %q", got)
+	}
+}
+
+func TestNodeNameColumnWidthRespects64Chars(t *testing.T) {
+	face, err := LoadImageFont("")
+	if err != nil {
+		t.Fatalf("load font: %v", err)
+	}
+	defer face.close()
+
+	name40 := strings.Repeat("名", 40)
+	name65 := strings.Repeat("名", 65)
+	headers := GetHeaders(speedtester.SpeedModeFast)
+	rows := BuildImageRows([]*speedtester.Result{
+		{ProxyName: name40, ProxyType: "SS", Latency: 100 * time.Millisecond},
+		{ProxyName: name65, ProxyType: "SS", Latency: 100 * time.Millisecond},
+	}, speedtester.SpeedModeFast)
+
+	widths := measureColumns(face.face, headers, rows)
+	if len(widths) < 2 {
+		t.Fatalf("列宽数量不足: %v", widths)
+	}
+	// 与 RenderResultImage 一致，节点名列额外加 resultImageNameExtra。
+	nameWidth := widths[1] + resultImageNameExtra
+	if nameWidth < textWidth(face.face, name40) {
+		t.Fatalf("40 字符名字不应被截断: 列宽 %d < 名字宽 %d", nameWidth, textWidth(face.face, name40))
+	}
+	capped := textWidth(face.face, strings.Repeat("名", 64)+"…")
+	if nameWidth > capped+resultImageRowPadX+resultImageNameExtra {
+		t.Fatalf("列宽应按 64 字符封顶: 列宽 %d > 上限 %d", nameWidth, capped+resultImageRowPadX+resultImageNameExtra)
+	}
 }
 
 func TestJoinStatus(t *testing.T) {

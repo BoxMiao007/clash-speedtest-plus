@@ -24,7 +24,6 @@ import (
 var flagFiles embed.FS
 
 const (
-	resultImageMaxWidth  = 4000
 	resultImageFontSize  = 16
 	resultImageRowPadX   = 28
 	resultImageRowPadY   = 6
@@ -184,7 +183,7 @@ func firstExistingFont(candidates []string) string {
 }
 
 // RenderResultImage 把结果表画成浅色 PNG。
-// 节点名列按最长名字撑宽；总宽超过约 4000 像素时截断名字并加省略号。
+// 节点名列按最长名字撑宽；节点名超过 64 个字符才开始截断并加省略号。
 func RenderResultImage(spec ImageSpec, fontFace imageFont) ([]byte, string, error) {
 	if fontFace.face == nil {
 		return nil, "", fmt.Errorf("font face is nil")
@@ -197,19 +196,6 @@ func RenderResultImage(spec ImageSpec, fontFace imageFont) ([]byte, string, erro
 	colWidths := measureColumns(fontFace.face, headers, rows)
 	if len(colWidths) > 1 {
 		colWidths[1] += resultImageNameExtra
-	}
-	nameIndex := 1
-	total := sumWidths(colWidths) + resultImageRowPadX*2
-	if total > resultImageMaxWidth && nameIndex < len(colWidths) {
-		overflow := total - resultImageMaxWidth
-		minName := textWidth(fontFace.face, "…") + resultImageRowPadX
-		if colWidths[nameIndex]-overflow < minName {
-			overflow = colWidths[nameIndex] - minName
-		}
-		if overflow > 0 {
-			colWidths[nameIndex] -= overflow
-			rows = truncateNameColumn(fontFace.face, rows, colWidths[nameIndex]-resultImageRowPadX)
-		}
 	}
 
 	lineHeight := fontFace.face.Metrics().Height.Ceil()
@@ -272,16 +258,31 @@ func measureColumns(face font.Face, headers []string, rows []ImageRow) []int {
 	}
 	for _, row := range rows {
 		for i, cell := range row.Cells {
-			if i >= len(widths) || i == 1 {
+			if i >= len(widths) {
 				continue
 			}
-			w := textWidth(face, metricWidthText(cell)) + resultImageRowPadX
-			if w > widths[i] {
+			text := cell
+			if i == 1 {
+				// 节点名：超过 64 个字符才开始截断，短名完整参与列宽。
+				text = truncateName64(cell)
+			} else {
+				text = metricWidthText(cell)
+			}
+			if w := textWidth(face, text) + resultImageRowPadX; w > widths[i] {
 				widths[i] = w
 			}
 		}
 	}
 	return widths
+}
+
+// truncateName64 节点名超过 64 个字符才截断并加省略号；短名保持完整。
+func truncateName64(name string) string {
+	runes := []rune(name)
+	if len(runes) <= 64 {
+		return name
+	}
+	return string(runes[:64]) + "…"
 }
 
 // metricWidthText 让正常测试数据参与列宽。速度和延迟列里的错误信息不撑开格子。
@@ -304,20 +305,6 @@ func metricWidthText(text string) string {
 
 func isSpeedHeader(header string) bool {
 	return strings.Contains(header, "速度")
-}
-
-func truncateNameColumn(face font.Face, rows []ImageRow, maxWidth int) []ImageRow {
-	out := make([]ImageRow, len(rows))
-	for i, row := range rows {
-		out[i] = row
-		if len(row.Cells) < 2 {
-			continue
-		}
-		cells := append([]string(nil), row.Cells...)
-		cells[1] = truncateToWidth(face, cells[1], maxWidth)
-		out[i].Cells = cells
-	}
-	return out
 }
 
 func truncateToWidth(face font.Face, text string, maxWidth int) string {
