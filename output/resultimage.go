@@ -272,33 +272,34 @@ func measureColumns(face font.Face, headers []string, rows []ImageRow) []int {
 	}
 	for _, row := range rows {
 		for i, cell := range row.Cells {
-			if i >= len(widths) {
+			if i >= len(widths) || i == 1 {
 				continue
 			}
-			w := textWidth(face, cell) + resultImageRowPadX
+			w := textWidth(face, metricWidthText(cell)) + resultImageRowPadX
 			if w > widths[i] {
 				widths[i] = w
 			}
 		}
 	}
-	for i, header := range headers {
-		if !isSpeedHeader(header) {
-			continue
-		}
-		need := resultImageBarWidth + resultImageRowPadX
-		for _, row := range rows {
-			if i >= len(row.Cells) {
-				continue
-			}
-			if w := textWidth(face, row.Cells[i]) + resultImageRowPadX*2; w > need {
-				need = w
-			}
-		}
-		if widths[i] < need {
-			widths[i] = need
-		}
-	}
 	return widths
+}
+
+// metricWidthText 让正常测试数据参与列宽。速度和延迟列里的错误信息不撑开格子。
+func metricWidthText(text string) string {
+	switch text {
+	case "", "N/A", "测试中", "…":
+		return text
+	}
+	if strings.HasSuffix(text, "ms") || strings.HasSuffix(text, "%") ||
+		strings.HasSuffix(text, "B/s") || strings.HasSuffix(text, "KB/s") ||
+		strings.HasSuffix(text, "MB/s") || strings.HasSuffix(text, "GB/s") ||
+		strings.HasSuffix(text, "TB/s") {
+		return text
+	}
+	if len([]rune(text)) > 12 {
+		return ""
+	}
+	return text
 }
 
 func isSpeedHeader(header string) bool {
@@ -403,7 +404,7 @@ func drawHeaderRow(img *image.NRGBA, faces imageFont, y, height int, colWidths [
 		if i < len(headers) {
 			text = headers[i]
 		}
-		drawCellText(img, faces, x, y, width, height, text, color.NRGBA{0, 0, 0, 255}, i == 1)
+		drawCellText(img, faces, x, y, width, height, text, color.NRGBA{0, 0, 0, 255}, false)
 		x += width
 	}
 }
@@ -561,13 +562,13 @@ func drawGrid(img *image.NRGBA, titleRows, rowHeight int, colWidths []int) {
 
 func drawCellText(img *image.NRGBA, faces imageFont, x, y, width, height int, text string, fg color.NRGBA, left bool) {
 	if left {
-		drawNameCell(img, faces, x, y, height, text, fg)
+		drawNameCell(img, faces, x, y, width, height, text, fg)
 		return
 	}
 	drawCentered(img, faces, x, y, width, height, text, fg)
 }
 
-func drawNameCell(img *image.NRGBA, faces imageFont, x, y, height int, text string, fg color.NRGBA) {
+func drawNameCell(img *image.NRGBA, faces imageFont, x, y, width, height int, text string, fg color.NRGBA) {
 	left := x + 8
 	code, rest, strip := leadingFlag(text)
 	if flag := flagImage(code); flag != nil {
@@ -581,7 +582,8 @@ func drawNameCell(img *image.NRGBA, faces imageFont, x, y, height int, text stri
 			text = strings.TrimSpace(rest)
 		}
 	}
-	drawText(img, faces, left, y, height, text, fg)
+	available := x + width - 8 - left
+	drawText(img, faces, left, y, height, truncateToWidth(faces.face, text, available), fg)
 }
 
 // leadingFlag 优先识别名字开头的国旗符号；没有时再认 JP、HK 这类国家码。
@@ -628,6 +630,7 @@ func flagImage(code string) image.Image {
 }
 
 func drawCentered(img *image.NRGBA, faces imageFont, x, y, width, height int, text string, fg color.NRGBA) {
+	text = truncateToWidth(faces.face, text, width-8)
 	tw := textWidth(faces.face, text)
 	left := x + (width-tw)/2
 	if left < x+4 {
