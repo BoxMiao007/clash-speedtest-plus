@@ -40,55 +40,35 @@ rules:
 
 # 查看帮助
 > clash-speedtest -h
-Usage of clash-speedtest:
+用法：clash-speedtest [选项]
   -c string
-        configuration file path, also support http(s) url
-  -ua string
-        User-Agent for fetching config from http(s) URL (default: mihomo kernel UA, e.g. mihomo/1.10.0)
+        配置文件路径，也支持 http(s) 地址
   -f string
-        filter proxies by name, use regexp (default ".*")
+        按节点名过滤，使用正则 (default ".+")
   -b string
-        block proxies by keywords, use | to separate multiple keywords (example: -b 'rate|x1|1x')
-  -server-url string
-        server url or direct download url (default "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg")
+        按关键字屏蔽节点，多个关键字用 | 分隔
   -speed-mode string
-        speed test mode: fast, download, full (default "download")
-  -download-size int
-        download size for testing proxies (default 50MB)
-  -upload-size int
-        upload size for testing proxies (full mode only) (default 20MB)
-  -timeout duration
-        timeout for testing proxies (default 5s)
+        测速模式：fast、download、full (default "download")
+  -parallel int
+        同时测试的节点数 (default 1)
   -concurrent int
-        download concurrent size (default 4)
-  -output string
-        output config file path (default "")
-  -max-latency duration
-        filter latency greater than this value (default 800ms)
-  -max-packet-loss float
-        filter packet loss greater than this value(unit: %) (default 100)
-  -min-download-speed float
-        filter speed less than this value(unit: MB/s) (default 5)
-  -min-upload-speed float
-        filter upload speed less than this value(unit: MB/s, full mode only) (default 2)
+        同一节点的下载并发连接数 (default 4)
+  -download-size int
+        下载测试大小 (default 52428800)
+  -upload-size int
+        上传测试大小，仅完整模式 (default 20971520)
+  -timeout duration
+        超时时间 (default 5s)
   -early-stop int
-        stop testing after this many results pass filters (0 disables)
-  -rename
-        rename nodes with IP location and speed
+        过筛结果达到该数量后提前结束（0 为关闭）
+  -output string
+        输出配置文件路径
+  -no-image
+        关闭自动导出结果图；交互界面按 s 仍可手动保存
   -fast
-        fast mode (alias for --speed-mode fast)
-  -gist-token string
-        GitHub personal access token for gist upload
-  -gist-address string
-        gist URL or ID for uploading output file (filename uses output basename)
-  -repo-token string
-        GitHub personal access token for repository file upload
-  -repo-address string
-        repository URL or owner/repo for uploading output file
-  -repo-file-path string
-        repository file path for uploading output file (default: output basename)
-  -repo-branch string
-        repository branch for uploading output file (default: repository default branch)
+        快速模式（等同 --speed-mode fast）
+
+完整参数以 `clash-speedtest -h` 为准。交互界面里空格暂停或继续，q 或 Ctrl+C 退出。整轮结束后会在当前目录写出结果图。
 
 # 演示：
 
