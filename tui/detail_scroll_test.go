@@ -255,6 +255,188 @@ func latencyOnLine(line string) int {
 	return 0
 }
 
+// 详情已经打开时再点另一行，选中和详情都要换成画面上那一行。
+func TestClickWhileDetailOpenSelectsVisibleRow(t *testing.T) {
+	model := testingModel(t, 40)
+	model.windowHeight = 16
+	model.updateTableLayout()
+	opened := clickRow(model, 0)
+	cur := opened
+	for i := 0; i < 12; i++ {
+		next, _ := cur.Update(tea.KeyMsg{Type: tea.KeyDown})
+		cur = next.(tuiModel)
+	}
+	if !cur.detailVisible {
+		t.Fatal("方向键不应关掉详情")
+	}
+	shown := latencyOnLine(firstDataLine(cur))
+	clicked := clickRow(cur, 0)
+	if clicked.detailResult == nil || clicked.detailResult.Latency.Milliseconds() != int64(shown) {
+		got := time.Duration(0)
+		if clicked.detailResult != nil {
+			got = clicked.detailResult.Latency
+		}
+		t.Fatalf("详情开着时点第一行：画面 %dms，详情 %s", shown, got)
+	}
+}
+
+// 内部偏移已经不是 0 时，最后一行、在测行、表头和空白都不能点错。
+func TestClickEdgesAfterScroll(t *testing.T) {
+	model := testingModel(t, 40)
+	model.windowHeight = 16
+	model.updateTableLayout()
+	cur := model
+	for i := 0; i < 20; i++ {
+		next, _ := cur.Update(tea.KeyMsg{Type: tea.KeyDown})
+		cur = next.(tuiModel)
+	}
+	if tableYOffset(cur.table) == 0 {
+		t.Fatal("这组按键应让表格内部出现纵向偏移，否则测不到点上一行")
+	}
+
+	lastVisual := cur.table.Height() - 1
+	lastLine := dataLine(cur, lastVisual)
+	lastShown := latencyOnLine(lastLine)
+	clickedLast := clickRow(cur, lastVisual)
+	if lastShown > 0 {
+		if clickedLast.detailResult == nil || clickedLast.detailResult.Latency.Milliseconds() != int64(lastShown) {
+			t.Fatalf("最后一行画面 %dms，点开 %v", lastShown, clickedLast.detailResult)
+		}
+	} else if !strings.Contains(lastLine, "inflight") || clickedLast.detailInFlight == nil || clickedLast.detailInFlight.name != "inflight" {
+		t.Fatalf("最后一行应打开在测详情: %q inFlight=%v", lastLine, clickedLast.detailInFlight)
+	}
+
+	// 表头仍然只排序，不打开详情。
+	header, _ := cur.Update(tea.MouseMsg{
+		X: 1, Y: cur.tableHeaderY(),
+		Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft,
+	})
+	if header.(tuiModel).detailVisible {
+		t.Fatal("点表头不应打开详情")
+	}
+
+	// 数据区下面的空白不选中、不打开详情。
+	blankY := cur.tableHeaderY() + tableHeaderLines + cur.table.Height()
+	blank, _ := cur.Update(tea.MouseMsg{
+		X: 1, Y: blankY,
+		Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft,
+	})
+	blanked := blank.(tuiModel)
+	if blanked.detailVisible || blanked.table.Cursor() != cur.table.Cursor() {
+		t.Fatalf("点空白不应改选中或打开详情: cursor %d->%d detail=%v", cur.table.Cursor(), blanked.table.Cursor(), blanked.detailVisible)
+	}
+}
+
+// 拖到后面再点画面上的行，应选中那一行，而不是拖之前的选中行。
+func TestClickAfterScrollbarDragSelectsVisibleRow(t *testing.T) {
+	model := testingModel(t, 40)
+	model.windowHeight = 16
+	model.updateTableLayout()
+	startY := model.tableHeaderY() + dataRowOffset(model.table.View())
+	bottom := startY + model.table.Height() - 1
+	clicked, _ := model.Update(tea.MouseMsg{
+		X: model.windowWidth - 1, Y: bottom,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+	})
+	scrolled := clicked.(tuiModel)
+	if scrolled.table.Cursor() != 0 || scrolled.followSelection {
+		t.Fatalf("拖滚动条后选中应停在原处: cursor=%d follow=%v", scrolled.table.Cursor(), scrolled.followSelection)
+	}
+	shown := latencyOnLine(firstDataLine(scrolled))
+	if shown == 100 {
+		t.Fatalf("视口没有滚开: %s", firstDataLine(scrolled))
+	}
+	picked := clickRow(scrolled, 0)
+	if picked.detailResult == nil || picked.detailResult.Latency.Milliseconds() != int64(shown) {
+		t.Fatalf("滚动后点击：画面 %dms，详情 %v", shown, picked.detailResult)
+	}
+	if !picked.followSelection {
+		t.Fatal("点某一行后应恢复选中跟随")
+	}
+}
+
+// 按键把选中行移走之后，再拖滚动条，选中行保持不动，画面跟着滑块走。
+func TestDragScrollbarKeepsMovedSelection(t *testing.T) {
+	model := testingModel(t, 40)
+	model.windowHeight = 16
+	model.updateTableLayout()
+	cur := model
+	for i := 0; i < 3; i++ {
+		next, _ := cur.Update(tea.KeyMsg{Type: tea.KeyDown})
+		cur = next.(tuiModel)
+	}
+	if cur.table.Cursor() != 3 {
+		t.Fatalf("方向键应停在第 4 行: %d", cur.table.Cursor())
+	}
+	startY := cur.tableHeaderY() + dataRowOffset(cur.table.View())
+	bottom := startY + cur.table.Height() - 1
+	dragged, _ := cur.Update(tea.MouseMsg{
+		X: cur.windowWidth - 1, Y: bottom,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+	})
+	after := dragged.(tuiModel)
+	if after.table.Cursor() != 3 {
+		t.Fatalf("拖滚动条把选中行从 3 改成了 %d", after.table.Cursor())
+	}
+	if after.detailVisible {
+		t.Fatal("拖滚动条不应打开详情")
+	}
+	if latencyOnLine(firstDataLine(after)) == 100 {
+		t.Fatal("拖到底后画面仍停在第一行")
+	}
+	// 松手后按方向键，选中继续从刚才那一行走，而不是从视口顶走。
+	released, _ := after.Update(tea.MouseMsg{
+		X: cur.windowWidth - 1, Y: bottom,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease,
+	})
+	down, _ := released.(tuiModel).Update(tea.KeyMsg{Type: tea.KeyDown})
+	if down.(tuiModel).table.Cursor() != 4 {
+		t.Fatalf("松手后方向键应从原选中行继续: %d", down.(tuiModel).table.Cursor())
+	}
+}
+
+// 进度刷新把在测行变灰时，不能把已经滚到下面的完成行也涂灰。
+func TestGrayOnlyInFlightWhenScrolled(t *testing.T) {
+	model := testingModel(t, 40)
+	model.windowHeight = 16
+	model.updateTableLayout()
+	startY := model.tableHeaderY() + dataRowOffset(model.table.View())
+	bottom := startY + model.table.Height() - 1
+	clicked, _ := model.Update(tea.MouseMsg{
+		X: model.windowWidth - 1, Y: bottom,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+	})
+	scrolled := clicked.(tuiModel)
+	view := scrolled.View()
+	lines := strings.Split(view, "\n")
+	dataStart := scrolled.tableHeaderY() + dataRowOffset(scrolled.table.View())
+	for i := 0; i < scrolled.table.Height() && dataStart+i < len(lines); i++ {
+		line := lines[dataStart+i]
+		plain := stripANSI(line)
+		if strings.TrimSpace(plain) == "" {
+			continue
+		}
+		if strings.Contains(plain, "inflight") {
+			if !strings.Contains(line, "\x1b[2m") {
+				t.Fatal("在测行应是灰色")
+			}
+			continue
+		}
+		if strings.Contains(line, "\x1b[2m") {
+			t.Fatalf("完成行被涂灰了: %s", plain)
+		}
+	}
+}
+
+func dataLine(model tuiModel, visualRow int) string {
+	lines := strings.Split(model.View(), "\n")
+	start := model.tableHeaderY() + dataRowOffset(model.table.View()) + visualRow
+	if start < 0 || start >= len(lines) {
+		return ""
+	}
+	return stripANSI(lines[start])
+}
+
 // 选中第 9 行后刷新，不能跳回第 1 行。
 func TestRefreshKeepsLaterSelection(t *testing.T) {
 	model := testingModel(t, 10)

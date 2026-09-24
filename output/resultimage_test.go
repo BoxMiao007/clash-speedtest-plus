@@ -11,7 +11,37 @@ import (
 	"time"
 
 	"github.com/faceair/clash-speedtest/speedtester"
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/goregular"
+	"golang.org/x/image/font/opentype"
 )
+
+func TestResultImageFontSizeIsOneStepSmaller(t *testing.T) {
+	if resultImageFontSize != 15 {
+		t.Fatalf("结果图字号应为 15，实际 %v", resultImageFontSize)
+	}
+	smaller, err := openEmbeddedFace()
+	if err != nil {
+		t.Fatalf("load font: %v", err)
+	}
+	defer smaller.Close()
+	parsed, err := opentype.Parse(goregular.TTF)
+	if err != nil {
+		t.Fatalf("parse font: %v", err)
+	}
+	previous, err := opentype.NewFace(parsed, &opentype.FaceOptions{
+		Size:    16,
+		DPI:     96,
+		Hinting: font.HintingFull,
+	})
+	if err != nil {
+		t.Fatalf("16 号字: %v", err)
+	}
+	defer previous.Close()
+	if smaller.Metrics().Height >= previous.Metrics().Height {
+		t.Fatalf("15 号字行高应小于 16 号: %v >= %v", smaller.Metrics().Height, previous.Metrics().Height)
+	}
+}
 
 func TestRenderResultImagePNG(t *testing.T) {
 	face, err := LoadImageFont("")
