@@ -8,7 +8,7 @@ Features:
 1. 无需额外的配置，直接将 Clash/Mihomo 配置本地文件路径或者订阅地址作为参数传入即可
 2. 支持 Proxies 和 Proxy Provider 中定义的全部类型代理节点，兼容性跟 Mihomo 一致
 3. 不依赖额外的 Clash/Mihomo 进程实例，单一工具即可完成测试
-4. 代码简单而且开源，不发布构建好的二进制文件，保证你的节点安全
+4. 代码开源。各平台二进制在本仓库 [Releases](https://github.com/BoxMiao007/clash-speedtest-plus/releases) 下载，也可自行从源码构建
 
 <img width="1346" height="682" alt="Image" src="https://github.com/user-attachments/assets/9fea1d47-251f-4c49-b059-05b5962d4e72" />
 
@@ -34,8 +34,8 @@ rules:
 ## 使用方法
 
 ```bash
-# 支持从源码安装，或从 Release 里下载由 Github Action 自动构建的二进制文件
-> go install github.com/faceair/clash-speedtest@latest
+# 从本仓库 Release 下载对应系统的二进制，或从源码安装
+> go install github.com/BoxMiao007/clash-speedtest-plus@latest
 
 # 查看版本
 > clash-speedtest -v
