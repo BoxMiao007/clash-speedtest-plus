@@ -353,12 +353,17 @@ func (m *tuiModel) highlightInFlight(name string) {
 	}
 }
 
-// scrollbarMarks 按当前光标给出每行数据该画的滚动条字符。放得下时为空。
-func (m tuiModel) scrollbarMarks() []string {
+func (m tuiModel) scrollbarVisible() bool {
+	height := m.table.Height()
+	return height > 0 && m.tableRowCount() > height
+}
+
+// scrollbarRange 返回滑块在数据行里的起止下标。
+func (m tuiModel) scrollbarRange() (top, thumb int, ok bool) {
 	total := m.tableRowCount()
 	height := m.table.Height()
 	if total <= height || height <= 0 {
-		return nil
+		return 0, 0, false
 	}
 	cursor := m.table.Cursor()
 	if cursor < 0 {
@@ -367,14 +372,68 @@ func (m tuiModel) scrollbarMarks() []string {
 	if cursor >= total {
 		cursor = total - 1
 	}
-	thumb := max(1, height*height/total)
+	thumb = max(1, height*height/total)
 	if thumb >= height {
 		thumb = height - 1
 	}
-	top := cursor * (height - thumb) / max(total-1, 1)
+	top = cursor * (height - thumb) / max(total-1, 1)
 	if top+thumb > height {
 		top = height - thumb
 	}
+	return top, thumb, true
+}
+
+// cursorForScrollbar 把滚动条上的一行映射成表格选中行。
+func (m tuiModel) cursorForScrollbar(markIndex int) int {
+	total := m.tableRowCount()
+	height := m.table.Height()
+	if height <= 1 || total <= 1 {
+		return 0
+	}
+	if markIndex < 0 {
+		markIndex = 0
+	}
+	if markIndex >= height {
+		markIndex = height - 1
+	}
+	return markIndex * (total - 1) / (height - 1)
+}
+
+func (m *tuiModel) jumpScrollbar(markIndex int) {
+	target := m.cursorForScrollbar(markIndex)
+	if target >= len(m.results) {
+		m.table.SetCursor(target)
+		if target-len(m.results) < len(m.inFlightOrder) {
+			m.highlightInFlight(m.inFlightOrder[target-len(m.results)])
+		}
+		return
+	}
+	m.setSelection(target)
+	if m.detailVisible {
+		m.syncSelectionFromCursor()
+	}
+}
+
+// scrollbarMarkAt 判断鼠标是否落在滚动条上，并返回对应的数据行下标。
+func (m tuiModel) scrollbarMarkAt(x, y int) (int, bool) {
+	if !m.scrollbarVisible() || m.windowWidth <= 0 || x < m.windowWidth-1 {
+		return 0, false
+	}
+	startY := m.tableHeaderY() + dataRowOffset(m.table.View())
+	index := y - startY
+	if index < 0 || index >= m.table.Height() {
+		return 0, false
+	}
+	return index, true
+}
+
+// scrollbarMarks 按当前光标给出每行数据该画的滚动条字符。放得下时为空。
+func (m tuiModel) scrollbarMarks() []string {
+	top, thumb, ok := m.scrollbarRange()
+	if !ok {
+		return nil
+	}
+	height := m.table.Height()
 	marks := make([]string, height)
 	for i := range marks {
 		marks[i] = "░"
@@ -385,28 +444,37 @@ func (m tuiModel) scrollbarMarks() []string {
 	return marks
 }
 
-// withScrollbar 把滚动条画进表格每一行的末尾，避免被窗口宽度裁掉。
-func withScrollbar(view string, marks []string) string {
-	if len(marks) == 0 {
+// tableWithScrollbar 把滚动条补到窗口最右一列。行数放得下时不占位置。
+func (m tuiModel) tableWithScrollbar(view string) string {
+	marks := m.scrollbarMarks()
+	if len(marks) == 0 || m.windowWidth <= 0 {
 		return view
 	}
 	lines := strings.Split(view, "\n")
 	body := 0
 	for i, line := range lines {
-		if strings.TrimSpace(stripANSI(line)) == "" || strings.Contains(line, "─") {
+		plain := stripANSI(line)
+		width := lipgloss.Width(plain)
+		pad := m.windowWidth - 1 - width
+		if pad < 1 {
+			pad = 1
+		}
+		if strings.TrimSpace(plain) == "" || strings.Contains(line, "─") {
+			lines[i] = line + strings.Repeat(" ", pad) + " "
 			continue
 		}
 		if body == 0 {
-			lines[i] = strings.TrimRight(line, " ") + " "
+			lines[i] = line + strings.Repeat(" ", pad) + " "
 			body++
 			continue
 		}
 		index := body - 1
 		body++
-		if index >= len(marks) {
-			continue
+		mark := " "
+		if index < len(marks) {
+			mark = marks[index]
 		}
-		lines[i] = strings.TrimRight(line, " ") + marks[index]
+		lines[i] = line + strings.Repeat(" ", pad) + mark
 	}
 	return strings.Join(lines, "\n")
 }

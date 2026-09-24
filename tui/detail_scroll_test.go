@@ -88,6 +88,64 @@ func TestScrollbarAppearsWhenRowsOverflow(t *testing.T) {
 	if !strings.Contains(view, "█") {
 		t.Fatalf("行数超出窗口时应显示滚动条:\n%s", view)
 	}
+	lines := strings.Split(view, "\n")
+	start := model.tableHeaderY() + dataRowOffset(model.table.View())
+	found := false
+	for i := start; i < start+model.table.Height() && i < len(lines); i++ {
+		plain := stripANSI(lines[i])
+		last := []rune(strings.TrimRight(plain, " "))
+		if len(last) == 0 {
+			continue
+		}
+		mark := last[len(last)-1]
+		if mark != '█' && mark != '░' {
+			t.Fatalf("滚动条不在窗口最右: %q", plain)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("数据行上看不到滚动条")
+	}
+	if model.table.Width() >= model.windowWidth {
+		t.Fatalf("滚动条应让出最右一列: table=%d window=%d", model.table.Width(), model.windowWidth)
+	}
+}
+
+func TestScrollbarClickAndDrag(t *testing.T) {
+	model := testingModel(t, 40)
+	model.windowHeight = 16
+	model.updateTableLayout()
+	startY := model.tableHeaderY() + dataRowOffset(model.table.View())
+	bottom := startY + model.table.Height() - 1
+
+	clicked, _ := model.Update(tea.MouseMsg{
+		X: model.windowWidth - 1, Y: bottom,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+	})
+	jumped := clicked.(tuiModel)
+	if jumped.table.Cursor() < 20 {
+		t.Fatalf("点击轨道底部应跳到后面的行: %d", jumped.table.Cursor())
+	}
+
+	top, _, ok := jumped.scrollbarRange()
+	if !ok {
+		t.Fatal("行数超出时应有滑块")
+	}
+	pressed, _ := jumped.Update(tea.MouseMsg{
+		X: model.windowWidth - 1, Y: startY + top,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+	})
+	dragging := pressed.(tuiModel)
+	if !dragging.scrollbarDrag {
+		t.Fatal("按住滑块应进入拖动")
+	}
+	moved, _ := dragging.Update(tea.MouseMsg{
+		X: model.windowWidth - 1, Y: startY,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion,
+	})
+	if moved.(tuiModel).table.Cursor() != 0 {
+		t.Fatalf("拖到顶部应选中第一行: %d", moved.(tuiModel).table.Cursor())
+	}
 }
 
 // 选中第 9 行后刷新，不能跳回第 1 行。

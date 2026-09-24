@@ -124,6 +124,8 @@ type tuiModel struct {
 	configSaved       bool
 	uploadFunc        func() string
 	uploadCancel      func()
+	// scrollbarDrag 为真表示正在拖动滚动条滑块。
+	scrollbarDrag bool
 }
 
 const (
@@ -399,6 +401,30 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.table.MoveDown(1)
 			m.syncSelectionFromCursor()
 			return m, nil
+		}
+		if mark, onBar := m.scrollbarMarkAt(msg.X, msg.Y); onBar {
+			top, thumb, ok := m.scrollbarRange()
+			onThumb := ok && mark >= top && mark < top+thumb
+			switch msg.Action {
+			case tea.MouseActionPress:
+				if onThumb {
+					m.scrollbarDrag = true
+					return m, nil
+				}
+				m.jumpScrollbar(mark)
+				return m, nil
+			case tea.MouseActionMotion:
+				if m.scrollbarDrag {
+					m.jumpScrollbar(mark)
+				}
+				return m, nil
+			case tea.MouseActionRelease:
+				m.scrollbarDrag = false
+				return m, nil
+			}
+		}
+		if msg.Action == tea.MouseActionRelease {
+			m.scrollbarDrag = false
 		}
 		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionRelease {
 			if m.isHeaderClick(msg.Y) {
@@ -812,7 +838,7 @@ func (m tuiModel) View() string {
 	sections := []string{
 		m.progressLine(),
 		"",
-		withScrollbar(tableView, m.scrollbarMarks()),
+		m.tableWithScrollbar(tableView),
 	}
 	if detailView != "" {
 		sections = append(sections, "", detailView)

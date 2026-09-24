@@ -14,9 +14,13 @@ func (m *tuiModel) updateTableLayout() {
 	}
 	start := time.Now()
 	defer m.perf.record(perfEventLayout, len(m.results), start)
-	columns := buildColumns(addSortIndicators(m.baseHeaders, m.sortColumn, m.sortAscending), m.windowWidth, m.mode)
+	tableWidth := m.windowWidth
+	if m.scrollbarVisible() {
+		tableWidth = max(tableWidth-2, 1)
+	}
+	columns := buildColumns(addSortIndicators(m.baseHeaders, m.sortColumn, m.sortAscending), tableWidth, m.mode)
 	m.table.SetColumns(columns)
-	m.table.SetWidth(m.windowWidth)
+	m.table.SetWidth(tableWidth)
 	m.help.setWidth(m.windowWidth)
 	reserved := 2
 	if m.detailVisible && m.detailResult != nil {
