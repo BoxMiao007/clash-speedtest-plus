@@ -1,3 +1,8 @@
 .vscode
 *.exe
 clash-speedtest
+
+# 真实订阅/节点配置含服务器地址与凭据，禁止入库
+test/test.yaml
+**/clash-speedtest.yaml
+*.local.yaml
