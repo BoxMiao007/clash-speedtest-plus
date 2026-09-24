@@ -51,7 +51,7 @@ rules:
         按关键字屏蔽节点，多个关键字用 | 分隔
   -speed-mode string
         测速模式：fast、download、full (default "download")
-  -parallel int
+  -p, -parallel int
         同时测试的节点数 (default 1)
   -concurrent int
         同一节点的下载并发连接数 (default 4)

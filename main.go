@@ -39,7 +39,7 @@ var (
 	uploadSize        = flag.Int("upload-size", 20*1024*1024, "上传测试大小（仅完整模式）")
 	timeout           = flag.Duration("timeout", time.Second*5, "单个请求超时")
 	concurrent        = flag.Int("concurrent", 4, "同一节点的下载并发连接数")
-	parallel          = flag.Int("parallel", 1, "同时测试的节点数")
+	parallel          = intFlag("p", "parallel", 1, "同时测试的节点数")
 	noImage           = flag.Bool("no-image", false, "关闭自动导出结果表图，仍可按 s 手动保存")
 	outputPath        = flag.String("output", "", "输出配置文件路径")
 	gistToken         = flag.String("gist-token", "", "用于更新 Gist 的 GitHub token")
@@ -397,6 +397,13 @@ func uploadNeeded() bool {
 }
 
 // waitForUpload 非交互等待上传。Ctrl+C 立刻中断，并在 stderr 写正在上传。
+// intFlag 把短名和长名绑到同一个整数。标准库一个 flag 只能有一个名字。
+func intFlag(shortName, longName string, value int, usage string) *int {
+	p := flag.Int(shortName, value, usage)
+	flag.IntVar(p, longName, value, usage)
+	return p
+}
+
 func waitForUpload() {
 	if !uploadNeeded() || *outputPath == "" {
 		return
