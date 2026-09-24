@@ -107,6 +107,44 @@ func TestImageFileNameConflict(t *testing.T) {
 	}
 }
 
+func TestTypeColumnFitsFullProxyType(t *testing.T) {
+	face, err := LoadImageFont("")
+	if err != nil {
+		t.Fatalf("load font: %v", err)
+	}
+	defer face.close()
+
+	proxyType := "Shadowsocks"
+	headers := GetHeaders(speedtester.SpeedModeDownload)
+	rows := BuildImageRows([]*speedtester.Result{{
+		ProxyName: "节点",
+		ProxyType: proxyType,
+		Latency:   120 * time.Millisecond,
+	}}, speedtester.SpeedModeDownload)
+	widths := measureColumns(face.face, headers, rows)
+	if len(widths) < 3 {
+		t.Fatalf("列数不足: %v", widths)
+	}
+	if widths[2] < textWidth(face.face, proxyType)+8 {
+		t.Fatalf("类型列被截短了: 列宽 %d，类型 %q 宽 %d", widths[2], proxyType, textWidth(face.face, proxyType))
+	}
+	for _, header := range []string{"延迟", "抖动", "丢包率"} {
+		found := false
+		for i, name := range headers {
+			if name != header {
+				continue
+			}
+			found = true
+			if widths[i] < textWidth(face.face, header) {
+				t.Fatalf("%s 列比表头还窄: %d < %d", header, widths[i], textWidth(face.face, header))
+			}
+		}
+		if !found {
+			t.Fatalf("缺少表头 %s", header)
+		}
+	}
+}
+
 func TestErrorTextDoesNotWidenResultImage(t *testing.T) {
 	face, err := LoadImageFont("")
 	if err != nil {

@@ -450,14 +450,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if rowIndex, ok := m.rowAtY(msg.Y); ok {
-				m.followSelection = true
+				// 先记住当前画面起点。打开详情会改表格高度，不能顺势把列表滚走。
+				pinned := m.viewportStart()
 				if rowIndex < 0 {
 					// 负偏移索引在测行：打开测试中占位详情，再点同一行则关掉。
-					m.toggleInFlightDetail(m.inFlightOrder[-rowIndex-1])
+					name := m.inFlightOrder[-rowIndex-1]
+					m.toggleInFlightDetail(name)
+					m.table.SetCursor(len(m.results) + (-rowIndex - 1))
+					m.highlightInFlight(name)
 				} else {
 					m.toggleDetail(m.results[rowIndex])
 					m.setSelection(rowIndex)
 				}
+				m.followSelection = false
+				m.scrollOffset = pinned
 				return m, nil
 			}
 		}

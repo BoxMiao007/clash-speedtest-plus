@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -235,23 +236,74 @@ func (m tuiModel) columnAtX(x int) int {
 }
 
 func (m tuiModel) rowAtY(y int) (int, bool) {
-	startY := m.tableHeaderY() + dataRowOffset(m.table.View())
-	if y < startY {
+	// 鼠标 Y 是终端折行之后的行号。进度行比窗口宽时会多占一行，
+	// 不能拿逻辑行号直接当画面行号，否则会点到旁边那一条。
+	line, ok := m.lineAtVisualY(y)
+	if !ok {
 		return 0, false
 	}
-	rowIndex := y - startY
-	if rowIndex < 0 || rowIndex >= m.table.Height() {
+	return rowIndexFromLine(stripANSI(line), m.results, m.inFlightOrder)
+}
+
+func (m tuiModel) lineAtVisualY(y int) (string, bool) {
+	if y < 0 {
+		return "", false
+	}
+	cursor := 0
+	for _, line := range strings.Split(m.View(), "\n") {
+		rows := visualRows(line, m.windowWidth)
+		if y < cursor+rows {
+			return line, true
+		}
+		cursor += rows
+	}
+	return "", false
+}
+
+func visualRows(line string, width int) int {
+	if width <= 0 {
+		return 1
+	}
+	w := lipgloss.Width(line)
+	if w <= width {
+		return 1
+	}
+	return (w + width - 1) / width
+}
+
+func rowIndexFromLine(line string, results []*speedtester.Result, inFlight []string) (int, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.Contains(line, "─") || strings.Contains(line, "序号") {
 		return 0, false
 	}
-	absoluteIndex := m.viewportStart() + rowIndex
-	if absoluteIndex < 0 || absoluteIndex >= m.tableRowCount() {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
 		return 0, false
 	}
-	// 完成行在上。超出完成区的是在测行，用负偏移标记。
-	if absoluteIndex >= len(m.results) {
-		return len(m.results) - absoluteIndex - 1, true
+	token := fields[0]
+	if token == "…" {
+		best := -1
+		bestLen := 0
+		for i, name := range inFlight {
+			if name != "" && strings.Contains(line, name) && len(name) > bestLen {
+				best = i
+				bestLen = len(name)
+			}
+		}
+		if best < 0 {
+			return 0, false
+		}
+		return -(best + 1), true
 	}
-	return absoluteIndex, true
+	number := strings.TrimSuffix(token, ".")
+	if number == token || number == "" {
+		return 0, false
+	}
+	index, err := strconv.Atoi(number)
+	if err != nil || index < 1 || index > len(results) {
+		return 0, false
+	}
+	return index - 1, true
 }
 
 // tableRowCount 返回表格总行数：在测行 + 完成行。
@@ -545,12 +597,24 @@ func truncateCol(text string, width int) string {
 	return b.String()
 }
 
+// firstDataVisualY 是第一条数据行在终端里的行号，进度行折行也算进去。
+func (m tuiModel) firstDataVisualY() int {
+	y := 0
+	for _, line := range strings.Split(m.View(), "\n") {
+		if _, ok := rowIndexFromLine(stripANSI(line), m.results, m.inFlightOrder); ok {
+			return y
+		}
+		y += visualRows(line, m.windowWidth)
+	}
+	return m.tableHeaderY() + dataRowOffset(m.table.View())
+}
+
 // scrollbarMarkAt 判断鼠标是否落在滚动条上，并返回对应的数据行下标。
 func (m tuiModel) scrollbarMarkAt(x, y int) (int, bool) {
 	if !m.scrollbarVisible() || m.windowWidth <= 0 || x < m.windowWidth-1 {
 		return 0, false
 	}
-	startY := m.tableHeaderY() + dataRowOffset(m.table.View())
+	startY := m.firstDataVisualY()
 	index := y - startY
 	if index < 0 || index >= m.table.Height() {
 		return 0, false

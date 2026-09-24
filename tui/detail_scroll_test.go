@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/faceair/clash-speedtest/speedtester"
 )
 
@@ -350,8 +351,11 @@ func TestClickAfterScrollbarDragSelectsVisibleRow(t *testing.T) {
 	if picked.detailResult == nil || picked.detailResult.Latency.Milliseconds() != int64(shown) {
 		t.Fatalf("滚动后点击：画面 %dms，详情 %v", shown, picked.detailResult)
 	}
-	if !picked.followSelection {
-		t.Fatal("点某一行后应恢复选中跟随")
+	if picked.followSelection {
+		t.Fatal("点某一行不应把列表滚回选中行原先的位置")
+	}
+	if latencyOnLine(firstDataLine(picked)) != shown {
+		t.Fatalf("点击后列表被滚走了: 原来 %dms，现在 %s", shown, firstDataLine(picked))
 	}
 }
 
@@ -435,6 +439,53 @@ func dataLine(model tuiModel, visualRow int) string {
 		return ""
 	}
 	return stripANSI(lines[start])
+}
+
+// 进度行比窗口宽、被终端折成两行时，点击仍必须命中画面上那一条。
+func TestClickUsesPrintedRowWhenProgressWraps(t *testing.T) {
+	model := testingModel(t, 8)
+	model.windowWidth = 40
+	model.windowHeight = 24
+	model.updateTableLayout()
+	if lipgloss.Width(model.progressLine()) <= model.windowWidth {
+		t.Fatal("这个宽度下进度行不会折行，测不到点错行")
+	}
+	target := visualYOf(model.View(), model.windowWidth, "103ms")
+	if target < 0 {
+		t.Fatal("画面上找不到 103ms 那一行")
+	}
+	logical := -1
+	for i, line := range strings.Split(model.View(), "\n") {
+		if strings.Contains(stripANSI(line), "103ms") {
+			logical = i
+			break
+		}
+	}
+	if target == logical {
+		t.Fatal("进度行没有把后面的行号顶下去")
+	}
+	updated, _ := model.Update(tea.MouseMsg{
+		X: 1, Y: target,
+		Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft,
+	})
+	got := updated.(tuiModel)
+	if got.detailResult == nil || got.detailResult.Latency != 103*time.Millisecond {
+		t.Fatalf("点在 103ms 上，实际打开 %v", got.detailResult)
+	}
+	if !strings.Contains(firstDataLine(got), "100ms") {
+		t.Fatalf("点击把列表滚走了:\n%s", firstDataLine(got))
+	}
+}
+
+func visualYOf(view string, width int, target string) int {
+	y := 0
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(stripANSI(line), target) {
+			return y
+		}
+		y += visualRows(line, width)
+	}
+	return -1
 }
 
 // 选中第 9 行后刷新，不能跳回第 1 行。

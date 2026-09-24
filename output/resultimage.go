@@ -265,8 +265,9 @@ func measureColumns(face font.Face, headers []string, rows []ImageRow) []int {
 			if i == 1 {
 				// 节点名：超过 64 个字符才开始截断，短名完整参与列宽。
 				text = truncateName64(cell)
-			} else if !metricCell(cell) {
-				// 错误信息和其他非测速文本不撑列宽，绘制时再截断。
+			} else if isTransferColumn(i) && !metricCell(cell) {
+				// 下载/上传列里的错误文本不撑列宽，绘制时再截断。
+				// 类型、延迟、抖动、丢包率必须按原文撑开，否则类型名会被截断。
 				continue
 			}
 			if w := textWidth(face, text) + resultImageRowPadX; w > widths[i] {
@@ -286,7 +287,12 @@ func truncateName64(name string) string {
 	return string(runes[:64]) + "…"
 }
 
-// metricCell 判断格子是不是测速数据。错误信息不是，不能撑开列宽。
+// isTransferColumn 只指下载速度、上传速度。类型列不在这里。
+func isTransferColumn(index int) bool {
+	return index >= 6
+}
+
+// metricCell 判断格子是不是测速数据。错误信息不是，不能撑开速度列。
 func metricCell(text string) bool {
 	switch text {
 	case "", "N/A", "测试中", "…":
