@@ -21,16 +21,16 @@ func (m *tuiModel) updateTableRows() {
 	for i, result := range m.results {
 		rows = append(rows, fitRowWidth(output.FormatRow(result, m.mode, i), columns))
 	}
-	for i, name := range m.inFlightOrder {
-		rows = append(rows, fitRowWidth(m.inFlightRow(m.inFlight[name], m.table.Cursor() == len(m.results)+i), columns))
+	for _, name := range m.inFlightOrder {
+		rows = append(rows, fitRowWidth(m.inFlightRow(m.inFlight[name]), columns))
 	}
 	m.table.SetRows(rows)
 	m.syncSelection()
 }
 
 // inFlightRow 渲染一个在测行：延迟阶段显示「测试中」，下载/上传进行中显示阶段瞬时速度，
-// 已结束的阶段列定格。未选中时暗色斜体；选中时不加斜体，让表格亮底优先。
-func (m *tuiModel) inFlightRow(node *inFlightNode, selected bool) table.Row {
+// 已结束的阶段列定格。单元格保持纯文本，选中样式交给表格本身。
+func (m *tuiModel) inFlightRow(node *inFlightNode) table.Row {
 	p := node.latest
 	idStr := "…"
 	name := node.name
@@ -41,7 +41,7 @@ func (m *tuiModel) inFlightRow(node *inFlightNode, selected bool) table.Row {
 		latencyStr = fmt.Sprintf("%dms", p.Latency.Milliseconds())
 	}
 	if m.mode.IsFast() {
-		return m.styleInFlight(table.Row{idStr, name, pxyType, latencyStr}, selected)
+		return table.Row{idStr, name, pxyType, latencyStr}
 	}
 
 	jitterStr := ""
@@ -62,7 +62,7 @@ func (m *tuiModel) inFlightRow(node *inFlightNode, selected bool) table.Row {
 	if m.mode.UploadEnabled() {
 		row = append(row, uploadStr)
 	}
-	return m.styleInFlight(row, selected)
+	return row
 }
 
 // fitRowWidth 保证行单元格数不超过表头列数，避免 bubbles table 按下标渲染时越界。
@@ -75,19 +75,6 @@ func fitRowWidth(row table.Row, columns int) table.Row {
 		fitted[i] = row[i]
 	}
 	return fitted
-}
-
-// styleInFlight 未选中时暗色斜体；选中时保持纯文本，交给表格选中样式。
-func (m *tuiModel) styleInFlight(row table.Row, selected bool) table.Row {
-	if selected {
-		return row
-	}
-	style := lipgloss.NewStyle().Faint(true).Italic(true)
-	out := make(table.Row, len(row))
-	for i, cell := range row {
-		out[i] = style.Render(cell)
-	}
-	return out
 }
 
 func (m *tuiModel) updateTableHeaders() {
@@ -329,9 +316,7 @@ func (m *tuiModel) syncSelectionFromCursor() {
 	if cursor < 0 || cursor >= m.tableRowCount() {
 		return
 	}
-	if m.inFlightCount() > 0 {
-		m.updateTableRows()
-	}
+	// 不在这里重绘。测试过程中每次按键都 SetRows 会重算视口，方向键和滚轮看起来像失灵。
 	if cursor >= len(m.results) {
 		// 点击/滚动到表尾在测行：仅高亮，不更新完成区选中索引。
 		m.highlightInFlight(m.inFlightOrder[cursor-len(m.results)])

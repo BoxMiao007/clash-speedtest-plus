@@ -723,6 +723,8 @@ func (m tuiModel) imageSpec(finished bool) output.ImageSpec {
 		}
 	}
 	rows := make([]output.ImageRow, 0, m.inFlightCount()+len(m.results))
+	// 结果图与终端一致：完成行在上，在测行在下。
+	rows = append(rows, output.BuildImageRows(m.results, m.mode)...)
 	for _, name := range m.inFlightOrder {
 		node := m.inFlight[name]
 		if node == nil {
@@ -733,7 +735,6 @@ func (m tuiModel) imageSpec(finished bool) output.ImageSpec {
 			InFlight: true,
 		})
 	}
-	rows = append(rows, output.BuildImageRows(m.results, m.mode)...)
 	return output.ImageSpec{
 		Mode:    m.mode,
 		Source:  m.imageSource,
