@@ -146,6 +146,40 @@ func TestScrollbarClickAndDrag(t *testing.T) {
 	if moved.(tuiModel).table.Cursor() != 0 {
 		t.Fatalf("拖到顶部应选中第一行: %d", moved.(tuiModel).table.Cursor())
 	}
+	// Windows 拖出轨道时按钮仍是左键，不能丢。
+	off, _ := moved.(tuiModel).Update(tea.MouseMsg{
+		X: 0, Y: startY,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion,
+	})
+	if !off.(tuiModel).scrollbarDrag {
+		t.Fatal("拖出轨道不应结束拖动")
+	}
+	released, _ := off.(tuiModel).Update(tea.MouseMsg{
+		X: 0, Y: startY,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease,
+	})
+	if released.(tuiModel).scrollbarDrag {
+		t.Fatal("松手应结束拖动")
+	}
+}
+
+func TestThumbSitsOnCurrentRow(t *testing.T) {
+	model := testingModel(t, 30)
+	model.windowHeight = 20
+	model.updateTableLayout()
+	model.table.SetCursor(model.tableRowCount() - 1)
+	top, thumb, ok := model.scrollbarRange()
+	if !ok {
+		t.Fatal("应有滚动条")
+	}
+	if top+thumb != model.table.Height() {
+		t.Fatalf("选中最后一行时滑块应贴底: top=%d thumb=%d height=%d", top, thumb, model.table.Height())
+	}
+	model.table.SetCursor(0)
+	top, _, ok = model.scrollbarRange()
+	if !ok || top != 0 {
+		t.Fatalf("选中第一行时滑块应贴顶: %d", top)
+	}
 }
 
 // 选中第 9 行后刷新，不能跳回第 1 行。

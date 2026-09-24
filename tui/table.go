@@ -374,9 +374,14 @@ func (m tuiModel) scrollbarRange() (top, thumb int, ok bool) {
 	}
 	thumb = max(1, height*height/total)
 	if thumb >= height {
-		thumb = height - 1
+		thumb = max(height-1, 1)
 	}
-	top = cursor * (height - thumb) / max(total-1, 1)
+	span := height - thumb
+	if span <= 0 || total <= 1 {
+		top = 0
+	} else {
+		top = cursor * span / (total - 1)
+	}
 	if top+thumb > height {
 		top = height - thumb
 	}
@@ -400,6 +405,9 @@ func (m tuiModel) cursorForScrollbar(markIndex int) int {
 }
 
 func (m *tuiModel) jumpScrollbar(markIndex int) {
+	if m.scrollbarDrag {
+		markIndex -= m.scrollbarGrab
+	}
 	target := m.cursorForScrollbar(markIndex)
 	if target >= len(m.results) {
 		m.table.SetCursor(target)

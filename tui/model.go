@@ -124,8 +124,9 @@ type tuiModel struct {
 	configSaved       bool
 	uploadFunc        func() string
 	uploadCancel      func()
-	// scrollbarDrag 为真表示正在拖动滚动条滑块。
+	// scrollbarDrag 为真表示正在拖动滚动条滑块。scrollbarGrab 是按下时相对滑块顶部的偏移。
 	scrollbarDrag bool
+	scrollbarGrab int
 }
 
 const (
@@ -402,29 +403,27 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncSelectionFromCursor()
 			return m, nil
 		}
-		if mark, onBar := m.scrollbarMarkAt(msg.X, msg.Y); onBar {
-			top, thumb, ok := m.scrollbarRange()
-			onThumb := ok && mark >= top && mark < top+thumb
-			switch msg.Action {
-			case tea.MouseActionPress:
-				if onThumb {
-					m.scrollbarDrag = true
-					return m, nil
-				}
+		if m.scrollbarDrag && msg.Action == tea.MouseActionMotion && msg.Button == tea.MouseButtonLeft {
+			if mark, ok := m.scrollbarMarkAt(msg.X, msg.Y); ok {
 				m.jumpScrollbar(mark)
-				return m, nil
-			case tea.MouseActionMotion:
-				if m.scrollbarDrag {
-					m.jumpScrollbar(mark)
-				}
-				return m, nil
-			case tea.MouseActionRelease:
-				m.scrollbarDrag = false
-				return m, nil
 			}
+			return m, nil
 		}
 		if msg.Action == tea.MouseActionRelease {
 			m.scrollbarDrag = false
+		}
+		if mark, onBar := m.scrollbarMarkAt(msg.X, msg.Y); onBar && msg.Button == tea.MouseButtonLeft {
+			top, thumb, ok := m.scrollbarRange()
+			onThumb := ok && mark >= top && mark < top+thumb
+			if msg.Action == tea.MouseActionPress && onThumb {
+				m.scrollbarDrag = true
+				m.scrollbarGrab = mark - top
+				return m, nil
+			}
+			if msg.Action == tea.MouseActionPress || msg.Action == tea.MouseActionRelease {
+				m.jumpScrollbar(mark)
+			}
+			return m, nil
 		}
 		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionRelease {
 			if m.isHeaderClick(msg.Y) {
