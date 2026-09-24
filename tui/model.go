@@ -409,8 +409,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if msg.Action == tea.MouseActionRelease {
+		if msg.Action == tea.MouseActionRelease && m.scrollbarDrag {
 			m.scrollbarDrag = false
+			return m, nil
 		}
 		if mark, onBar := m.scrollbarMarkAt(msg.X, msg.Y); onBar && msg.Button == tea.MouseButtonLeft {
 			top, thumb, ok := m.scrollbarRange()

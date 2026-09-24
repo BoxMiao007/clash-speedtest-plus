@@ -100,8 +100,8 @@ func TestErrorTextDoesNotWidenResultImage(t *testing.T) {
 		Latency:       200 * time.Millisecond,
 		Jitter:        30 * time.Millisecond,
 		PacketLoss:    1,
-		DownloadError: "download request to https://example.com/very/long/path failed: context deadline exceeded while reading response body",
-		UploadError:   "upload request to https://example.com/very/long/path failed: connection reset by peer",
+		DownloadError: "timeout",
+		UploadError:   "reset",
 	}
 	spec := func(results []*speedtester.Result) ImageSpec {
 		return ImageSpec{

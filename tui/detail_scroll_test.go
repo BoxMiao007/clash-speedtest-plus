@@ -161,6 +161,9 @@ func TestScrollbarClickAndDrag(t *testing.T) {
 	if released.(tuiModel).scrollbarDrag {
 		t.Fatal("松手应结束拖动")
 	}
+	if released.(tuiModel).detailVisible {
+		t.Fatal("拖动滚动条松手不应打开详情")
+	}
 }
 
 func TestThumbSitsOnCurrentRow(t *testing.T) {

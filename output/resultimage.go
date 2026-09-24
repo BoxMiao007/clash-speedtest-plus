@@ -265,8 +265,9 @@ func measureColumns(face font.Face, headers []string, rows []ImageRow) []int {
 			if i == 1 {
 				// 节点名：超过 64 个字符才开始截断，短名完整参与列宽。
 				text = truncateName64(cell)
-			} else {
-				text = metricWidthText(cell)
+			} else if !metricCell(cell) {
+				// 错误信息和其他非测速文本不撑列宽，绘制时再截断。
+				continue
 			}
 			if w := textWidth(face, text) + resultImageRowPadX; w > widths[i] {
 				widths[i] = w
@@ -285,22 +286,16 @@ func truncateName64(name string) string {
 	return string(runes[:64]) + "…"
 }
 
-// metricWidthText 让正常测试数据参与列宽。速度和延迟列里的错误信息不撑开格子。
-func metricWidthText(text string) string {
+// metricCell 判断格子是不是测速数据。错误信息不是，不能撑开列宽。
+func metricCell(text string) bool {
 	switch text {
 	case "", "N/A", "测试中", "…":
-		return text
+		return true
 	}
-	if strings.HasSuffix(text, "ms") || strings.HasSuffix(text, "%") ||
+	return strings.HasSuffix(text, "ms") || strings.HasSuffix(text, "%") ||
 		strings.HasSuffix(text, "B/s") || strings.HasSuffix(text, "KB/s") ||
 		strings.HasSuffix(text, "MB/s") || strings.HasSuffix(text, "GB/s") ||
-		strings.HasSuffix(text, "TB/s") {
-		return text
-	}
-	if len([]rune(text)) > 12 {
-		return ""
-	}
-	return text
+		strings.HasSuffix(text, "TB/s")
 }
 
 func isSpeedHeader(header string) bool {
