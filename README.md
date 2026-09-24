@@ -51,8 +51,8 @@ rules:
         按关键字屏蔽节点，多个关键字用 | 分隔
   -speed-mode string
         测速模式：fast、download、full (default "download")
-  -p, -parallel int
-        同时测试的节点数 (default 1)
+  -p int
+        同时测试的节点数（也可写 -parallel） (default 1)
   -concurrent int
         同一节点的下载并发连接数 (default 4)
   -download-size int
@@ -70,7 +70,7 @@ rules:
   -fast
         快速模式（等同 --speed-mode fast）
 
-完整参数以 `clash-speedtest -h` 为准。交互界面里空格暂停或继续，q 或 Ctrl+C 退出。整轮结束后会在当前目录写出结果图。
+完整参数以 `clash-speedtest -h` 为准。`-p` 与 `-parallel` 相同，都是同时测试的节点数。交互界面里空格暂停或继续，q 或 Ctrl+C 退出，点某一行打开详情，拖滚动条只滚动不改选中。整轮结束后会在当前目录写出结果图；类型列按类型名撑开。
 
 # 演示：
 
