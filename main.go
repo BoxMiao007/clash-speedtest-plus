@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -36,13 +37,13 @@ var (
 	blockKeywords     = flag.String("b", "", "按关键字屏蔽节点，多个关键字用 | 分隔（例如 -b 'rate|x1|1x'）")
 	serverURL         = flag.String("server-url", "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg", "测速服务器地址或直接下载地址")
 	speedMode         = flag.String("speed-mode", "download", "测速模式：fast、download、full")
-	downloadSize      = flag.Int("download-size", 50*1024*1024, "下载测试大小")
-	uploadSize        = flag.Int("upload-size", 20*1024*1024, "上传测试大小（仅完整模式）")
+	downloadSize      = flag.Int("download-size", 50, "下载测试大小（单位：MB）")
+	uploadSize        = flag.Int("upload-size", 20, "上传测试大小（单位：MB，仅完整模式）")
 	timeout           = flag.Duration("timeout", time.Second*5, "单个请求超时")
 	concurrent        = flag.Int("concurrent", 4, "同一节点的下载并发连接数")
 	parallel          = intFlag("p", "parallel", 1, "同时测试的节点数")
 	noImage           = flag.Bool("no-image", false, "关闭自动导出结果表图，仍可按 s 手动保存")
-	outputPath        = flag.String("output", "", "输出配置文件路径")
+	outputPath        = stringFlag("o", "output", "", "输出配置文件路径")
 	gistToken         = flag.String("gist-token", "", "用于更新 Gist 的 GitHub token")
 	gistAddress       = flag.String("gist-address", "", "要更新的 Gist 地址或 ID（文件名使用输出文件名）")
 	repoToken         = flag.String("repo-token", "", "用于更新仓库文件的 GitHub token")
@@ -93,8 +94,8 @@ func main() {
 		FilterRegex:      *filterRegexConfig,
 		BlockRegex:       *blockKeywords,
 		ServerURL:        *serverURL,
-		DownloadSize:     *downloadSize,
-		UploadSize:       *uploadSize,
+		DownloadSize:     *downloadSize * 1024 * 1024,
+		UploadSize:       *uploadSize * 1024 * 1024,
 		Timeout:          *timeout,
 		Concurrent:       *concurrent,
 		Parallel:         *parallel,
@@ -405,13 +406,48 @@ func intFlag(shortName, longName string, value int, usage string) *int {
 	return p
 }
 
+func stringFlag(shortName, longName, value, usage string) *string {
+	p := flag.String(shortName, value, usage+"（也可写 -"+longName+"）")
+	flag.StringVar(p, longName, value, hiddenFlagUsage)
+	return p
+}
+
+// 简写和常用参数排在帮助前面，其余按名字排序。
+var commonFlagOrder = []string{
+	"c", "f", "b", "o", "p", "v", "fast", "speed-mode",
+	"concurrent", "download-size", "upload-size", "timeout",
+	"early-stop", "no-image",
+}
+
 const hiddenFlagUsage = "\x00"
 
 func printFlagDefaults(fs *flag.FlagSet) {
+	var flags []*flag.Flag
 	fs.VisitAll(func(f *flag.Flag) {
 		if f.Usage == hiddenFlagUsage {
 			return
 		}
+		flags = append(flags, f)
+	})
+	order := map[string]int{}
+	for i, name := range commonFlagOrder {
+		order[name] = i
+	}
+	sort.SliceStable(flags, func(i, j int) bool {
+		ai, aok := order[flags[i].Name]
+		bi, bok := order[flags[j].Name]
+		switch {
+		case aok && bok:
+			return ai < bi
+		case aok:
+			return true
+		case bok:
+			return false
+		default:
+			return flags[i].Name < flags[j].Name
+		}
+	})
+	for _, f := range flags {
 		name, usage := flag.UnquoteUsage(f)
 		s := fmt.Sprintf("  -%s", f.Name)
 		if len(name) > 0 {
@@ -431,7 +467,7 @@ func printFlagDefaults(fs *flag.FlagSet) {
 			}
 		}
 		fmt.Fprint(fs.Output(), s, "\n")
-	})
+	}
 }
 
 func isZeroValue(f *flag.Flag, value string) bool {

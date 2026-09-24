@@ -56,3 +56,59 @@ func TestParallelFlagHelpShowsBothNames(t *testing.T) {
 		t.Fatalf("-parallel 不应再单独占一行:\n%s", help)
 	}
 }
+
+func TestOutputShortAndLongFlagsShareValue(t *testing.T) {
+	orig := flag.CommandLine
+	t.Cleanup(func() { flag.CommandLine = orig })
+
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-o", "a.yaml"}, "a.yaml"},
+		{[]string{"-output", "b.yaml"}, "b.yaml"},
+		{[]string{"--output=c.yaml"}, "c.yaml"},
+	}
+	for _, tc := range cases {
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		flag.CommandLine = fs
+		p := stringFlag("o", "output", "", "输出配置文件路径")
+		if err := fs.Parse(tc.args); err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		if *p != tc.want {
+			t.Fatalf("%v 得到 %q，期望 %q", tc.args, *p, tc.want)
+		}
+	}
+}
+
+func TestHelpPutsCommonFlagsFirstAndUsesMegabytes(t *testing.T) {
+	orig := flag.CommandLine
+	t.Cleanup(func() { flag.CommandLine = orig })
+
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	var buf bytes.Buffer
+	fs.SetOutput(&buf)
+	flag.CommandLine = fs
+	_ = flag.String("c", "", "配置文件路径，也支持 http(s) 地址")
+	_ = flag.Int("download-size", 50, "下载测试大小（单位：MB）")
+	_ = stringFlag("o", "output", "", "输出配置文件路径")
+	_ = flag.String("gist-token", "", "用于更新 Gist 的 GitHub token")
+	printFlagDefaults(fs)
+	help := buf.String()
+	if strings.Contains(help, "52428800") || strings.Contains(help, "20971520") {
+		t.Fatalf("帮助不应再显示字节数:\n%s", help)
+	}
+	if !strings.Contains(help, "单位：MB") || !strings.Contains(help, "(default 50)") {
+		t.Fatalf("下载大小应按 MB 显示:\n%s", help)
+	}
+	c := strings.Index(help, "  -c ")
+	o := strings.Index(help, "  -o ")
+	gist := strings.Index(help, "  -gist-token ")
+	if c < 0 || o < 0 || gist < 0 || !(c < o && o < gist) {
+		t.Fatalf("常用参数应排在前面:\n%s", help)
+	}
+	if strings.Contains(help, "\n  -output ") {
+		t.Fatalf("-output 不应再单独占一行:\n%s", help)
+	}
+}
