@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"flag"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -42,9 +43,16 @@ func TestParallelFlagHelpShowsBothNames(t *testing.T) {
 	fs.SetOutput(&buf)
 	flag.CommandLine = fs
 	_ = intFlag("p", "parallel", 1, "同时测试的节点数")
-	fs.PrintDefaults()
+	fs.Usage = func() {
+		fmt.Fprintln(&buf, "用法：clash-speedtest [选项]")
+		printFlagDefaults(fs)
+	}
+	fs.Usage()
 	help := buf.String()
-	if !strings.Contains(help, "-p") || !strings.Contains(help, "-parallel") {
-		t.Fatalf("帮助里应同时出现 -p 和 -parallel:\n%s", help)
+	if !strings.Contains(help, "-p int") || !strings.Contains(help, "也可写 -parallel") {
+		t.Fatalf("帮助应在 -p 一行注明 -parallel:\n%s", help)
+	}
+	if strings.Contains(help, "\n  -parallel ") {
+		t.Fatalf("-parallel 不应再单独占一行:\n%s", help)
 	}
 }

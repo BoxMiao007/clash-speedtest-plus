@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -63,7 +64,7 @@ var (
 func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "用法：clash-speedtest [选项]\n")
-		flag.PrintDefaults()
+		printFlagDefaults(flag.CommandLine)
 	}
 	flag.Parse()
 	mihomolog.SetLevel(mihomolog.SILENT)
@@ -396,14 +397,55 @@ func uploadNeeded() bool {
 	return (*gistToken != "" && *gistAddress != "") || (*repoToken != "" && *repoAddress != "")
 }
 
-// waitForUpload 非交互等待上传。Ctrl+C 立刻中断，并在 stderr 写正在上传。
-// intFlag 把短名和长名绑到同一个整数。标准库一个 flag 只能有一个名字。
+// intFlag 把短名和长名绑到同一个整数。标准库一个 flag 只能有一个名字，
+// 长名仍可解析，但帮助里只留短名一行并注明长名。
 func intFlag(shortName, longName string, value int, usage string) *int {
-	p := flag.Int(shortName, value, usage)
-	flag.IntVar(p, longName, value, usage)
+	p := flag.Int(shortName, value, usage+"（也可写 -"+longName+"）")
+	flag.IntVar(p, longName, value, hiddenFlagUsage)
 	return p
 }
 
+const hiddenFlagUsage = "\x00"
+
+func printFlagDefaults(fs *flag.FlagSet) {
+	fs.VisitAll(func(f *flag.Flag) {
+		if f.Usage == hiddenFlagUsage {
+			return
+		}
+		name, usage := flag.UnquoteUsage(f)
+		s := fmt.Sprintf("  -%s", f.Name)
+		if len(name) > 0 {
+			s += " " + name
+		}
+		if len(s) <= 4 {
+			s += "\t"
+		} else {
+			s += "\n    \t"
+		}
+		s += strings.ReplaceAll(usage, "\n", "\n    \t")
+		if !isZeroValue(f, f.DefValue) {
+			if strings.Contains(usage, "\n") || len(s) > 60 {
+				s += fmt.Sprintf("\n    \t(default %s)", f.DefValue)
+			} else {
+				s += fmt.Sprintf(" (default %s)", f.DefValue)
+			}
+		}
+		fmt.Fprint(fs.Output(), s, "\n")
+	})
+}
+
+func isZeroValue(f *flag.Flag, value string) bool {
+	typ := reflect.TypeOf(f.Value)
+	var z reflect.Value
+	if typ.Kind() == reflect.Pointer {
+		z = reflect.New(typ.Elem())
+	} else {
+		z = reflect.Zero(typ)
+	}
+	return value == z.Interface().(flag.Value).String()
+}
+
+// waitForUpload 非交互等待上传。Ctrl+C 立刻中断，并在 stderr 写正在上传。
 func waitForUpload() {
 	if !uploadNeeded() || *outputPath == "" {
 		return
