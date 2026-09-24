@@ -24,7 +24,7 @@ import (
 var flagFiles embed.FS
 
 const (
-	resultImageFontSize  = 16
+	resultImageFontSize  = 15
 	resultImageRowPadX   = 28
 	resultImageRowPadY   = 6
 	resultImageLineGap   = 0
