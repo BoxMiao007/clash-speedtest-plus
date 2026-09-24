@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"flag"
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -43,14 +42,14 @@ func TestParallelFlagHelpShowsBothNames(t *testing.T) {
 	fs.SetOutput(&buf)
 	flag.CommandLine = fs
 	_ = intFlag("p", "parallel", 1, "同时测试的节点数")
-	fs.Usage = func() {
-		fmt.Fprintln(&buf, "用法：clash-speedtest [选项]")
-		printFlagDefaults(fs)
-	}
-	fs.Usage()
+	_ = flag.Int("download-size", 50, "下载测试大小（单位：MB）")
+	printFlagDefaults(fs)
 	help := buf.String()
-	if !strings.Contains(help, "-p int") || !strings.Contains(help, "也可写 -parallel") {
+	if !strings.Contains(help, "同时测试的节点数（也可写 -parallel | 默认: 1）") {
 		t.Fatalf("帮助应在 -p 一行注明 -parallel:\n%s", help)
+	}
+	if !strings.Contains(help, "下载测试大小（默认: 50 | 单位：MB）") {
+		t.Fatalf("下载大小应把默认值和单位写在同一行:\n%s", help)
 	}
 	if strings.Contains(help, "\n  -parallel ") {
 		t.Fatalf("-parallel 不应再单独占一行:\n%s", help)
@@ -92,6 +91,7 @@ func TestHelpPutsCommonFlagsFirstAndUsesMegabytes(t *testing.T) {
 	flag.CommandLine = fs
 	_ = flag.String("c", "", "配置文件路径，也支持 http(s) 地址")
 	_ = flag.Int("download-size", 50, "下载测试大小（单位：MB）")
+	_ = flag.Int("upload-size", 20, "上传测试大小，仅完整模式（单位：MB）")
 	_ = stringFlag("o", "output", "", "输出配置文件路径")
 	_ = flag.String("gist-token", "", "用于更新 Gist 的 GitHub token")
 	printFlagDefaults(fs)
@@ -99,8 +99,14 @@ func TestHelpPutsCommonFlagsFirstAndUsesMegabytes(t *testing.T) {
 	if strings.Contains(help, "52428800") || strings.Contains(help, "20971520") {
 		t.Fatalf("帮助不应再显示字节数:\n%s", help)
 	}
-	if !strings.Contains(help, "单位：MB") || !strings.Contains(help, "(default 50)") {
-		t.Fatalf("下载大小应按 MB 显示:\n%s", help)
+	if !strings.Contains(help, "下载测试大小（默认: 50 | 单位：MB）") {
+		t.Fatalf("下载大小应把默认值和单位写在同一行:\n%s", help)
+	}
+	if !strings.Contains(help, "上传测试大小，仅完整模式（默认: 20 | 单位：MB）") {
+		t.Fatalf("上传大小应保留模式说明:\n%s", help)
+	}
+	if strings.Contains(help, "(default ") {
+		t.Fatalf("帮助不应再把默认值单独折行:\n%s", help)
 	}
 	c := strings.Index(help, "  -c ")
 	o := strings.Index(help, "  -o ")

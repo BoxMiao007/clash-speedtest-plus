@@ -46,27 +46,27 @@ rules:
   -c string
         配置文件路径，也支持 http(s) 地址
   -f string
-        按节点名过滤，使用正则 (default ".+")
+        按节点名过滤，使用正则（默认: .+）
   -b string
         按关键字屏蔽节点，多个关键字用 | 分隔
   -o string
         输出配置文件路径（也可写 -output）
   -p int
-        同时测试的节点数（也可写 -parallel） (default 1)
+        同时测试的节点数（也可写 -parallel | 默认: 1）
   -v
         显示版本信息
   -fast
         快速模式（等同 --speed-mode fast）
   -speed-mode string
-        测速模式：fast、download、full (default "download")
+        测速模式：fast、download、full（默认: download）
   -concurrent int
-        同一节点的下载并发连接数 (default 4)
+        同一节点的下载并发连接数（默认: 4）
   -download-size int
-        下载测试大小（单位：MB） (default 50)
+        下载测试大小（默认: 50 | 单位：MB）
   -upload-size int
-        上传测试大小（单位：MB，仅完整模式） (default 20)
+        上传测试大小，仅完整模式（默认: 20 | 单位：MB）
   -timeout duration
-        单个请求超时 (default 5s)
+        单个请求超时（默认: 5s）
   -early-stop int
         过筛结果达到该数量后提前结束（0 为关闭）
   -no-image

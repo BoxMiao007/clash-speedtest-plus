@@ -38,7 +38,7 @@ var (
 	serverURL         = flag.String("server-url", "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg", "测速服务器地址或直接下载地址")
 	speedMode         = flag.String("speed-mode", "download", "测速模式：fast、download、full")
 	downloadSize      = flag.Int("download-size", 50, "下载测试大小（单位：MB）")
-	uploadSize        = flag.Int("upload-size", 20, "上传测试大小（单位：MB，仅完整模式）")
+	uploadSize        = flag.Int("upload-size", 20, "上传测试大小，仅完整模式（单位：MB）")
 	timeout           = flag.Duration("timeout", time.Second*5, "单个请求超时")
 	concurrent        = flag.Int("concurrent", 4, "同一节点的下载并发连接数")
 	parallel          = intFlag("p", "parallel", 1, "同时测试的节点数")
@@ -458,16 +458,50 @@ func printFlagDefaults(fs *flag.FlagSet) {
 		} else {
 			s += "\n    \t"
 		}
-		s += strings.ReplaceAll(usage, "\n", "\n    \t")
-		if !isZeroValue(f, f.DefValue) {
-			if strings.Contains(usage, "\n") || len(s) > 60 {
-				s += fmt.Sprintf("\n    \t(default %s)", f.DefValue)
-			} else {
-				s += fmt.Sprintf(" (default %s)", f.DefValue)
-			}
-		}
+		s += formatFlagUsage(usage, f)
 		fmt.Fprint(fs.Output(), s, "\n")
 	}
+}
+
+// formatFlagUsage 把默认值和单位收进同一对括号，避免帮助里再单独折一行。
+func formatFlagUsage(usage string, f *flag.Flag) string {
+	usage = strings.ReplaceAll(usage, "\n", " ")
+	unit := ""
+	alias := ""
+	if before, after, ok := strings.Cut(usage, "（单位："); ok {
+		usage = strings.TrimSpace(before)
+		unit, _, _ = strings.Cut(after, "）")
+		unit, _, _ = strings.Cut(unit, "，")
+	}
+	if before, after, ok := strings.Cut(usage, "（也可写 -"); ok {
+		usage = strings.TrimSpace(before)
+		alias, _, _ = strings.Cut(after, "）")
+		alias = "-" + alias
+	}
+	var notes []string
+	if alias != "" {
+		notes = append(notes, "也可写 "+alias)
+	}
+	if !isZeroValue(f, f.DefValue) {
+		notes = append(notes, "默认: "+formatFlagDefault(f.DefValue))
+	}
+	if unit != "" {
+		notes = append(notes, "单位："+unit)
+	}
+	if len(notes) == 0 {
+		return usage
+	}
+	if usage == "" {
+		return "（" + strings.Join(notes, " | ") + "）"
+	}
+	return usage + "（" + strings.Join(notes, " | ") + "）"
+}
+
+func formatFlagDefault(value string) string {
+	if value == "" {
+		return `""`
+	}
+	return value
 }
 
 func isZeroValue(f *flag.Flag, value string) bool {
