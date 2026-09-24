@@ -123,8 +123,14 @@ func TestScrollbarClickAndDrag(t *testing.T) {
 		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
 	})
 	jumped := clicked.(tuiModel)
-	if jumped.table.Cursor() < 20 {
-		t.Fatalf("点击轨道底部应跳到后面的行: %d", jumped.table.Cursor())
+	if jumped.table.Cursor() != 0 {
+		t.Fatalf("点击滚动条不应改选中行: %d", jumped.table.Cursor())
+	}
+	if jumped.scrollOffset < 20 {
+		t.Fatalf("点击轨道底部应滚到后面的行: %d", jumped.scrollOffset)
+	}
+	if strings.Contains(firstDataLine(jumped), "100ms") {
+		t.Fatalf("滚动后第一行不应还是最初那条:\n%s", firstDataLine(jumped))
 	}
 
 	top, _, ok := jumped.scrollbarRange()
@@ -144,7 +150,10 @@ func TestScrollbarClickAndDrag(t *testing.T) {
 		Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion,
 	})
 	if moved.(tuiModel).table.Cursor() != 0 {
-		t.Fatalf("拖到顶部应选中第一行: %d", moved.(tuiModel).table.Cursor())
+		t.Fatalf("拖动滚动条不应改选中行: %d", moved.(tuiModel).table.Cursor())
+	}
+	if moved.(tuiModel).scrollOffset != 0 {
+		t.Fatalf("拖到顶部视口应回到第一行: %d", moved.(tuiModel).scrollOffset)
 	}
 	// Windows 拖出轨道时按钮仍是左键，不能丢。
 	off, _ := moved.(tuiModel).Update(tea.MouseMsg{
@@ -183,6 +192,67 @@ func TestThumbSitsOnCurrentRow(t *testing.T) {
 	if !ok || top != 0 {
 		t.Fatalf("选中第一行时滑块应贴顶: %d", top)
 	}
+}
+
+// 滚出第一屏后再点击，详情和选中行必须是画面上那一行，不能是它上面一条。
+func TestClickAfterScrollSelectsVisibleRow(t *testing.T) {
+	model := testingModel(t, 40)
+	model.windowHeight = 16
+	model.updateTableLayout()
+	cur := model
+	for i := 0; i < 15; i++ {
+		next, _ := cur.Update(tea.KeyMsg{Type: tea.KeyDown})
+		cur = next.(tuiModel)
+	}
+	lines := strings.Split(cur.View(), "\n")
+	start := cur.tableHeaderY() + dataRowOffset(cur.table.View())
+	if start >= len(lines) {
+		t.Fatalf("找不到第一条数据行: start=%d lines=%d", start, len(lines))
+	}
+	shown := latencyOnLine(stripANSI(lines[start]))
+	if shown <= 0 {
+		t.Fatalf("第一条数据行没有延迟: %q", stripANSI(lines[start]))
+	}
+	clicked := clickRow(cur, 0)
+	if clicked.detailResult == nil {
+		t.Fatal("点击应打开详情")
+	}
+	if clicked.detailResult.Latency.Milliseconds() != int64(shown) {
+		t.Fatalf("画面上是 %dms，点开的是 %dms", shown, clicked.detailResult.Latency.Milliseconds())
+	}
+	if clicked.table.Cursor() != shown-100 {
+		t.Fatalf("选中行应是 %d，实际 %d", shown-100, clicked.table.Cursor())
+	}
+}
+
+func firstDataLine(model tuiModel) string {
+	lines := strings.Split(model.View(), "\n")
+	start := model.tableHeaderY() + dataRowOffset(model.table.View())
+	if start < 0 || start >= len(lines) {
+		return ""
+	}
+	return stripANSI(lines[start])
+}
+
+func latencyOnLine(line string) int {
+	fields := strings.Fields(line)
+	for _, field := range fields {
+		if !strings.HasSuffix(field, "ms") {
+			continue
+		}
+		n := 0
+		for _, r := range strings.TrimSuffix(field, "ms") {
+			if r < '0' || r > '9' {
+				n = 0
+				break
+			}
+			n = n*10 + int(r-'0')
+		}
+		if n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 // 选中第 9 行后刷新，不能跳回第 1 行。

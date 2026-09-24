@@ -127,6 +127,9 @@ type tuiModel struct {
 	// scrollbarDrag 为真表示正在拖动滚动条滑块。scrollbarGrab 是按下时相对滑块顶部的偏移。
 	scrollbarDrag bool
 	scrollbarGrab int
+	// followSelection 为真时视口跟着当前选中行。拖滚动条时关掉，只滚动不改选中。
+	followSelection bool
+	scrollOffset    int
 }
 
 const (
@@ -224,13 +227,14 @@ func newTUIModel(
 		detailHeight:   0,
 		perf:           newPerfTracker(),
 
-		pauseCtl:      pauseCtl,
-		progressCh:    progressCh,
-		earlyStopCh:   earlyStopCh,
-		inFlight:      make(map[string]*inFlightNode),
-		finishedNames: make(map[string]struct{}),
-		autoImage:     true,
-		imageDir:      ".",
+		pauseCtl:        pauseCtl,
+		progressCh:      progressCh,
+		earlyStopCh:     earlyStopCh,
+		inFlight:        make(map[string]*inFlightNode),
+		finishedNames:   make(map[string]struct{}),
+		autoImage:       true,
+		imageDir:        ".",
+		followSelection: true,
 	}
 }
 
@@ -386,6 +390,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.table, cmd = m.table.Update(msg)
+		m.followSelection = true
 		m.syncSelectionFromCursor()
 		return m, cmd
 
@@ -395,11 +400,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Button == tea.MouseButtonWheelUp {
 			m.table.MoveUp(1)
+			m.followSelection = true
 			m.syncSelectionFromCursor()
 			return m, nil
 		}
 		if msg.Button == tea.MouseButtonWheelDown {
 			m.table.MoveDown(1)
+			m.followSelection = true
 			m.syncSelectionFromCursor()
 			return m, nil
 		}
@@ -443,6 +450,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if rowIndex, ok := m.rowAtY(msg.Y); ok {
+				m.followSelection = true
 				if rowIndex < 0 {
 					// 负偏移索引在测行：打开测试中占位详情，再点同一行则关掉。
 					m.toggleInFlightDetail(m.inFlightOrder[-rowIndex-1])
@@ -804,7 +812,7 @@ func formatLoss(value float64) string {
 
 // grayInFlightLines 把已渲染的在测行整行变灰。选中行保持表格高亮。
 // 染色放在表格截断之后，转义码不会把类型、延迟裁掉。
-func grayInFlightLines(view string, finished int, cursor int) string {
+func grayInFlightLines(view string, finished int, cursor int, start int) string {
 	lines := strings.Split(view, "\n")
 	body := 0
 	for i, line := range lines {
@@ -815,7 +823,7 @@ func grayInFlightLines(view string, finished int, cursor int) string {
 			body++
 			continue
 		}
-		index := body - 1
+		index := start + body - 1
 		body++
 		if index < finished || index == cursor {
 			continue
@@ -832,7 +840,11 @@ func (m tuiModel) View() string {
 	}
 
 	// Layout: progress bar at top, table below
-	tableView := grayInFlightLines(m.table.View(), len(m.results), m.table.Cursor())
+	tableView := m.table.View()
+	if !m.followSelection {
+		tableView = m.renderScrolledTable()
+	}
+	tableView = grayInFlightLines(tableView, len(m.results), m.table.Cursor(), m.viewportStart())
 	detailView := m.detailPanelView()
 
 	sections := []string{

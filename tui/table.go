@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -242,8 +243,7 @@ func (m tuiModel) rowAtY(y int) (int, bool) {
 	if rowIndex < 0 || rowIndex >= m.table.Height() {
 		return 0, false
 	}
-	start := tableStartIndex(m.table.Cursor(), m.table.Height())
-	absoluteIndex := start + rowIndex
+	absoluteIndex := m.viewportStart() + rowIndex
 	if absoluteIndex < 0 || absoluteIndex >= m.tableRowCount() {
 		return 0, false
 	}
@@ -359,28 +359,48 @@ func (m tuiModel) scrollbarVisible() bool {
 }
 
 // scrollbarRange 返回滑块在数据行里的起止下标。
+// 平时滑块贴着选中行；拖动滚动条时改贴视口，避免选中行被拖着走。
 func (m tuiModel) scrollbarRange() (top, thumb int, ok bool) {
 	total := m.tableRowCount()
 	height := m.table.Height()
 	if total <= height || height <= 0 {
 		return 0, 0, false
 	}
-	cursor := m.table.Cursor()
-	if cursor < 0 {
-		cursor = 0
-	}
-	if cursor >= total {
-		cursor = total - 1
-	}
 	thumb = max(1, height*height/total)
 	if thumb >= height {
 		thumb = max(height-1, 1)
 	}
 	span := height - thumb
-	if span <= 0 || total <= 1 {
-		top = 0
+	if span <= 0 {
+		return 0, thumb, true
+	}
+	if m.followSelection {
+		cursor := m.table.Cursor()
+		if cursor < 0 {
+			cursor = 0
+		}
+		if cursor >= total {
+			cursor = total - 1
+		}
+		if total <= 1 {
+			top = 0
+		} else {
+			top = cursor * span / (total - 1)
+		}
 	} else {
-		top = cursor * span / (total - 1)
+		maxStart := total - height
+		pos := m.scrollOffset
+		if pos < 0 {
+			pos = 0
+		}
+		if maxStart > 0 && pos > maxStart {
+			pos = maxStart
+		}
+		if maxStart <= 0 {
+			top = 0
+		} else {
+			top = pos * span / maxStart
+		}
 	}
 	if top+thumb > height {
 		top = height - thumb
@@ -388,11 +408,15 @@ func (m tuiModel) scrollbarRange() (top, thumb int, ok bool) {
 	return top, thumb, true
 }
 
-// cursorForScrollbar 把滚动条上的一行映射成表格选中行。
-func (m tuiModel) cursorForScrollbar(markIndex int) int {
-	total := m.tableRowCount()
+// offsetForScrollbar 把滚动条上的一行映射成视口起点，不改选中行。
+func (m tuiModel) offsetForScrollbar(markIndex int) int {
 	height := m.table.Height()
-	if height <= 1 || total <= 1 {
+	total := m.tableRowCount()
+	maxStart := total - height
+	if maxStart < 0 {
+		maxStart = 0
+	}
+	if height <= 1 || maxStart == 0 {
 		return 0
 	}
 	if markIndex < 0 {
@@ -401,25 +425,124 @@ func (m tuiModel) cursorForScrollbar(markIndex int) int {
 	if markIndex >= height {
 		markIndex = height - 1
 	}
-	return markIndex * (total - 1) / (height - 1)
+	return markIndex * maxStart / (height - 1)
 }
 
 func (m *tuiModel) jumpScrollbar(markIndex int) {
 	if m.scrollbarDrag {
 		markIndex -= m.scrollbarGrab
 	}
-	target := m.cursorForScrollbar(markIndex)
-	if target >= len(m.results) {
-		m.table.SetCursor(target)
-		if target-len(m.results) < len(m.inFlightOrder) {
-			m.highlightInFlight(m.inFlightOrder[target-len(m.results)])
+	// 只挪视口。选中行留给点击和方向键。
+	m.followSelection = false
+	m.scrollOffset = m.offsetForScrollbar(markIndex)
+}
+
+// viewportStart 是当前画面上第一条数据行的绝对下标。
+// 选中跟随开启时，要加上表格内部的滚动偏移，否则点击会落到上一行。
+func (m tuiModel) viewportStart() int {
+	height := m.table.Height()
+	total := m.tableRowCount()
+	maxStart := 0
+	if height > 0 && total > height {
+		maxStart = total - height
+	}
+	start := m.scrollOffset
+	if m.followSelection {
+		start = tableStartIndex(m.table.Cursor(), height) + tableYOffset(m.table)
+	}
+	if start < 0 {
+		return 0
+	}
+	if start > maxStart {
+		return maxStart
+	}
+	return start
+}
+
+// tableYOffset 读取 bubbles 表格视口的纵向偏移。这个字段没有导出，
+// 但点击定位必须用它，否则滚过一页后会稳定地选中上一行。
+func tableYOffset(t table.Model) int {
+	viewport := reflect.ValueOf(t).FieldByName("viewport")
+	if !viewport.IsValid() {
+		return 0
+	}
+	offset := viewport.FieldByName("YOffset")
+	if !offset.IsValid() || offset.Kind() != reflect.Int {
+		return 0
+	}
+	return int(offset.Int())
+}
+
+// renderScrolledTable 按 scrollOffset 画出数据行，选中行保持不动。
+// 表头仍用表格组件原来的两行，避免滚动条和点击的行号对不齐。
+func (m tuiModel) renderScrolledTable() string {
+	base := m.table.View()
+	lines := strings.Split(base, "\n")
+	off := dataRowOffset(base)
+	if off > len(lines) {
+		off = len(lines)
+	}
+	head := append([]string(nil), lines[:off]...)
+	rows := m.table.Rows()
+	height := m.table.Height()
+	start := m.viewportStart()
+	body := make([]string, 0, height)
+	for i := 0; i < height; i++ {
+		abs := start + i
+		if abs < 0 || abs >= len(rows) {
+			body = append(body, "")
+			continue
 		}
-		return
+		body = append(body, renderDataRow(m.table.Columns(), rows[abs], abs == m.table.Cursor()))
 	}
-	m.setSelection(target)
-	if m.detailVisible {
-		m.syncSelectionFromCursor()
+	return strings.Join(append(head, body...), "\n")
+}
+
+func renderDataRow(cols []table.Column, row table.Row, selected bool) string {
+	cells := make([]string, 0, len(cols))
+	for i, col := range cols {
+		if col.Width <= 0 {
+			continue
+		}
+		val := ""
+		if i < len(row) {
+			val = row[i]
+		}
+		fitted := lipgloss.NewStyle().Width(col.Width).MaxWidth(col.Width).Inline(true)
+		cell := lipgloss.NewStyle().Padding(0, 1).Render(fitted.Render(truncateCol(val, col.Width)))
+		cells = append(cells, cell)
 	}
+	line := lipgloss.JoinHorizontal(lipgloss.Top, cells...)
+	if selected {
+		line = selectedRowStyle.Render(line)
+	}
+	return line
+}
+
+func truncateCol(text string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(text) <= width {
+		return text
+	}
+	ellipsis := "…"
+	if lipgloss.Width(ellipsis) > width {
+		return ""
+	}
+	limit := width - lipgloss.Width(ellipsis)
+	var b strings.Builder
+	used := 0
+	for _, r := range text {
+		w := lipgloss.Width(string(r))
+		if used+w > limit {
+			break
+		}
+		b.WriteRune(r)
+		used += w
+	}
+	b.WriteString(ellipsis)
+	return b.String()
 }
 
 // scrollbarMarkAt 判断鼠标是否落在滚动条上，并返回对应的数据行下标。
