@@ -812,7 +812,7 @@ func (m tuiModel) View() string {
 	sections := []string{
 		m.progressLine(),
 		"",
-		lipgloss.JoinHorizontal(lipgloss.Top, tableView, m.tableScrollbar()),
+		withScrollbar(tableView, m.scrollbarMarks()),
 	}
 	if detailView != "" {
 		sections = append(sections, "", detailView)

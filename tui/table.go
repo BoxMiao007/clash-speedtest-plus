@@ -234,7 +234,7 @@ func (m tuiModel) columnAtX(x int) int {
 }
 
 func (m tuiModel) rowAtY(y int) (int, bool) {
-	startY := m.tableHeaderY() + tableHeaderLines
+	startY := m.tableHeaderY() + dataRowOffset(m.table.View())
 	if y < startY {
 		return 0, false
 	}
@@ -353,12 +353,12 @@ func (m *tuiModel) highlightInFlight(name string) {
 	}
 }
 
-// tableScrollbar 在表格右侧画一条位置条。行数放得下时不占位置。
-func (m tuiModel) tableScrollbar() string {
+// scrollbarMarks 按当前光标给出每行数据该画的滚动条字符。放得下时为空。
+func (m tuiModel) scrollbarMarks() []string {
 	total := m.tableRowCount()
 	height := m.table.Height()
 	if total <= height || height <= 0 {
-		return ""
+		return nil
 	}
 	cursor := m.table.Cursor()
 	if cursor < 0 {
@@ -375,15 +375,71 @@ func (m tuiModel) tableScrollbar() string {
 	if top+thumb > height {
 		top = height - thumb
 	}
-	lines := make([]string, height)
-	for i := range lines {
-		mark := "│"
+	marks := make([]string, height)
+	for i := range marks {
+		marks[i] = "░"
 		if i >= top && i < top+thumb {
-			mark = "█"
+			marks[i] = "█"
 		}
-		lines[i] = mark
 	}
-	return " " + strings.Join(lines, "\n ")
+	return marks
+}
+
+// withScrollbar 把滚动条画进表格每一行的末尾，避免被窗口宽度裁掉。
+func withScrollbar(view string, marks []string) string {
+	if len(marks) == 0 {
+		return view
+	}
+	lines := strings.Split(view, "\n")
+	body := 0
+	for i, line := range lines {
+		if strings.TrimSpace(stripANSI(line)) == "" || strings.Contains(line, "─") {
+			continue
+		}
+		if body == 0 {
+			lines[i] = strings.TrimRight(line, " ") + " "
+			body++
+			continue
+		}
+		index := body - 1
+		body++
+		if index >= len(marks) {
+			continue
+		}
+		lines[i] = strings.TrimRight(line, " ") + marks[index]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != 0x1b {
+			b.WriteByte(s[i])
+			continue
+		}
+		for i < len(s) && s[i] != 'm' {
+			i++
+		}
+	}
+	return b.String()
+}
+
+// dataRowOffset 返回表格视图里第一条数据行的行号。
+func dataRowOffset(view string) int {
+	lines := strings.Split(view, "\n")
+	body := 0
+	for i, line := range lines {
+		if strings.TrimSpace(stripANSI(line)) == "" || strings.Contains(line, "─") {
+			continue
+		}
+		if body == 0 {
+			body++
+			continue
+		}
+		return i
+	}
+	return tableHeaderLines
 }
 
 func tableStartIndex(cursor int, height int) int {

@@ -69,6 +69,27 @@ func TestDetailOpenKeepsScrollAndPinnedDetail(t *testing.T) {
 	}
 }
 
+func TestClickSecondRowSelectsSecond(t *testing.T) {
+	model := testingModel(t, 4)
+	clicked := clickRow(model, 1)
+	if clicked.table.Cursor() != 1 {
+		t.Fatalf("点击第二行实际选中了 %d", clicked.table.Cursor())
+	}
+	if clicked.detailResult != clicked.results[1] {
+		t.Fatal("点击第二行打开的不是第二行详情")
+	}
+}
+
+func TestScrollbarAppearsWhenRowsOverflow(t *testing.T) {
+	model := testingModel(t, 40)
+	model.windowHeight = 16
+	model.updateTableLayout()
+	view := model.View()
+	if !strings.Contains(view, "█") {
+		t.Fatalf("行数超出窗口时应显示滚动条:\n%s", view)
+	}
+}
+
 // 选中第 9 行后刷新，不能跳回第 1 行。
 func TestRefreshKeepsLaterSelection(t *testing.T) {
 	model := testingModel(t, 10)
