@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/table"
@@ -294,14 +295,6 @@ func (m *tuiModel) syncSelection() {
 	if m.selectedIndex < 0 {
 		return
 	}
-	if m.detailResult != nil {
-		for i, result := range m.results {
-			if result == m.detailResult {
-				m.selectedIndex = i
-				break
-			}
-		}
-	}
 	if m.selectedIndex < 0 || m.selectedIndex >= len(m.results) {
 		m.selectedIndex = -1
 		m.table.Blur()
@@ -358,6 +351,39 @@ func (m *tuiModel) highlightInFlight(name string) {
 			m.updateTableLayout()
 		}
 	}
+}
+
+// tableScrollbar 在表格右侧画一条位置条。行数放得下时不占位置。
+func (m tuiModel) tableScrollbar() string {
+	total := m.tableRowCount()
+	height := m.table.Height()
+	if total <= height || height <= 0 {
+		return ""
+	}
+	cursor := m.table.Cursor()
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= total {
+		cursor = total - 1
+	}
+	thumb := max(1, height*height/total)
+	if thumb >= height {
+		thumb = height - 1
+	}
+	top := cursor * (height - thumb) / max(total-1, 1)
+	if top+thumb > height {
+		top = height - thumb
+	}
+	lines := make([]string, height)
+	for i := range lines {
+		mark := "│"
+		if i >= top && i < top+thumb {
+			mark = "█"
+		}
+		lines[i] = mark
+	}
+	return " " + strings.Join(lines, "\n ")
 }
 
 func tableStartIndex(cursor int, height int) int {

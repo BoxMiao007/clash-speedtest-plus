@@ -69,6 +69,24 @@ func TestDetailOpenKeepsScrollAndPinnedDetail(t *testing.T) {
 	}
 }
 
+// 选中第 9 行后刷新，不能跳回第 1 行。
+func TestRefreshKeepsLaterSelection(t *testing.T) {
+	model := testingModel(t, 10)
+	opened := clickRow(model, 0)
+	moved := opened
+	for i := 0; i < 8; i++ {
+		next, _ := moved.Update(tea.KeyMsg{Type: tea.KeyDown})
+		moved = next.(tuiModel)
+	}
+	if moved.table.Cursor() != 8 {
+		t.Fatalf("应停在第 9 行: %d", moved.table.Cursor())
+	}
+	refreshed, _ := moved.Update(nodeProgressMsg{progress: speedtester.Progress{Name: "inflight", Type: "SS"}})
+	if refreshed.(tuiModel).table.Cursor() != 8 {
+		t.Fatalf("刷新跳回了上一条: %d", refreshed.(tuiModel).table.Cursor())
+	}
+}
+
 // 进度刷新不应把已经滚到下面的视口拉回顶部。
 func TestProgressRefreshKeepsViewport(t *testing.T) {
 	model := testingModel(t, 30)

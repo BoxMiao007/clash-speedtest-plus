@@ -776,6 +776,29 @@ func formatLoss(value float64) string {
 	return fmt.Sprintf("%.1f%%", value)
 }
 
+// grayInFlightLines 把已渲染的在测行整行变灰。选中行保持表格高亮。
+// 染色放在表格截断之后，转义码不会把类型、延迟裁掉。
+func grayInFlightLines(view string, finished int, cursor int) string {
+	lines := strings.Split(view, "\n")
+	body := 0
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" || strings.Contains(line, "─") {
+			continue
+		}
+		if body == 0 {
+			body++
+			continue
+		}
+		index := body - 1
+		body++
+		if index < finished || index == cursor {
+			continue
+		}
+		lines[i] = "\x1b[2m" + line + "\x1b[22m"
+	}
+	return strings.Join(lines, "\n")
+}
+
 // View renders the TUI
 func (m tuiModel) View() string {
 	if m.quitting {
@@ -783,13 +806,13 @@ func (m tuiModel) View() string {
 	}
 
 	// Layout: progress bar at top, table below
-	tableView := m.table.View()
+	tableView := grayInFlightLines(m.table.View(), len(m.results), m.table.Cursor())
 	detailView := m.detailPanelView()
 
 	sections := []string{
 		m.progressLine(),
 		"",
-		tableView,
+		lipgloss.JoinHorizontal(lipgloss.Top, tableView, m.tableScrollbar()),
 	}
 	if detailView != "" {
 		sections = append(sections, "", detailView)

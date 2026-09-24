@@ -17,9 +17,12 @@ func TestInFlightTypeAndLatencyAreFullyVisible(t *testing.T) {
 	}
 	model.updateTableRows()
 
-	view := model.table.View()
-	if !strings.Contains(view, "Trojan") {
-		t.Fatalf("在测行类型没有显示全:\n%s", view)
+	view := model.View()
+	if !strings.Contains(view, "Trojan") || !strings.Contains(view, "123ms") {
+		t.Fatalf("在测行类型或延迟没有显示全:\n%s", view)
+	}
+	if !strings.Contains(view, "\x1b[2m") || !strings.Contains(view, "inflight") {
+		t.Fatalf("在测行应是灰色:\n%s", view)
 	}
 	if !strings.Contains(view, "测试中") && !strings.Contains(view, "123ms") {
 		t.Fatalf("在测行延迟没有显示全:\n%s", view)
