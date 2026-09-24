@@ -1,5 +1,7 @@
 # Clash-SpeedTest
 
+本仓库是 [faceair/clash-speedtest](https://github.com/faceair/clash-speedtest) 的下游版本，在上游基础上增加了交互界面、结果图导出等改动，并持续合并上游更新。协议仍为 [GPL-3.0](LICENSE)。
+
 基于 Clash/Mihomo 核心的测速工具，快速测试你的节点速度。
 
 Features:
