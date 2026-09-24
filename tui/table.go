@@ -320,9 +320,13 @@ func (m tuiModel) tableHeaderY() int {
 }
 
 func (m tuiModel) isHeaderClick(y int) bool {
-	startY := m.tableHeaderY()
-	endY := startY + tableHeaderLines
-	return y >= startY && y < endY
+	line, ok := m.lineAtVisualY(y)
+	if !ok {
+		return false
+	}
+	plain := stripANSI(line)
+	// 认画面上的表头文字，不用推算行号。进度行折行后，推算会把第一条数据当成表头。
+	return strings.Contains(plain, "序号") && !strings.Contains(plain, "─")
 }
 
 func (m *tuiModel) setSelection(index int) {

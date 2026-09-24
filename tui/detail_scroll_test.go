@@ -477,6 +477,31 @@ func TestClickUsesPrintedRowWhenProgressWraps(t *testing.T) {
 	}
 }
 
+// 进度行折行后，第一条数据行的画面行号会落进旧的表头区间。
+// 点它必须打开详情，不能去改排序。
+func TestClickFirstRowWhenProgressWrapsOpensDetail(t *testing.T) {
+	model := testingModel(t, 8)
+	model.windowWidth = 40
+	model.windowHeight = 24
+	model.updateTableLayout()
+	target := visualYOf(model.View(), model.windowWidth, "100ms")
+	if target < 0 {
+		t.Fatal("画面上找不到第一条数据")
+	}
+	before := model.sortColumn
+	updated, _ := model.Update(tea.MouseMsg{
+		X: 1, Y: target,
+		Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft,
+	})
+	got := updated.(tuiModel)
+	if got.detailResult == nil || got.detailResult.Latency != 100*time.Millisecond {
+		t.Fatalf("点在第一条上，实际打开 %v", got.detailResult)
+	}
+	if got.sortColumn != before {
+		t.Fatalf("点数据行不该改排序列: %d -> %d", before, got.sortColumn)
+	}
+}
+
 func visualYOf(view string, width int, target string) int {
 	y := 0
 	for _, line := range strings.Split(view, "\n") {
