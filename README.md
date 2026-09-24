@@ -55,6 +55,7 @@ rules:
         同时测试的节点数（也可写 -parallel | 默认: 1）
   -v
         显示版本信息
+
   -fast
         快速模式（等同 --speed-mode fast）
   -speed-mode string

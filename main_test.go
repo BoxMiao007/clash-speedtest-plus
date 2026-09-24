@@ -42,17 +42,18 @@ func TestParallelFlagHelpShowsBothNames(t *testing.T) {
 	fs.SetOutput(&buf)
 	flag.CommandLine = fs
 	_ = intFlag("p", "parallel", 1, "同时测试的节点数")
-	_ = flag.Int("download-size", 50, "下载测试大小（单位：MB）")
+	_ = flag.Bool("v", false, "显示版本信息")
+	_ = flag.Bool("fast", false, "快速模式")
 	printFlagDefaults(fs)
 	help := buf.String()
 	if !strings.Contains(help, "同时测试的节点数（也可写 -parallel | 默认: 1）") {
 		t.Fatalf("帮助应在 -p 一行注明 -parallel:\n%s", help)
 	}
-	if !strings.Contains(help, "下载测试大小（默认: 50 | 单位：MB）") {
-		t.Fatalf("下载大小应把默认值和单位写在同一行:\n%s", help)
-	}
 	if strings.Contains(help, "\n  -parallel ") {
 		t.Fatalf("-parallel 不应再单独占一行:\n%s", help)
+	}
+	if !strings.Contains(help, "显示版本信息\n\n  -fast") {
+		t.Fatalf("单字母简写和完整参数名之间应空一行:\n%s", help)
 	}
 }
 

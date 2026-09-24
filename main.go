@@ -447,7 +447,12 @@ func printFlagDefaults(fs *flag.FlagSet) {
 			return flags[i].Name < flags[j].Name
 		}
 	})
+	short := true
 	for _, f := range flags {
+		if short && len(f.Name) > 1 {
+			fmt.Fprint(fs.Output(), "\n")
+			short = false
+		}
 		name, usage := flag.UnquoteUsage(f)
 		s := fmt.Sprintf("  -%s", f.Name)
 		if len(name) > 0 {
