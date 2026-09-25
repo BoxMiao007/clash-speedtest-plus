@@ -816,6 +816,82 @@ func WriteResultImage(dir string, spec ImageSpec) (string, string, error) {
 	return path, warning, nil
 }
 
+// ImageSpeedFilter 是 -image-speed-only 筛完后的图行和计数。
+// 无效是已完成且两侧速度都是 0 的行；测试中是在测且两侧速度都是 0 的行。
+type ImageSpeedFilter struct {
+	Rows    []ImageRow
+	Invalid int
+	Testing int
+}
+
+// FilterImageRowsBySpeed 在 enabled 时只留下载或上传速度大于 0 的行，并重编序号。
+// 关闭时原样返回，不计数。
+func FilterImageRowsBySpeed(rows []ImageRow, enabled bool) ImageSpeedFilter {
+	if !enabled {
+		return ImageSpeedFilter{Rows: rows}
+	}
+	kept := make([]ImageRow, 0, len(rows))
+	var invalid, testing int
+	for _, row := range rows {
+		if imageRowHasSpeed(row) {
+			kept = append(kept, row)
+			continue
+		}
+		if row.InFlight {
+			testing++
+			continue
+		}
+		invalid++
+	}
+	for i := range kept {
+		if len(kept[i].Cells) == 0 {
+			continue
+		}
+		cells := append([]string(nil), kept[i].Cells...)
+		cells[0] = fmt.Sprintf("%d.", i+1)
+		kept[i].Cells = cells
+	}
+	return ImageSpeedFilter{Rows: kept, Invalid: invalid, Testing: testing}
+}
+
+func imageRowHasSpeed(row ImageRow) bool {
+	if row.Result != nil {
+		return row.Result.DownloadSpeed > 0 || row.Result.UploadSpeed > 0
+	}
+	if row.InFlight {
+		return inFlightCellHasSpeed(row.Cells)
+	}
+	return false
+}
+
+func inFlightCellHasSpeed(cells []string) bool {
+	for _, index := range []int{6, 7} {
+		if index >= len(cells) {
+			continue
+		}
+		text := strings.TrimSpace(cells[index])
+		if text != "" && text != "N/A" && text != "测试中" && text != "…" {
+			return true
+		}
+	}
+	return false
+}
+
+// AppendImageSpeedCounts 在摘要分数后补括号。某一项为 0 就省略，两项都是 0 不加括号。
+func AppendImageSpeedCounts(summary string, invalid, testing int) string {
+	var parts []string
+	if invalid > 0 {
+		parts = append(parts, fmt.Sprintf("无效 %d", invalid))
+	}
+	if testing > 0 {
+		parts = append(parts, fmt.Sprintf("测试中 %d", testing))
+	}
+	if len(parts) == 0 {
+		return summary
+	}
+	return summary + "（" + strings.Join(parts, "，") + "）"
+}
+
 // BuildImageRows 把完成结果转成图行。节点名用订阅原名。
 func BuildImageRows(results []*speedtester.Result, mode speedtester.SpeedMode) []ImageRow {
 	rows := make([]ImageRow, 0, len(results))
