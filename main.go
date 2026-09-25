@@ -295,7 +295,7 @@ func writeNonInteractiveImage(ctx context.Context, results []*speedtester.Result
 	filtered := output.FilterImageRowsBySpeed(rows, speedOnly)
 	summary := output.SummaryLine(time.Now(), mode, status, len(results), total)
 	if speedOnly {
-		summary = output.AppendImageSpeedCounts(summary, filtered.Invalid, filtered.Testing)
+		summary = output.AppendImageSpeedCounts(summary, len(filtered.Rows), filtered.Invalid, filtered.Testing)
 	}
 	spec := output.ImageSpec{
 		Mode:    mode,

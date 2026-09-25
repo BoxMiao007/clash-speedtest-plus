@@ -801,7 +801,7 @@ func (m tuiModel) imageSpec(finished bool) output.ImageSpec {
 	filtered := output.FilterImageRowsBySpeed(rows, m.imageSpeedOnly)
 	summary := output.SummaryLine(time.Now(), m.mode, status, m.currentProxy, m.totalProxies)
 	if m.imageSpeedOnly {
-		summary = output.AppendImageSpeedCounts(summary, filtered.Invalid, filtered.Testing)
+		summary = output.AppendImageSpeedCounts(summary, len(filtered.Rows), filtered.Invalid, filtered.Testing)
 	}
 	return output.ImageSpec{
 		Mode:    m.mode,

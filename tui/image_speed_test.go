@@ -58,7 +58,7 @@ func TestImageSpeedOnlyDropsZeroSpeedInFlight(t *testing.T) {
 	if !spec.Rows[1].InFlight || spec.Rows[1].Cells[0] != "2." || spec.Rows[1].Cells[1] != "moving" {
 		t.Fatalf("第二行应是灰色的 2. moving: %#v inFlight=%v", spec.Rows[1].Cells, spec.Rows[1].InFlight)
 	}
-	if !strings.HasSuffix(spec.Summary, "2/4（无效 1，测试中 1）") {
-		t.Fatalf("摘要应带无效和测试中: %q", spec.Summary)
+	if !strings.HasSuffix(spec.Summary, "2/4（有效 2，无效 1，测试中 1）") {
+		t.Fatalf("摘要应带有效、无效和测试中: %q", spec.Summary)
 	}
 }

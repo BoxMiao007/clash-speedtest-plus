@@ -877,9 +877,12 @@ func inFlightCellHasSpeed(cells []string) bool {
 	return false
 }
 
-// AppendImageSpeedCounts 在摘要分数后补括号。某一项为 0 就省略，两项都是 0 不加括号。
-func AppendImageSpeedCounts(summary string, invalid, testing int) string {
+// AppendImageSpeedCounts 在摘要分数后补括号。某一项为 0 就省略，三项都是 0 不加括号。
+func AppendImageSpeedCounts(summary string, valid, invalid, testing int) string {
 	var parts []string
+	if valid > 0 {
+		parts = append(parts, fmt.Sprintf("有效 %d", valid))
+	}
 	if invalid > 0 {
 		parts = append(parts, fmt.Sprintf("无效 %d", invalid))
 	}
