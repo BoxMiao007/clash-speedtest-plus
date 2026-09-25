@@ -10,7 +10,9 @@ import (
 
 // Options 是选源界面上可填写的测速选项。没填的项沿用命令行默认值。
 type Options struct {
-	Filter string
+	Filter       string
+	Mode         string
+	DownloadSize string
 }
 
 // Session 是选源界面打开时已经准备好的配置列表。
@@ -31,6 +33,7 @@ type Model struct {
 	focus       int
 	address     string
 	addressLine int
+	optionIndex int
 }
 
 // New 用一份会话创建选源界面。有合格配置时光标停在第一条。
@@ -48,6 +51,7 @@ func New(session Session) Model {
 		cursor:      cursor,
 		checked:     checked,
 		addressLine: len(session.Configs) + 1,
+		options:     Options{Filter: ".+", Mode: "download", DownloadSize: "50"},
 	}
 }
 
@@ -64,9 +68,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.move(1)
 		case tea.KeyUp:
 			m.move(-1)
+		case tea.KeyLeft, tea.KeyRight:
+			if m.focus == focusOptions {
+				m.changeMode(msg.Type == tea.KeyRight)
+			}
 		case tea.KeyRunes:
 			if m.focus == focusAddress {
 				m.address += string(msg.Runes)
+			} else if m.focus == focusOptions {
+				m.typeOption(string(msg.Runes))
 			}
 		case tea.KeyBackspace:
 			if m.focus == focusAddress && m.address != "" {
@@ -106,16 +116,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 const (
 	focusConfigs = iota
 	focusAddress
+	focusOptions
 )
 
+func (m *Model) changeMode(next bool) {
+	modes := []string{"fast", "download", "full"}
+	index := 1
+	for i, mode := range modes {
+		if m.options.Mode == mode {
+			index = i
+		}
+	}
+	if next && index < len(modes)-1 {
+		index++
+	}
+	if !next && index > 0 {
+		index--
+	}
+	m.options.Mode = modes[index]
+}
+
+func (m *Model) typeOption(text string) {
+	if m.optionIndex != 0 || !m.optionState().Enabled(OptionDownloadSize) {
+		return
+	}
+	m.options.DownloadSize += text
+}
+
+func (m Model) optionState() OptionState {
+	return OptionState{Mode: m.options.Mode, OutputPath: ""}
+}
+
 func (m *Model) move(delta int) {
-	if m.focus == focusConfigs && delta > 0 && m.cursor >= len(m.configs)-1 {
+	if m.focus == focusConfigs && delta > 0 && (len(m.configs) == 0 || m.cursor >= len(m.configs)-1) {
 		m.focus = focusAddress
+		return
+	}
+	if m.focus == focusAddress && delta > 0 {
+		m.focus = focusOptions
 		return
 	}
 	if m.focus == focusAddress && delta < 0 && len(m.configs) > 0 {
 		m.focus = focusConfigs
 		m.cursor = len(m.configs) - 1
+		return
+	}
+	if m.focus == focusOptions && delta < 0 {
+		m.focus = focusAddress
 		return
 	}
 	if m.focus != focusConfigs || len(m.configs) == 0 {
@@ -138,6 +185,17 @@ func (m Model) hasSource() bool {
 		}
 	}
 	return false
+}
+
+func modeLabel(mode string) string {
+	switch mode {
+	case "fast":
+		return "快速"
+	case "full":
+		return "完整"
+	default:
+		return "下载"
+	}
 }
 
 func (m *Model) toggle(index int) {
@@ -168,6 +226,12 @@ func (m Model) View() string {
 		b.WriteString(line + "\n")
 	}
 	b.WriteString("\n订阅地址  " + m.address + "\n")
+	b.WriteString("测速模式  " + modeLabel(m.options.Mode) + "\n")
+	download := "下载大小  " + m.options.DownloadSize
+	if !m.optionState().Enabled(OptionDownloadSize) {
+		download += "  不可用"
+	}
+	b.WriteString(download + "\n")
 	if m.status != "" {
 		b.WriteString(m.status + "\n")
 	}

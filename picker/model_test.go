@@ -40,6 +40,40 @@ func TestSpaceAndClickToggleOnlySelectableConfigs(t *testing.T) {
 	}
 }
 
+func TestFastModeDisablesDownloadSizeOnScreen(t *testing.T) {
+	model := New(sessionFixture())
+	if model.options.Mode != "download" {
+		t.Fatalf("默认模式 = %q", model.options.Mode)
+	}
+	for model.focus != focusOptions {
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(Model)
+	}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model = updated.(Model)
+	view := model.View()
+	if !strings.Contains(view, "快速") || !strings.Contains(view, "下载大小") {
+		t.Fatalf("画面缺少模式或下载大小:\n%s", view)
+	}
+	if !optionLineDisabled(view, "下载大小") {
+		t.Fatalf("快速模式下下载大小应不可用:\n%s", view)
+	}
+	before := model.options.DownloadSize
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("9")})
+	if updated.(Model).options.DownloadSize != before {
+		t.Fatal("不可用的下载大小被改了")
+	}
+}
+
+func optionLineDisabled(view, label string) bool {
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, label) {
+			return strings.Contains(line, "不可用")
+		}
+	}
+	return false
+}
+
 func TestTypedSubscriptionStartsWithoutCheckedConfig(t *testing.T) {
 	model := New(sessionFixture())
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
