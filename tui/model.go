@@ -109,13 +109,15 @@ type tuiModel struct {
 	pausedElapsed  time.Duration
 
 	// 结果表图：-no-image 只关自动导出，s 仍可手动保存。
-	autoImage     bool
-	imageDir      string
-	imageSource   string
-	savingImage   bool
-	statusText    string
-	statusUntil   time.Time
-	autoImageDone bool
+	// imageSpeedOnly 为真时，图里只留下载或上传速度大于 0 的行。
+	autoImage      bool
+	imageSpeedOnly bool
+	imageDir       string
+	imageSource    string
+	savingImage    bool
+	statusText     string
+	statusUntil    time.Time
+	autoImageDone  bool
 	// quittingAfterSave 表示整轮已结束，第一次退出正在等本地产物。
 	quittingAfterSave bool
 	forceQuit         bool
@@ -236,6 +238,11 @@ func newTUIModel(
 		imageDir:        ".",
 		followSelection: true,
 	}
+}
+
+// SetImageSpeedOnly 打开后，结果图只留下载或上传速度大于 0 的行。
+func (m *tuiModel) SetImageSpeedOnly(enabled bool) {
+	m.imageSpeedOnly = enabled
 }
 
 // SetImageExport 配置结果表图目录。auto 为 false 时只关自动导出。
@@ -775,12 +782,17 @@ func (m tuiModel) imageSpec(finished bool) output.ImageSpec {
 			InFlight: true,
 		})
 	}
+	filtered := output.FilterImageRowsBySpeed(rows, m.imageSpeedOnly)
+	summary := output.SummaryLine(time.Now(), m.mode, status, m.currentProxy, m.totalProxies)
+	if m.imageSpeedOnly {
+		summary = output.AppendImageSpeedCounts(summary, filtered.Invalid, filtered.Testing)
+	}
 	return output.ImageSpec{
 		Mode:    m.mode,
 		Source:  m.imageSource,
-		Summary: output.SummaryLine(time.Now(), m.mode, status, m.currentProxy, m.totalProxies),
+		Summary: summary,
 		Headers: m.baseHeaders,
-		Rows:    rows,
+		Rows:    filtered.Rows,
 		Now:     time.Now(),
 	}
 }

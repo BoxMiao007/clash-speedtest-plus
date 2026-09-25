@@ -855,8 +855,8 @@ func FilterImageRowsBySpeed(rows []ImageRow, enabled bool) ImageSpeedFilter {
 }
 
 func imageRowHasSpeed(row ImageRow) bool {
-	if row.Result != nil {
-		return row.Result.DownloadSpeed > 0 || row.Result.UploadSpeed > 0
+	if row.Result != nil && (row.Result.DownloadSpeed > 0 || row.Result.UploadSpeed > 0) {
+		return true
 	}
 	if row.InFlight {
 		return inFlightCellHasSpeed(row.Cells)
