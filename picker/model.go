@@ -1,7 +1,9 @@
 package picker
 
 import (
+	"fmt"
 	"regexp"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -97,5 +99,25 @@ func (m *Model) toggle(index int) {
 // Init 满足 bubbletea 的界面接口。选源界面打开时没有后台任务。
 func (m Model) Init() tea.Cmd { return nil }
 
-// View 满足 bubbletea 的界面接口。勾选测试不看画面。
-func (m Model) View() string { return "" }
+// View 画出配置列表。打勾的合格配置带 ✓，不可选的带原因。
+func (m Model) View() string {
+	var b strings.Builder
+	if len(m.configs) == 0 {
+		b.WriteString("没有配置\n")
+	}
+	for i, config := range m.configs {
+		mark := " "
+		if m.checked[i] {
+			mark = "✓"
+		}
+		line := fmt.Sprintf("%s %s", mark, config.Name)
+		if !config.Selectable && config.Reason != "" {
+			line += "  " + config.Reason
+		}
+		b.WriteString(line + "\n")
+	}
+	if m.status != "" {
+		b.WriteString(m.status + "\n")
+	}
+	return b.String()
+}

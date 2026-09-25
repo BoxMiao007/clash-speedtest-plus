@@ -7,6 +7,18 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func TestViewShowsCheckAndUnselectableReason(t *testing.T) {
+	model := New(sessionFixture())
+	model.checked[0] = true
+	view := model.View()
+	if !strings.Contains(view, "a.yaml") || !strings.Contains(view, "✓") {
+		t.Fatalf("合格配置未显示勾选:\n%s", view)
+	}
+	if !strings.Contains(view, "bad.yaml") || !strings.Contains(view, "不是合法的 yaml") {
+		t.Fatalf("不可选配置未显示原因:\n%s", view)
+	}
+}
+
 func TestSpaceAndClickToggleOnlySelectableConfigs(t *testing.T) {
 	model := New(sessionFixture())
 	model.cursor = 0
