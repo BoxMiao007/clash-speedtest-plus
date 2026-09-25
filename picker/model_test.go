@@ -65,6 +65,26 @@ func TestFastModeDisablesDownloadSizeOnScreen(t *testing.T) {
 	}
 }
 
+func TestDownFromModeEditsDownloadSizeOnly(t *testing.T) {
+	model := New(sessionFixture())
+	for model.focus != focusOptions {
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(Model)
+	}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model = updated.(Model)
+	if model.options.Mode != "download" {
+		t.Fatalf("停在下载大小时左右键不该改模式: %q", model.options.Mode)
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("8")})
+	model = updated.(Model)
+	if model.options.DownloadSize != "508" {
+		t.Fatalf("下载大小 = %q", model.options.DownloadSize)
+	}
+}
+
 func TestFastModeGreysSpeedOptionsAndEmptyOutputGreysRename(t *testing.T) {
 	model := New(sessionFixture())
 	model.options.Mode = "fast"

@@ -78,7 +78,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyUp:
 			m.move(-1)
 		case tea.KeyLeft, tea.KeyRight:
-			if m.focus == focusOptions {
+			if m.focus == focusOptions && m.optionIndex == optionMode {
 				m.changeMode(msg.Type == tea.KeyRight)
 			}
 		case tea.KeyRunes:
@@ -145,8 +145,13 @@ func (m *Model) changeMode(next bool) {
 	m.options.Mode = modes[index]
 }
 
+const (
+	optionMode = iota
+	optionDownloadSize
+)
+
 func (m *Model) typeOption(text string) {
-	if m.optionIndex != 0 || !m.optionState().Enabled(OptionDownloadSize) {
+	if m.optionIndex != optionDownloadSize || !m.optionState().Enabled(OptionDownloadSize) {
 		return
 	}
 	m.options.DownloadSize += text
@@ -163,6 +168,11 @@ func (m *Model) move(delta int) {
 	}
 	if m.focus == focusAddress && delta > 0 {
 		m.focus = focusOptions
+		m.optionIndex = optionMode
+		return
+	}
+	if m.focus == focusOptions && delta > 0 && m.optionIndex < optionDownloadSize {
+		m.optionIndex++
 		return
 	}
 	if m.focus == focusAddress && delta < 0 && len(m.configs) > 0 {
@@ -171,6 +181,10 @@ func (m *Model) move(delta int) {
 		return
 	}
 	if m.focus == focusOptions && delta < 0 {
+		if m.optionIndex > optionMode {
+			m.optionIndex--
+			return
+		}
 		m.focus = focusAddress
 		return
 	}
