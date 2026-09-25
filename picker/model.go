@@ -10,9 +10,15 @@ import (
 
 // Options 是选源界面上可填写的测速选项。没填的项沿用命令行默认值。
 type Options struct {
-	Filter       string
-	Mode         string
-	DownloadSize string
+	Filter         string
+	Mode           string
+	DownloadSize   string
+	UploadSize     string
+	MinDownload    string
+	MinUpload      string
+	ImageSpeedOnly bool
+	OutputPath     string
+	Rename         bool
 }
 
 // Session 是选源界面打开时已经准备好的配置列表。
@@ -51,7 +57,10 @@ func New(session Session) Model {
 		cursor:      cursor,
 		checked:     checked,
 		addressLine: len(session.Configs) + 1,
-		options:     Options{Filter: ".+", Mode: "download", DownloadSize: "50"},
+		options: Options{
+			Filter: ".+", Mode: "download", DownloadSize: "50", UploadSize: "20",
+			MinDownload: "5", MinUpload: "2", Rename: true,
+		},
 	}
 }
 
@@ -144,7 +153,7 @@ func (m *Model) typeOption(text string) {
 }
 
 func (m Model) optionState() OptionState {
-	return OptionState{Mode: m.options.Mode, OutputPath: ""}
+	return OptionState{Mode: m.options.Mode, OutputPath: m.options.OutputPath}
 }
 
 func (m *Model) move(delta int) {
@@ -187,6 +196,21 @@ func (m Model) hasSource() bool {
 	return false
 }
 
+func optionLine(state OptionState, option Option, label, value string) string {
+	line := label + "  " + value
+	if !state.Enabled(option) {
+		line += "  不可用"
+	}
+	return line + "\n"
+}
+
+func boolText(on bool) string {
+	if on {
+		return "开"
+	}
+	return "关"
+}
+
 func modeLabel(mode string) string {
 	switch mode {
 	case "fast":
@@ -227,11 +251,13 @@ func (m Model) View() string {
 	}
 	b.WriteString("\n订阅地址  " + m.address + "\n")
 	b.WriteString("测速模式  " + modeLabel(m.options.Mode) + "\n")
-	download := "下载大小  " + m.options.DownloadSize
-	if !m.optionState().Enabled(OptionDownloadSize) {
-		download += "  不可用"
-	}
-	b.WriteString(download + "\n")
+	state := m.optionState()
+	b.WriteString(optionLine(state, OptionDownloadSize, "下载大小", m.options.DownloadSize))
+	b.WriteString(optionLine(state, OptionMinDownload, "最低下载速度", m.options.MinDownload))
+	b.WriteString(optionLine(state, OptionImageSpeedOnly, "结果图只留有速度", boolText(m.options.ImageSpeedOnly)))
+	b.WriteString(optionLine(state, OptionUploadSize, "上传大小", m.options.UploadSize))
+	b.WriteString(optionLine(state, OptionMinUpload, "最低上传速度", m.options.MinUpload))
+	b.WriteString(optionLine(state, OptionRename, "重命名", boolText(m.options.Rename)))
 	if m.status != "" {
 		b.WriteString(m.status + "\n")
 	}

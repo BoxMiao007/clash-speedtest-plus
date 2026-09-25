@@ -65,6 +65,30 @@ func TestFastModeDisablesDownloadSizeOnScreen(t *testing.T) {
 	}
 }
 
+func TestFastModeGreysSpeedOptionsAndEmptyOutputGreysRename(t *testing.T) {
+	model := New(sessionFixture())
+	model.options.Mode = "fast"
+	view := model.View()
+	for _, label := range []string{"下载大小", "最低下载速度", "结果图只留有速度", "上传大小", "最低上传速度"} {
+		if !optionLineDisabled(view, label) {
+			t.Fatalf("%s 应不可用:\n%s", label, view)
+		}
+	}
+	if !optionLineDisabled(view, "重命名") {
+		t.Fatal("没有输出路径时重命名应不可用")
+	}
+
+	model.options.Mode = "download"
+	model.options.OutputPath = "out.yaml"
+	view = model.View()
+	if optionLineDisabled(view, "下载大小") || optionLineDisabled(view, "重命名") {
+		t.Fatalf("下载模式且有输出时不应不可用:\n%s", view)
+	}
+	if !optionLineDisabled(view, "上传大小") {
+		t.Fatal("下载模式上传大小应不可用")
+	}
+}
+
 func optionLineDisabled(view, label string) bool {
 	for _, line := range strings.Split(view, "\n") {
 		if strings.Contains(line, label) {
