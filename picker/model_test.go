@@ -40,6 +40,21 @@ func TestSpaceAndClickToggleOnlySelectableConfigs(t *testing.T) {
 	}
 }
 
+func TestTypedSubscriptionStartsWithoutCheckedConfig(t *testing.T) {
+	model := New(sessionFixture())
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("https://example.com/a")})
+	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := updated.(Model)
+	if !got.started {
+		t.Fatalf("填了地址却没开始: %q", got.status)
+	}
+	if !strings.Contains(got.View(), "https://example.com/a") {
+		t.Fatalf("地址没有出现在画面:\n%s", got.View())
+	}
+}
+
 func TestEnterWithoutSourceStaysAndExplains(t *testing.T) {
 	model := New(sessionFixture())
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})

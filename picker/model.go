@@ -23,11 +23,14 @@ type Model struct {
 	configs []ConfigEntry
 	cursor  int
 	checked []bool
-	status   string
-	started  bool
-	options  Options
-	fetching bool
-	quitting bool
+	status      string
+	started     bool
+	options     Options
+	fetching    bool
+	quitting    bool
+	focus       int
+	address     string
+	addressLine int
 }
 
 // New 用一份会话创建选源界面。有合格配置时光标停在第一条。
@@ -40,7 +43,12 @@ func New(session Session) Model {
 			break
 		}
 	}
-	return Model{configs: session.Configs, cursor: cursor, checked: checked}
+	return Model{
+		configs:     session.Configs,
+		cursor:      cursor,
+		checked:     checked,
+		addressLine: len(session.Configs) + 1,
+	}
 }
 
 // Update 处理勾选。空格和点击只切换当前合格配置。
@@ -53,11 +61,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.Type {
 		case tea.KeyDown:
-			if m.cursor < len(m.configs)-1 {
-				m.cursor++
+			m.move(1)
+		case tea.KeyUp:
+			m.move(-1)
+		case tea.KeyRunes:
+			if m.focus == focusAddress {
+				m.address += string(msg.Runes)
+			}
+		case tea.KeyBackspace:
+			if m.focus == focusAddress && m.address != "" {
+				m.address = m.address[:len(m.address)-1]
 			}
 		case tea.KeySpace:
-			m.toggle(m.cursor)
+			if m.focus == focusConfigs {
+				m.toggle(m.cursor)
+			} else if m.focus == focusAddress {
+				m.address += " "
+			}
 		case tea.KeyEnter:
 			if !m.hasSource() {
 				m.status = "先勾选配置或填入订阅地址"
@@ -72,15 +92,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
 			if msg.Y >= 0 && msg.Y < len(m.configs) {
+				m.focus = focusConfigs
 				m.cursor = msg.Y
 				m.toggle(m.cursor)
+			} else if msg.Y == m.addressLine {
+				m.focus = focusAddress
 			}
 		}
 	}
 	return m, nil
 }
 
+const (
+	focusConfigs = iota
+	focusAddress
+)
+
+func (m *Model) move(delta int) {
+	if m.focus == focusConfigs && delta > 0 && m.cursor >= len(m.configs)-1 {
+		m.focus = focusAddress
+		return
+	}
+	if m.focus == focusAddress && delta < 0 && len(m.configs) > 0 {
+		m.focus = focusConfigs
+		m.cursor = len(m.configs) - 1
+		return
+	}
+	if m.focus != focusConfigs || len(m.configs) == 0 {
+		return
+	}
+	next := m.cursor + delta
+	if next < 0 || next >= len(m.configs) {
+		return
+	}
+	m.cursor = next
+}
+
 func (m Model) hasSource() bool {
+	if strings.TrimSpace(m.address) != "" {
+		return true
+	}
 	for i, config := range m.configs {
 		if config.Selectable && m.checked[i] {
 			return true
@@ -116,6 +167,7 @@ func (m Model) View() string {
 		}
 		b.WriteString(line + "\n")
 	}
+	b.WriteString("\n订阅地址  " + m.address + "\n")
 	if m.status != "" {
 		b.WriteString(m.status + "\n")
 	}
