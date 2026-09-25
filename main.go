@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -77,6 +78,27 @@ func launchChoice(args []string, stdoutIsTerminal bool) launchKind {
 		return launchPicker
 	}
 	return launchCLI
+}
+
+// runCLI 走命令行。没给配置时打印用法并返回非 0，不直接退出进程。
+func runCLI(args []string, stdoutIsTerminal bool, out io.Writer) int {
+	if launchChoice(args, stdoutIsTerminal) == launchPicker {
+		return 0
+	}
+	fs := flag.NewFlagSet("clash-speedtest", flag.ContinueOnError)
+	fs.SetOutput(out)
+	config := fs.String("c", "", "配置文件路径，也支持 http(s) 地址")
+	fs.Usage = func() {
+		fmt.Fprintf(out, "用法：clash-speedtest [选项]\n")
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *config == "" {
+		fs.Usage()
+		return 1
+	}
+	return 0
 }
 
 func main() {

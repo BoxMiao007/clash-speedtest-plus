@@ -19,6 +19,17 @@ func TestLaunchOpensPickerOnlyWithoutArgsOnTerminal(t *testing.T) {
 	}
 }
 
+func TestMissingConfigOnCLIPrintsUsage(t *testing.T) {
+	var buf bytes.Buffer
+	code := runCLI(nil, false, &buf)
+	if code == 0 {
+		t.Fatal("无参数且没有终端应失败")
+	}
+	if !strings.Contains(buf.String(), "用法：clash-speedtest") {
+		t.Fatalf("应打印用法，得到:\n%s", buf.String())
+	}
+}
+
 func TestParallelShortAndLongFlagsShareValue(t *testing.T) {
 	orig := flag.CommandLine
 	t.Cleanup(func() { flag.CommandLine = orig })
