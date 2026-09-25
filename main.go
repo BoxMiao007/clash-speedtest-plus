@@ -63,6 +63,22 @@ var (
 	userAgent         = flag.String("ua", "", "拉取 http(s) 配置时使用的 User-Agent（默认使用 mihomo 内核 UA）")
 )
 
+type launchKind int
+
+const (
+	launchCLI launchKind = iota
+	launchPicker
+)
+
+// launchChoice 决定这次启动进选源界面还是命令行。
+// 只有不带任何参数、并且标准输出是终端时才进选源界面。
+func launchChoice(args []string, stdoutIsTerminal bool) launchKind {
+	if len(args) == 0 && stdoutIsTerminal {
+		return launchPicker
+	}
+	return launchCLI
+}
+
 func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "用法：clash-speedtest [选项]\n")

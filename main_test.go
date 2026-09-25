@@ -7,6 +7,18 @@ import (
 	"testing"
 )
 
+func TestLaunchOpensPickerOnlyWithoutArgsOnTerminal(t *testing.T) {
+	if got := launchChoice(nil, true); got != launchPicker {
+		t.Fatalf("无参数且有终端应进选源，得到 %v", got)
+	}
+	if got := launchChoice([]string{"-c", "a.yaml"}, true); got != launchCLI {
+		t.Fatalf("有参数应走命令行，得到 %v", got)
+	}
+	if got := launchChoice(nil, false); got != launchCLI {
+		t.Fatalf("无终端应走命令行，得到 %v", got)
+	}
+}
+
 func TestParallelShortAndLongFlagsShareValue(t *testing.T) {
 	orig := flag.CommandLine
 	t.Cleanup(func() { flag.CommandLine = orig })
