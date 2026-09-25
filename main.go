@@ -43,6 +43,7 @@ var (
 	concurrent        = flag.Int("concurrent", 4, "同一节点的下载并发连接数")
 	parallel          = intFlag("p", "parallel", 1, "同时测试的节点数")
 	noImage           = flag.Bool("no-image", false, "关闭自动导出结果表图，仍可按 s 手动保存")
+	imageSpeedOnly    = flag.Bool("image-speed-only", false, "结果图只保留下载或上传速度大于 0 的行；快速模式会忽略")
 	outputPath        = stringFlag("o", "output", "", "输出配置文件路径")
 	gistToken         = flag.String("gist-token", "", "用于更新 Gist 的 GitHub token")
 	gistAddress       = flag.String("gist-address", "", "要更新的 Gist 地址或 ID（文件名使用输出文件名）")
@@ -184,6 +185,8 @@ func main() {
 		// Create and run TUI
 		model := tui.NewTUIModelWithEngine(effectiveMode, len(allProxies), resultChannel, speedTester, progressChannel, earlyStopSignal)
 		model.SetImageExport(".", !*noImage)
+		model.SetImageSpeedOnly(*imageSpeedOnly)
+		model.NoteFastImageSpeedIgnored()
 		model.SetImageSource(*configPathsConfig)
 		if collectResults {
 			model.SetConfigSaver(func(done []*speedtester.Result) (string, error) {
@@ -248,19 +251,26 @@ func main() {
 		// 非交互模式路径走 stderr，stdout 保留给 TSV/管道输出。
 		fmt.Fprintf(os.Stderr, "已保存配置: %s\n", *outputPath)
 	}
+	if effectiveMode.IsFast() && *imageSpeedOnly {
+		fmt.Fprintf(os.Stderr, "%s\n", tui.FastImageSpeedIgnored())
+	}
 	if !*noImage {
-		exportNonInteractiveImage(results, effectiveMode, len(allProxies))
+		exportNonInteractiveImage(results, effectiveMode, len(allProxies), imageSpeedFilterEnabled(effectiveMode))
 	}
 	waitForUpload()
 }
 
-func exportNonInteractiveImage(results []*speedtester.Result, mode speedtester.SpeedMode, total int) {
+func imageSpeedFilterEnabled(mode speedtester.SpeedMode) bool {
+	return *imageSpeedOnly && !mode.IsFast()
+}
+
+func exportNonInteractiveImage(results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		writeNonInteractiveImage(ctx, results, mode, total)
+		writeNonInteractiveImage(ctx, results, mode, total, speedOnly)
 	}()
 	select {
 	case <-done:
@@ -272,7 +282,7 @@ func exportNonInteractiveImage(results []*speedtester.Result, mode speedtester.S
 	}
 }
 
-func writeNonInteractiveImage(ctx context.Context, results []*speedtester.Result, mode speedtester.SpeedMode, total int) {
+func writeNonInteractiveImage(ctx context.Context, results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -281,12 +291,18 @@ func writeNonInteractiveImage(ctx context.Context, results []*speedtester.Result
 	if *earlyStop > 0 && len(results) < total {
 		status = "已提前结束"
 	}
+	rows := output.BuildImageRows(results, mode)
+	filtered := output.FilterImageRowsBySpeed(rows, speedOnly)
+	summary := output.SummaryLine(time.Now(), mode, status, len(results), total)
+	if speedOnly {
+		summary = output.AppendImageSpeedCounts(summary, filtered.Invalid, filtered.Testing)
+	}
 	spec := output.ImageSpec{
 		Mode:    mode,
 		Source:  *configPathsConfig,
-		Summary: output.SummaryLine(time.Now(), mode, status, len(results), total),
+		Summary: summary,
 		Headers: output.GetHeaders(mode),
-		Rows:    output.BuildImageRows(results, mode),
+		Rows:    filtered.Rows,
 		Now:     time.Now(),
 	}
 	path, warning, err := output.WriteResultImage(".", spec)

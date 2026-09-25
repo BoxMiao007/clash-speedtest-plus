@@ -3,9 +3,31 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/faceair/clash-speedtest/speedtester"
 )
+
+func TestFastModeIgnoresImageSpeedOnly(t *testing.T) {
+	model := NewTUIModel(speedtester.SpeedModeFast, 2, make(chan *speedtester.Result, 1))
+	model.results = []*speedtester.Result{
+		{ProxyName: "快速节点", ProxyType: "SS", Latency: 80 * time.Millisecond},
+	}
+	model.currentProxy = 1
+	model.SetImageSpeedOnly(true)
+	model.NoteFastImageSpeedIgnored()
+
+	if model.statusText != "快速模式没有速度，已忽略 -image-speed-only" {
+		t.Fatalf("启动应提示已忽略: %q", model.statusText)
+	}
+	spec := model.imageSpec(true)
+	if len(spec.Rows) != 1 || spec.Rows[0].Cells[1] != "快速节点" {
+		t.Fatalf("快速模式结果图应保持全量: %#v", spec.Rows)
+	}
+	if strings.Contains(spec.Summary, "无效") || strings.Contains(spec.Summary, "测试中") {
+		t.Fatalf("忽略开关后摘要不应加括号: %q", spec.Summary)
+	}
+}
 
 func TestImageSpeedOnlyDropsZeroSpeedInFlight(t *testing.T) {
 	model := testingModel(t, 2)

@@ -240,9 +240,25 @@ func newTUIModel(
 	}
 }
 
+const fastImageSpeedIgnored = "快速模式没有速度，已忽略 -image-speed-only"
+
+// FastImageSpeedIgnored 是快速模式忽略 -image-speed-only 时的提示。
+func FastImageSpeedIgnored() string {
+	return fastImageSpeedIgnored
+}
+
 // SetImageSpeedOnly 打开后，结果图只留下载或上传速度大于 0 的行。
 func (m *tuiModel) SetImageSpeedOnly(enabled bool) {
 	m.imageSpeedOnly = enabled
+}
+
+// NoteFastImageSpeedIgnored 在快速模式忽略速度过滤时提示一次。
+func (m *tuiModel) NoteFastImageSpeedIgnored() {
+	if !m.mode.IsFast() || !m.imageSpeedOnly {
+		return
+	}
+	m.imageSpeedOnly = false
+	m.setStatus(fastImageSpeedIgnored)
 }
 
 // SetImageExport 配置结果表图目录。auto 为 false 时只关自动导出。

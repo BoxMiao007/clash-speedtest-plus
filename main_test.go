@@ -82,6 +82,22 @@ func TestOutputShortAndLongFlagsShareValue(t *testing.T) {
 	}
 }
 
+func TestImageSpeedOnlyHelpMentionsResultImage(t *testing.T) {
+	orig := flag.CommandLine
+	t.Cleanup(func() { flag.CommandLine = orig })
+
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	var buf bytes.Buffer
+	fs.SetOutput(&buf)
+	flag.CommandLine = fs
+	_ = flag.Bool("image-speed-only", false, "结果图只保留下载或上传速度大于 0 的行；快速模式会忽略")
+	printFlagDefaults(fs)
+	help := buf.String()
+	if !strings.Contains(help, "结果图只保留下载或上传速度大于 0 的行") {
+		t.Fatalf("帮助应说明结果图过滤范围:\n%s", help)
+	}
+}
+
 func TestHelpPutsCommonFlagsFirstAndUsesMegabytes(t *testing.T) {
 	orig := flag.CommandLine
 	t.Cleanup(func() { flag.CommandLine = orig })
