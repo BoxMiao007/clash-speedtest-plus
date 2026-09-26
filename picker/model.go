@@ -2,10 +2,23 @@ package picker
 
 import (
 	"strings"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/faceair/clash-speedtest/speedtester"
+	"github.com/charmbracelet/lipgloss"
 )
+
+// sanitizeInput 剥掉终端粘贴可能带进来的控制字符（如 \x00）。
+// 它们在地址里不可见、TrimSpace 也洗不掉，最后会让 url.Parse 报错。
+// 空格不属于控制字符，天然保留。
+func sanitizeInput(text string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, text)
+}
 
 // Options 是选源界面上可填写的测速选项。没填的项沿用命令行默认值。
 type Options struct {
@@ -37,14 +50,6 @@ type Options struct {
 	UserAgent      string
 }
 
-// StartRequest 是选源界面确认开始时交给调用方的全部内容。
-type StartRequest struct {
-	Selection   []string
-	Options     Options
-	UsedFlagged []string
-	SourceLabel string
-}
-
 // Session 是选源界面打开时已经准备好的配置列表。
 type Session struct {
 	Configs []ConfigEntry
@@ -52,8 +57,6 @@ type Session struct {
 	ExecDir string
 	// Fetch 把订阅地址变成 Clash/Mihomo yaml。测试里注入假的，不访问网络。
 	Fetch func(urls []string) (files []string, used []string, err error)
-	// OnStart 在回车确认后调用。返回的 Cmd 继续驱动界面：开始测速或报加载错误。
-	OnStart func(StartRequest) tea.Cmd
 }
 
 // Model 是选源界面。checked 只记录合格配置是否打勾。
@@ -71,17 +74,9 @@ type Model struct {
 	address     string
 	optionIndex int
 
-	// 测试执行状态。loading 在加载节点，testing 在测，testDone 停在记录表上等退出。
-	loading  bool
-	testing  bool
-	testDone bool
-	total    int
-	records  []*speedtester.Result
-
 	// 各区的滚动位置。
 	configScroll int
 	optionScroll int
-	recordScroll int
 
 	// 终端尺寸，未知（0）时不滚动、不限宽。
 	width  int
@@ -99,24 +94,19 @@ const (
 	focusOptions
 )
 
+// 帮助行热区。
+const (
+	helpHitNone = iota
+	helpHitEnter
+	helpHitQuit
+)
+
 // fetchDoneMsg 是订阅地址拉取结束。err 非空时留在选源界面。
 type fetchDoneMsg struct {
 	err   error
 	files []string
 	used  []string
 }
-
-// LoadFailedMsg 是回车后加载节点失败，选源界面回到可编辑状态。
-type LoadFailedMsg struct{ Err error }
-
-// TestingStartedMsg 是节点加载完成，记录表开始接收结果。
-type TestingStartedMsg struct{ Total int }
-
-// TestResultMsg 是一个节点测完。
-type TestResultMsg struct{ Result *speedtester.Result }
-
-// TestDoneMsg 是整轮测速结束（含提前结束）。
-type TestDoneMsg struct{}
 
 // New 用一份会话创建选源界面。
 // 有合格配置时光标停在第一条；一个都没有时直接停在地址框。
@@ -137,31 +127,34 @@ func New(session Session) Model {
 		checked: checked,
 		focus:   focus,
 		session: session,
+		// 界面默认值照顾双击直用的场景：并行 6 加速整轮测速，
+		// 结果图只留有速度的行，减少空行。命令行参数默认值不受影响。
 		options: Options{
 			Filter: ".+", Mode: "download", DownloadSize: "50", UploadSize: "20",
-			Concurrent: "4", Parallel: "1", Timeout: "5s", MaxLatency: "1s",
+			Concurrent: "4", Parallel: "6", Timeout: "5s", MaxLatency: "1s",
 			MaxPacketLoss: "100", MinDownload: "5", MinUpload: "2", Rename: true,
+			ImageSpeedOnly: true,
 		},
 	}
 }
 
 func (m *Model) ensureFetch() {
 	if m.session.Fetch == nil {
-		m.session.Fetch = defaultFetch(m.session.ExecDir)
+		// 每次回车取用当前「拉取订阅 UA」，改完重试即生效。
+		m.session.Fetch = defaultFetch(m.session.ExecDir, m.fetchUA())
 	}
+}
+
+// fetchUA 给出拉订阅用的 User-Agent：界面里填了就用填的，空则用默认。
+func (m Model) fetchUA() string {
+	if ua := strings.TrimSpace(m.options.UserAgent); ua != "" {
+		return ua
+	}
+	return defaultSubscriptionUA
 }
 
 // Started 表示是否已确认过测速源（回车成功过）。
 func (m Model) Started() bool { return m.started }
-
-// TestDone 表示整轮测速是否已经完成。
-func (m Model) TestDone() bool { return m.testDone }
-
-// Total 返回本轮要测的节点总数，画结果图摘要用。
-func (m Model) Total() int { return m.total }
-
-// Results 返回记录表里已完成的结果，由调用方导出产物。
-func (m Model) Results() []*speedtester.Result { return m.records }
 
 // Options 返回选好的测速选项，由调用方传给测速。
 func (m Model) Options() Options { return m.options }
@@ -186,52 +179,32 @@ func (m Model) optionState() OptionState {
 	return OptionState{Mode: m.options.Mode, OutputPath: m.options.OutputPath}
 }
 
-func isQuit(msg tea.KeyMsg, m Model) bool {
-	if msg.Type == tea.KeyEsc || msg.Type == tea.KeyCtrlC {
-		return true
-	}
-	// q 在输入文字的地方就是字符，其余地方当退出。
-	return string(msg.Runes) == "q" && !m.editingText()
+func isQuit(msg tea.KeyMsg) bool {
+	// 选源界面只认 Ctrl+C：q 和 Esc 都不再是退出，免得误触。
+	return msg.Type == tea.KeyCtrlC
 }
 
-func (m Model) editingText() bool {
-	if m.focus == focusAddress {
-		return true
-	}
-	if m.focus != focusOptions || m.optionIndex < 0 || m.optionIndex >= len(optionOrder) {
-		return false
-	}
-	row := optionOrder[m.optionIndex]
-	return row.kind == kindText && m.optionState().Enabled(row.option)
-}
-
-// Update 处理勾选、地址输入、选项编辑、开始测速和测试中的记录表。
+// Update 处理勾选、地址输入、选项编辑和回车开始。
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if isQuit(msg, m) {
+		if isQuit(msg) {
 			m.quitting = true
 			return m, tea.Quit
 		}
-		if m.fetching || m.loading {
-			// 获取/加载中其余按键忽略。
-			return m, nil
-		}
-		if m.testing || m.testDone {
-			// 记录表阶段只能滚动查看。
-			if msg.Type == tea.KeyUp || msg.Type == tea.KeyDown {
-				m.scrollRecords(msg.Type == tea.KeyDown)
-			}
+		if m.fetching {
+			// 获取中其余按键忽略。
 			return m, nil
 		}
 		wasFetching := m.fetching
-		cmd := m.handleKey(msg)
+		m.handleKey(msg)
 		m.ensureVisible()
 		if m.fetching && !wasFetching {
 			return m, m.fetchCmd()
 		}
-		if cmd != nil {
-			return m, cmd
+		if m.started {
+			// 回车确认即结束，把整理好的参数交给调用方。
+			return m, tea.Quit
 		}
 	case fetchDoneMsg:
 		m.fetching = false
@@ -246,22 +219,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "已用补过参数的地址 " + strings.Join(msg.used, "，")
 			}
 		}
-		return m, m.beginStart()
-	case LoadFailedMsg:
-		m.loading = false
-		m.started = false
-		m.status = msg.Err.Error()
-	case TestingStartedMsg:
-		m.loading = false
-		m.testing = true
-		m.total = msg.Total
-	case TestResultMsg:
-		m.records = append(m.records, msg.Result)
-		m.recordScroll = max(len(m.records)-m.recordRows(), 0)
-	case TestDoneMsg:
-		m.testing = false
-		m.testDone = true
-		m.status = "测试完成"
+		m.started = true
+		return m, tea.Quit
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.ensureVisible()
@@ -270,51 +229,96 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.wheelScroll(msg.Button == tea.MouseButtonWheelDown, msg.Y)
 			break
 		}
-		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
-			m.handleClick(msg.X, msg.Y)
+		if msg.Action != tea.MouseActionPress {
+			break
+		}
+		if m.fetching {
+			// 获取中界面锁定：滚轮可以滚窗口，点击一概忽略。
+			break
+		}
+		x := m.contentX(msg.X)
+		switch m.helpHit(x, msg.Y) {
+		case helpHitEnter:
+			m.pressEnter()
+			if m.started {
+				return m, tea.Quit
+			}
+			if m.fetching {
+				return m, m.fetchCmd()
+			}
+		case helpHitQuit:
+			m.quitting = true
+			return m, tea.Quit
+		}
+		// 右键不参与点击；选项栏的加减按点击位置分，不分鼠标键。
+		if msg.Button == tea.MouseButtonLeft {
+			m.handleClick(x, msg.Y)
 		}
 	}
 	return m, nil
 }
 
-// beginStart 确认开始：先交出选好的源，再交给 OnStart 起测速。
-func (m *Model) beginStart() tea.Cmd {
-	m.started = true
-	if m.session.OnStart == nil {
-		return nil
+// helpHit 报告内容坐标 (x, y) 落在帮助行的哪个热区上。
+func (m Model) helpHit(x, y int) int {
+	lo := m.computeLayout()
+	if y != lo.helpY {
+		return helpHitNone
 	}
-	m.loading = true
-	m.status = "正在加载节点"
-	return m.session.OnStart(StartRequest{
-		Selection:   m.Selection(),
-		Options:     m.options,
-		UsedFlagged: m.usedFlagged,
-		SourceLabel: m.SourceLabel(),
-	})
+	enter, quit := helpZones()
+	if x >= enter[0] && x < enter[1] {
+		return helpHitEnter
+	}
+	if x >= quit[0] && x < quit[1] {
+		return helpHitQuit
+	}
+	return helpHitNone
 }
 
-func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
+// contentX 把屏幕 X 换算成内容坐标：终端比内容宽时整块居中，左边有偏移。
+func (m Model) contentX(x int) int {
+	if m.width > maxContentWidth {
+		return x - (m.width-maxContentWidth)/2
+	}
+	return x
+}
+
+func (m *Model) handleKey(msg tea.KeyMsg) {
 	switch msg.Type {
 	case tea.KeyDown:
 		m.move(1)
 	case tea.KeyUp:
 		m.move(-1)
-	case tea.KeyLeft, tea.KeyTab:
+	case tea.KeyTab:
 		m.move(-1)
-	case tea.KeyRight:
-		m.move(1)
+	case tea.KeyLeft, tea.KeyRight:
+		if m.focus == focusConfigs {
+			// 文件栏里左右都切到选项栏，从测速模式行开始。
+			m.focus = focusOptions
+			m.optionIndex = 0
+			return
+		}
+		delta := -1
+		if msg.Type == tea.KeyRight {
+			delta = 1
+		}
+		m.adjustOption(delta)
 	case tea.KeyRunes:
 		// bubbletea 在所有平台上把空格报成 KeyRunes（见 key_windows.go），
 		// 必须在这里归一，否则勾选和开关在真实终端里按不动。
 		if string(msg.Runes) == " " {
 			m.pressSpace()
-			return nil
+			return
+		}
+		// 粘贴可能带进看不见的控制字符（如 \x00），拦在输入这一层。
+		text := sanitizeInput(string(msg.Runes))
+		if text == "" {
+			return
 		}
 		switch m.focus {
 		case focusAddress:
-			m.address += string(msg.Runes)
+			m.address += text
 		case focusOptions:
-			m.typeOption(string(msg.Runes))
+			m.typeOption(text)
 		}
 	case tea.KeyBackspace:
 		switch {
@@ -326,9 +330,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case tea.KeySpace:
 		m.pressSpace()
 	case tea.KeyEnter:
-		return m.pressEnter()
+		m.pressEnter()
 	}
-	return nil
 }
 
 func (m *Model) pressSpace() {
@@ -342,21 +345,41 @@ func (m *Model) pressSpace() {
 	}
 }
 
-func (m *Model) pressEnter() tea.Cmd {
+func (m *Model) pressEnter() {
 	if !m.hasSource() {
 		m.status = "先勾选配置或填入订阅地址"
-		return nil
+		return
 	}
 	if _, err := m.validateEnabledRows(); err != nil {
 		m.status = err.Error()
-		return nil
+		return
 	}
 	if strings.TrimSpace(m.address) != "" {
 		m.fetching = true
 		m.status = "正在获取"
-		return nil
+		return
 	}
-	return m.beginStart()
+	m.started = true
+}
+
+// adjustOption 用左右键调当前选项的值：模式循环、开关切换、数字按步长增减。
+// 文本类选项靠打字，左右键对它们无操作。
+func (m *Model) adjustOption(delta int) {
+	if m.focus != focusOptions || m.optionIndex < 0 || m.optionIndex >= len(optionOrder) {
+		return
+	}
+	row := optionOrder[m.optionIndex]
+	if !m.optionState().Enabled(row.option) {
+		return
+	}
+	switch row.kind {
+	case kindMode:
+		m.options.Mode = cycleMode(m.options.Mode, delta)
+	case kindBool:
+		m.options.toggle(row.option)
+	case kindText:
+		m.options.adjust(row.option, delta)
+	}
 }
 
 // fetchCmd 由调用方在 pressEnter 后取用，发起后台拉取。
@@ -382,7 +405,7 @@ func (m *Model) handleClick(x, y int) {
 			m.clickConfig(lo, y)
 			return
 		}
-		m.clickOption(lo, y)
+		m.clickOption(lo, y, x)
 	case y == lo.addressY:
 		m.focus = focusAddress
 	}
@@ -402,16 +425,53 @@ func (m *Model) clickConfig(lo layout, y int) {
 	m.toggle(index)
 }
 
-func (m *Model) clickOption(lo layout, y int) {
+// clickOption 点击选项行：聚焦该行。只有精准点中「<」「>」符号才增减，
+// 点值本身、标签或空白都只选中；开关行点哪儿都切换；灰行无操作。
+func (m *Model) clickOption(lo layout, y, x int) {
 	index := y - lo.paneY - 1 + m.optionScroll // 第 0 行是节标题
 	if index < 0 || index >= len(optionOrder) {
 		return
 	}
-	if !m.optionState().Enabled(optionOrder[index].option) {
+	row := optionOrder[index]
+	if !m.optionState().Enabled(row.option) {
 		return
 	}
 	m.focus = focusOptions
 	m.optionIndex = index
+	if row.kind == kindBool {
+		m.adjustOption(1)
+		return
+	}
+	left, right, ok := m.arrowSymbolX(lo, index)
+	if !ok {
+		return // 没有符号的行（纯文本）只选中
+	}
+	// 符号各带一格容差，其余位置不响应。
+	if x >= left-1 && x <= left+1 {
+		m.adjustOption(-1)
+		return
+	}
+	if x >= right-1 && x <= right+1 {
+		m.adjustOption(1)
+	}
+}
+
+// arrowSymbolX 算出该选项行「<」「>」符号的内容列位置。
+// 行布局与 optionLine 渲染共用：2 格缩进 + 标签列 + 2 格间隔，随后是值。
+func (m Model) arrowSymbolX(lo layout, index int) (left, right int, ok bool) {
+	row := optionOrder[index]
+	focused := m.focus == focusOptions && m.optionIndex == index
+	value := m.optionValue(row, focused)
+	if !strings.Contains(value, "<") {
+		return 0, 0, false
+	}
+	x0 := lo.optionsX + 2 + optionLabelWidth() + 2
+	right = x0 + lipgloss.Width(value) - 1
+	// 值被窄终端截断时尾部符号不在画面上，不给点。
+	if lo.optionsW > 0 && right >= lo.optionsX+lo.optionsW {
+		return 0, 0, false
+	}
+	return x0, right, true
 }
 
 func (m *Model) typeOption(text string) {
@@ -457,22 +517,11 @@ func (m *Model) pressOption() {
 	case kindBool:
 		m.options.toggle(row.option)
 	case kindMode:
-		m.cycleMode()
+		m.options.Mode = cycleMode(m.options.Mode, 1)
 	}
 }
 
-// cycleMode 让测速模式在快速、下载、完整之间循环。
-func (m *Model) cycleMode() {
-	modes := []string{"fast", "download", "full"}
-	next := 0
-	for i, mode := range modes {
-		if m.options.Mode == mode {
-			next = (i + 1) % len(modes)
-		}
-	}
-	m.options.Mode = modes[next]
-}
-
+// editableRow 报告当前行是否接受打字输入。
 func (m *Model) editableRow() bool {
 	if m.focus != focusOptions || m.optionIndex < 0 || m.optionIndex >= len(optionOrder) {
 		return false
@@ -484,7 +533,9 @@ func (m *Model) editableRow() bool {
 	return row.kind == kindText || row.kind == kindBool
 }
 
-// move 沿「文件 → 地址 → 选项」的环形次序移动焦点或栏内光标。
+// move 沿环形次序「文件 → 地址 → 选项 → 文件」移动焦点或栏内光标。
+// ↑↓ 走的是同一个环的正反两个方向，↑ 从文件栏头部绕到选项栏尾部。
+// Tab 等同 ↑。
 func (m *Model) move(delta int) {
 	switch m.focus {
 	case focusConfigs:
@@ -493,7 +544,13 @@ func (m *Model) move(delta int) {
 			return
 		}
 		next := m.cursor + delta
-		if next < 0 || next >= len(m.configs) {
+		if next < 0 {
+			// 文件栏头部再往上，绕环落到选项栏末项。
+			m.focus = focusOptions
+			m.optionIndex = len(optionOrder) - 1
+			return
+		}
+		if next >= len(m.configs) {
 			m.focus = focusAddress
 			return
 		}
@@ -513,7 +570,11 @@ func (m *Model) move(delta int) {
 		m.optionIndex = len(optionOrder) - 1
 	case focusOptions:
 		next := m.optionIndex + delta
-		if next < 0 || next >= len(optionOrder) {
+		if next < 0 {
+			m.focus = focusAddress
+			return
+		}
+		if next >= len(optionOrder) {
 			if len(m.configs) > 0 {
 				m.focus = focusConfigs
 				m.cursor = 0
@@ -584,24 +645,16 @@ func clampScroll(scroll, focus, count, visible int) int {
 	return min(max(scroll, 0), max(count-visible, 0))
 }
 
-// wheelScroll 按点击位置滚对应的区：上半区滚文件或选项栏，下半区滚记录表。
+// wheelScroll 滚焦点所在的栏：文件或选项，窗口动、光标不动。
 func (m *Model) wheelScroll(down bool, y int) {
 	lo := m.computeLayout()
 	step := 3
-	switch {
-	case y >= lo.paneY && y < lo.paneY+lo.paneH:
-		if lo.width > 0 {
-			// X 在鼠标事件里拿得到，这里按当前焦点栏滚最直观：滚焦点所在栏。
-			if m.focus == focusConfigs {
-				m.configScroll = stepScroll(m.configScroll, down, step, len(m.configs), lo.paneH-1)
-				return
-			}
-			m.optionScroll = stepScroll(m.optionScroll, down, step, len(optionOrder), lo.paneH-1)
+	if y >= lo.paneY && y < lo.paneY+lo.paneH {
+		if m.focus == focusConfigs {
+			m.configScroll = stepScroll(m.configScroll, down, step, len(m.configs), lo.paneH-1)
 			return
 		}
 		m.optionScroll = stepScroll(m.optionScroll, down, step, len(optionOrder), lo.paneH-1)
-	case y >= lo.recordsY:
-		m.recordScroll = stepScroll(m.recordScroll, down, step, len(m.records), m.recordRows())
 	}
 }
 
@@ -613,13 +666,4 @@ func stepScroll(scroll int, down bool, step, count, visible int) int {
 		return min(scroll+step, count-visible)
 	}
 	return max(scroll-step, 0)
-}
-
-func (m Model) recordRows() int {
-	lo := m.computeLayout()
-	return max(lo.recordsH-2, 0)
-}
-
-func (m *Model) scrollRecords(down bool) {
-	m.recordScroll = stepScroll(m.recordScroll, down, 1, len(m.records), m.recordRows())
 }

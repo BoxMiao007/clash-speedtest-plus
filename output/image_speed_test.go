@@ -36,24 +36,28 @@ func TestImageSpeedSummaryOmitsZeroCounts(t *testing.T) {
 	now := time.Date(2026, 9, 25, 15, 4, 5, 0, time.UTC)
 	base := SummaryLine(now, speedtester.SpeedModeDownload, "已完成", 50, 100)
 
-	all := AppendImageSpeedCounts(base, 12, 38, 4)
-	if all != "2026-09-25 15:04:05  下载  已完成  50/100（有效 12，无效 38，测试中 4）" {
-		t.Fatalf("三项都应写上: %q", all)
+	all := AppendImageSpeedCounts(base, 12, 38, 4, 46)
+	if all != "2026-09-25 15:04:05  下载  已完成  50/100（有效 12，无效 38，测试中 4，未测试 46）" {
+		t.Fatalf("四项都应写上: %q", all)
 	}
-	finished := AppendImageSpeedCounts(base, 26, 175, 0)
+	finished := AppendImageSpeedCounts(base, 26, 175, 0, 0)
 	if finished != "2026-09-25 15:04:05  下载  已完成  50/100（有效 26，无效 175）" {
-		t.Fatalf("测试中为 0 应省略: %q", finished)
+		t.Fatalf("后两项为 0 应省略: %q", finished)
 	}
-	onlyTesting := AppendImageSpeedCounts(base, 0, 0, 4)
+	onlyTesting := AppendImageSpeedCounts(base, 0, 0, 4, 0)
 	if onlyTesting != "2026-09-25 15:04:05  下载  已完成  50/100（测试中 4）" {
 		t.Fatalf("有效和无效为 0 应省略: %q", onlyTesting)
 	}
-	onlyValid := AppendImageSpeedCounts(base, 50, 0, 0)
+	onlyValid := AppendImageSpeedCounts(base, 50, 0, 0, 0)
 	if onlyValid != "2026-09-25 15:04:05  下载  已完成  50/100（有效 50）" {
 		t.Fatalf("只有效时应写出有效: %q", onlyValid)
 	}
-	none := AppendImageSpeedCounts(base, 0, 0, 0)
+	onlyUntested := AppendImageSpeedCounts(base, 0, 0, 0, 178)
+	if onlyUntested != "2026-09-25 15:04:05  下载  已完成  50/100（未测试 178）" {
+		t.Fatalf("只未测试时应写出未测试: %q", onlyUntested)
+	}
+	none := AppendImageSpeedCounts(base, 0, 0, 0, 0)
 	if none != base {
-		t.Fatalf("三项都是 0 不应加括号: %q", none)
+		t.Fatalf("各项都是 0 不应加括号: %q", none)
 	}
 }

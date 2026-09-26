@@ -81,82 +81,16 @@ func launchChoice(args []string, stdoutIsTerminal bool) launchKind {
 	return launchCLI
 }
 
-// runPickerFlow 负责选源界面的一生：选源、在记录表里跑完测试、导出产物。
-// 回车后不再跳到默认测速表格，那条路只留给命令行。
-func runPickerFlow(execDir string) {
-	var program *tea.Program
-
-	var (
-		imageSource   string
-		effectiveMode speedtester.SpeedMode
-		resultFilter  resultFilter
-		stopper       *earlyStopper
-	)
-
-	configs, err := picker.ListConfigs(execDir)
-	if err != nil {
-		log.Printf("读取程序目录失败: %s", err)
-	}
-	session := picker.Session{Configs: configs, ExecDir: execDir}
-	session.OnStart = func(req picker.StartRequest) tea.Cmd {
-		return func() tea.Msg {
-			applyPickerOptions(req.Options)
-			imageSource = req.SourceLabel
-			for _, used := range req.UsedFlagged {
-				fmt.Fprintf(os.Stderr, "已用补过参数的地址: %s\n", used)
-			}
-			*configPathsConfig = strings.Join(req.Selection, ",")
-			// 相对路径的输出锚在程序目录，和选源、结果图一致。
-			*outputPath = picker.ResolveOutputPath(execDir, *outputPath)
-
-			tester, mode, filter, stop, err := buildTester()
-			if err != nil {
-				return picker.LoadFailedMsg{Err: err}
-			}
-			effectiveMode, resultFilter, stopper = mode, filter, stop
-
-			allProxies, err := tester.LoadProxies()
-			if err != nil {
-				return picker.LoadFailedMsg{Err: fmt.Errorf("加载节点失败: %w", err)}
-			}
-			go func() {
-				tester.TestProxiesUntil(allProxies, nil, func(result *speedtester.Result) bool {
-					program.Send(picker.TestResultMsg{Result: result})
-					return stopper.ShouldContinue(result)
-				})
-				program.Send(picker.TestDoneMsg{})
-			}()
-			return picker.TestingStartedMsg{Total: len(allProxies)}
-		}
-	}
-
-	model := picker.New(session)
-	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())
+// runPickerModel 跑一遍选源界面。model 可以是上一轮按 Esc 返回时保留的状态，
+// 勾选、地址和选项原样继续。
+func runPickerModel(model picker.Model) (picker.Model, bool) {
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())
 	final, err := program.Run()
 	if err != nil {
 		log.Fatalf("选源界面运行失败: %s", err)
 	}
 	finished := final.(picker.Model)
-	if !finished.TestDone() {
-		// 没开始，或测试中途离开：不导出，退出码 0。
-		return
-	}
-
-	results := output.SortResults(finished.Results(), effectiveMode)
-	if *outputPath != "" {
-		if err := saveConfigInterruptible(results, resultFilter); err != nil {
-			fmt.Fprintf(os.Stderr, "保存配置失败: %s\n", err)
-			os.Exit(1)
-		}
-		fmt.Fprintf(os.Stderr, "已保存配置: %s\n", *outputPath)
-	}
-	if effectiveMode.IsFast() && *imageSpeedOnly {
-		fmt.Fprintf(os.Stderr, "%s\n", tui.FastImageSpeedIgnored())
-	}
-	if !*noImage {
-		exportNonInteractiveImage(execDir, imageSource, results, effectiveMode, finished.Total(), imageSpeedFilterEnabled(effectiveMode))
-	}
-	waitForUpload()
+	return finished, finished.Started()
 }
 
 // buildTester 按当前参数组装测速器。选源界面和命令行共用。
@@ -284,17 +218,43 @@ func main() {
 	}
 
 	args := os.Args[1:]
-	imageSource := "" // 命令行路径没有来源标签；选源路径在 runPickerFlow 里自己维护。
 	switch {
 	case launchChoice(args, output.IsTerminalFile(os.Stdout)) == launchPicker:
-		runPickerFlow(execDir)
-		return
+		configs, err := picker.ListConfigs(execDir)
+		if err != nil {
+			log.Printf("读取程序目录失败: %s", err)
+		}
+		model := picker.New(picker.Session{Configs: configs, ExecDir: execDir})
+		for {
+			finished, started := runPickerModel(model)
+			if !started {
+				return
+			}
+			*configPathsConfig = strings.Join(finished.Selection(), ",")
+			imageSource := finished.SourceLabel()
+			applyPickerOptions(finished.Options())
+			for _, used := range finished.UsedFlagged() {
+				fmt.Fprintf(os.Stderr, "已用补过参数的地址: %s\n", used)
+			}
+			if !runSpeedTest(execDir, imageSource, true) {
+				return
+			}
+			// 测试界面按 Esc 返回：保留勾选、地址和选项，改完再测一轮。
+			model = finished
+		}
 	case len(args) == 0:
 		// 没有终端，进不了选源界面。
 		flag.Usage()
 		os.Exit(1)
 	}
 
+	runSpeedTest(execDir, "", false)
+}
+
+// runSpeedTest 按当前参数跑完整测速流程（交互表格或 TSV）。
+// escapeToParent 为真时测试界面允许用 Esc 返回上一级（选源界面）；
+// 返回 true 表示这次是按 Esc 返回，调用方应回到选源界面。
+func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
 	if *configPathsConfig == "" {
 		log.Fatalln("请指定配置文件")
 	}
@@ -374,6 +334,9 @@ func main() {
 
 		// Create and run TUI
 		model := tui.NewTUIModelWithEngine(effectiveMode, len(allProxies), resultChannel, speedTester, progressChannel, earlyStopSignal)
+		if escapeToParent {
+			model.SetEscapeToParent(true)
+		}
 		model.SetImageExport(execDir, !*noImage)
 		model.SetImageSpeedOnly(*imageSpeedOnly)
 		model.NoteFastImageSpeedIgnored()
@@ -408,6 +371,10 @@ func main() {
 			log.Fatalf("界面运行失败: %s", err)
 		}
 		finished, _ := finalModel.(tui.Model)
+		if finished.EscapedToParent() {
+			// 按下 Esc 返回上一级：本轮不写产物，选源界面原样恢复。
+			return true
+		}
 		status, failed := finished.ExitStatus()
 		if status != "" {
 			fmt.Fprintf(os.Stderr, "%s\n", status)
@@ -415,7 +382,7 @@ func main() {
 		if failed {
 			os.Exit(1)
 		}
-		return
+		return false
 	}
 
 	// TSV mode: collect results synchronously
@@ -448,6 +415,7 @@ func main() {
 		exportNonInteractiveImage(execDir, imageSource, results, effectiveMode, len(allProxies), imageSpeedFilterEnabled(effectiveMode))
 	}
 	waitForUpload()
+	return false
 }
 
 func imageSpeedFilterEnabled(mode speedtester.SpeedMode) bool {
@@ -485,7 +453,8 @@ func writeNonInteractiveImage(ctx context.Context, execDir, imageSource string, 
 	filtered := output.FilterImageRowsBySpeed(rows, speedOnly)
 	summary := output.SummaryLine(time.Now(), mode, status, len(results), total)
 	if speedOnly {
-		summary = output.AppendImageSpeedCounts(summary, len(filtered.Rows), filtered.Invalid, filtered.Testing)
+		untested := max(total-len(results)-filtered.Testing, 0)
+		summary = output.AppendImageSpeedCounts(summary, len(filtered.Rows), filtered.Invalid, filtered.Testing, untested)
 	}
 	spec := output.ImageSpec{
 		Mode:    mode,

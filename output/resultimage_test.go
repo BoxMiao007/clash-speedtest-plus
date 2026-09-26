@@ -336,3 +336,149 @@ func TestJoinStatus(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// 顶部来源超宽时必须折成多行，每行都不超过图宽。
+func TestWrapTextByWidthFoldsLongSource(t *testing.T) {
+	face, err := LoadImageFont("")
+	if err != nil {
+		t.Skipf("环境没有可用字体: %s", err)
+	}
+	defer face.close()
+
+	short := "a.yaml"
+	if got := wrapTextByWidth(face.face, short, 200); len(got) != 1 || got[0] != short {
+		t.Fatalf("短文本不该折行: %#v", got)
+	}
+
+	long := strings.Repeat("很长的订阅地址", 40)
+	got := wrapTextByWidth(face.face, long, 200)
+	if len(got) < 2 {
+		t.Fatalf("超宽文本应折成多行: %d 行", len(got))
+	}
+	joined := strings.Join(got, "")
+	if joined != long {
+		t.Fatalf("折行不应丢字符: %q...(%d/%d)", joined[:16], len(joined), len(long))
+	}
+	for i, line := range got {
+		if w := textWidth(face.face, line); w > 200 {
+			t.Fatalf("第 %d 行超宽 %d: %q", i, w, line)
+		}
+	}
+}
+
+// 带超长来源的整图也要能渲染：多行来源抬高的高度被记进图高。
+func TestRenderResultImageWithVeryLongSource(t *testing.T) {
+	face, err := LoadImageFont("")
+	if err != nil {
+		t.Skipf("环境没有可用字体: %s", err)
+	}
+	defer face.close()
+
+	spec := ImageSpec{
+		Mode:    speedtester.SpeedModeDownload,
+		Source:  strings.Repeat("https://example.com/very-long-subscription-path/", 10),
+		Summary: "2026-09-26 21:04:21  下载  测试中 52/230",
+		Headers: []string{"节点", "延迟", "下载"},
+		Rows: []ImageRow{{Cells: []string{"节点 1", "100ms", "1.00MB/s"},
+			Result: &speedtester.Result{ProxyName: "节点 1", Latency: 100 * time.Millisecond, DownloadSpeed: 1024 * 1024}}},
+	}
+	data, _, err := RenderResultImage(spec, face)
+	if err != nil {
+		t.Fatalf("渲染失败: %s", err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("解码失败: %s", err)
+	}
+	// 折行后的来源行数远超单行，图高必须明显大于最小行数布局。
+	singleTitleSpec := spec
+	singleTitleSpec.Source = "a.yaml"
+	single, _, err := RenderResultImage(singleTitleSpec, face)
+	if err != nil {
+		t.Fatalf("渲染失败: %s", err)
+	}
+	singleImg, err := png.Decode(bytes.NewReader(single))
+	if err != nil {
+		t.Fatalf("解码失败: %s", err)
+	}
+	if img.Bounds().Dy() <= singleImg.Bounds().Dy() {
+		t.Fatalf("超长来源应折行抬高图高: %d <= %d", img.Bounds().Dy(), singleImg.Bounds().Dy())
+	}
+}
+
+// 每个指标列独立收集本批的 min..max：上传列的色阶不受下载列更大的值影响。
+func TestMetricScalesIndependentPerColumn(t *testing.T) {
+	rows := []ImageRow{
+		{Result: &speedtester.Result{ProxyName: "a", Latency: 400 * time.Millisecond, PacketLoss: 10, DownloadSpeed: 10 * 1024 * 1024, UploadSpeed: 2 * 1024 * 1024}},
+		{Result: &speedtester.Result{ProxyName: "b", Latency: 100 * time.Millisecond, PacketLoss: 0, DownloadSpeed: 1 * 1024 * 1024, UploadSpeed: 0.5 * 1024 * 1024}},
+		{Result: &speedtester.Result{ProxyName: "failed", Latency: 0, DownloadSpeed: 0, UploadError: "超时"}},
+	}
+	scales := metricScales(rows, speedtester.SpeedModeFull)
+
+	if s := scales[6]; s.low != 1*1024*1024 || s.high != 10*1024*1024 {
+		t.Fatalf("下载列色阶 = %v..%v", s.low, s.high)
+	}
+	// 上传列的 high 只看上传自己：0.5..2MB/s，绝不吸收下载列的 10。
+	if s := scales[7]; s.low != 0.5*1024*1024 || s.high != 2*1024*1024 {
+		t.Fatalf("上传列色阶被下载列污染: %v..%v", s.low, s.high)
+	}
+	// 延迟 0 表示没测出，不参加统计。
+	if s := scales[3]; s.low != 100 || s.high != 400 {
+		t.Fatalf("延迟列色阶 = %v..%v", s.low, s.high)
+	}
+	// 丢包率 0% 是有效值，参加统计。
+	if s := scales[5]; s.low != 0 || s.high != 10 {
+		t.Fatalf("丢包列色阶 = %v..%v", s.low, s.high)
+	}
+}
+
+// 色阶两端：本列最小值最浅、最大值最深，方向按指标好坏。
+func TestMetricScoreNormalizesPerColumn(t *testing.T) {
+	rows := []ImageRow{
+		{Result: &speedtester.Result{ProxyName: "slow", Latency: 400 * time.Millisecond, DownloadSpeed: 1 * 1024 * 1024, UploadSpeed: 0.5 * 1024 * 1024}},
+		{Result: &speedtester.Result{ProxyName: "fast", Latency: 100 * time.Millisecond, DownloadSpeed: 10 * 1024 * 1024, UploadSpeed: 2 * 1024 * 1024}},
+	}
+	scales := metricScales(rows, speedtester.SpeedModeFull)
+
+	// 下载列：1MB/s 最浅，10MB/s 最深。
+	if got := metricScore(rows[0].Result, 6, speedtester.SpeedModeFull, scales); got != 0 {
+		t.Fatalf("下载最小值应最浅: %v", got)
+	}
+	if got := metricScore(rows[1].Result, 6, speedtester.SpeedModeFull, scales); got != 1 {
+		t.Fatalf("下载最大值应最深: %v", got)
+	}
+	// 上传列独立：2MB/s 就是最深——不能被下载列的 10MB/s 稀释。
+	if got := metricScore(rows[1].Result, 7, speedtester.SpeedModeFull, scales); got != 1 {
+		t.Fatalf("上传最大值应最深（不被下载列稀释）: %v", got)
+	}
+	if got := metricScore(rows[0].Result, 7, speedtester.SpeedModeFull, scales); got != 0 {
+		t.Fatalf("上传最小值应最浅: %v", got)
+	}
+	// 延迟越小越好：100ms 最深，400ms 最浅。
+	if got := metricScore(rows[1].Result, 3, speedtester.SpeedModeFull, scales); got != 1 {
+		t.Fatalf("最低延迟应最深: %v", got)
+	}
+	if got := metricScore(rows[0].Result, 3, speedtester.SpeedModeFull, scales); got != 0 {
+		t.Fatalf("最高延迟应最浅: %v", got)
+	}
+	// 失败行（没测出）按最浅处理。
+	failed := &speedtester.Result{ProxyName: "f", Latency: 0, DownloadSpeed: 0}
+	if got := metricScore(failed, 6, speedtester.SpeedModeFull, scales); got != 0 {
+		t.Fatalf("失败行应最浅: %v", got)
+	}
+}
+
+// 本批全部同值时分不出深浅，填最深。
+func TestMetricScoreAllSameValueFillsDeepest(t *testing.T) {
+	rows := []ImageRow{
+		{Result: &speedtester.Result{ProxyName: "a", Latency: 100 * time.Millisecond, DownloadSpeed: 5 * 1024 * 1024}},
+		{Result: &speedtester.Result{ProxyName: "b", Latency: 100 * time.Millisecond, DownloadSpeed: 5 * 1024 * 1024}},
+	}
+	scales := metricScales(rows, speedtester.SpeedModeDownload)
+	if got := metricScore(rows[0].Result, 6, speedtester.SpeedModeDownload, scales); got != 1 {
+		t.Fatalf("全同速应填最深: %v", got)
+	}
+	if got := metricScore(rows[0].Result, 3, speedtester.SpeedModeDownload, scales); got != 1 {
+		t.Fatalf("全同延迟应填最深: %v", got)
+	}
+}

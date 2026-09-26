@@ -5,17 +5,13 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/faceair/clash-speedtest/speedtester"
 	"github.com/mattn/go-runewidth"
 )
 
-// 屏幕纵向预算：标题区 2 行、链接区 3 行、页脚 2 行，其余给上半分栏和记录表。
+// 屏幕纵向预算：标题区 2 行、链接区 3 行、页脚 2 行，其余给上半分栏。
 const (
 	headerLines = 2 // 标题 + 分隔线
 	footerLines = 2 // 状态 + 帮助
-
-	// 记录表至少占 4 行：节标题、表头和一行记录。
-	minRecordsH = 4
 
 	// 终端超过这个宽度时内容不再拉宽，整块居中，长行不再稀疏。
 	maxContentWidth = 100
@@ -32,8 +28,7 @@ type layout struct {
 	optionsX int // 选项栏起始列（分隔线后一格）
 	optionsW int
 	addressY int // 链接行
-	recordsY int // 记录表起始行
-	recordsH int // 记录区高度，含节标题和表头
+	helpY    int // 帮助行，含「回车」「Ctrl+C」两段可点热区
 }
 
 // computeLayout 算出各区的位置。尺寸未知时各栏按内容展开、不滚动。
@@ -64,24 +59,17 @@ func (m Model) computeLayout() layout {
 		lo.optionsW = 0
 	}
 
-	// 测试开始后上半区让位给记录表，只保留一屏上下文。
 	need := max(len(m.configs), len(optionOrder)) + 1
-	if m.loading || m.testing || m.testDone {
-		need = min(need, 6)
-	}
 	if m.height <= 0 {
 		lo.paneH = need
 		lo.addressY = headerLines + need + 1
-		lo.recordsY = lo.addressY + 2
-		lo.recordsH = minRecordsH
+		lo.helpY = lo.addressY + 3
 		return lo
 	}
-
-	avail := max(m.height-headerLines-footerLines-3, minRecordsH+1)
-	lo.paneH = min(need, max(avail-minRecordsH, 3))
+	// 标题 2 行、链接区 3 行、页脚 2 行之外的屏幕都给分栏。
+	lo.paneH = min(need, max(m.height-headerLines-footerLines-3, 3))
 	lo.addressY = headerLines + lo.paneH + 1
-	lo.recordsY = lo.addressY + 2
-	lo.recordsH = max(m.height-lo.recordsY-footerLines, minRecordsH)
+	lo.helpY = lo.addressY + 3
 	return lo
 }
 
@@ -92,7 +80,7 @@ func (m Model) contentWidth() int {
 	return min(m.width, maxContentWidth)
 }
 
-// View 画出标题、分栏、链接、记录表和页脚。超宽终端上整块居中；行宽始终受控。
+// View 画出标题、分栏、链接和页脚。超宽终端上整块居中；行宽始终受控。
 func (m Model) View() string {
 	lo := m.computeLayout()
 	lines := make([]string, 0, m.height+2)
@@ -102,7 +90,6 @@ func (m Model) View() string {
 		lines = append(lines, m.paneLine(lo, row))
 	}
 	lines = append(lines, ruleLine(lo.width, ""), m.addressLine(lo), ruleLine(lo.width, ""))
-	lines = append(lines, m.recordLines(lo)...)
 	lines = append(lines, m.statusLine(lo.width), m.helpLine(lo.width))
 
 	block := strings.Join(lines, "\n")
@@ -200,20 +187,27 @@ func (m Model) optionLine(lo layout, row int) string {
 		valueStyle = okStyle
 	case optionRow.kind == kindBool:
 		valueStyle = dimStyle
-	case optionRow.kind == kindText && strings.TrimSpace(value) == "":
+	case optionRow.kind == kindText && (strings.HasPrefix(value, "默认") || value == "不输出"):
 		valueStyle = dimStyle
 	}
 
 	prefix := "  " + padDisplay(optionRow.label, optionLabelWidth())
 	plain := prefix + "  " + value
-	if !enabled {
-		plain += "  不可用"
-	}
 	if focused {
-		return selectedLine(plain, width)
+		shown := plain
+		if !enabled {
+			shown += "  不可用"
+		}
+		return selectedLine(shown, width)
 	}
 	if !enabled {
-		return greyStyle.Render(padPlain(truncatePlain(plain, width), width))
+		// 「不可用」用斜体，和灰掉的原因区分开；先截断再拼接保证不超宽。
+		suffix := "  不可用"
+		base := width
+		if width > 0 {
+			base = max(width-lipgloss.Width(suffix), 0)
+		}
+		return greyStyle.Render(padPlain(truncatePlain(plain, base), base)) + disabledStyle.Render(suffix)
 	}
 	return joinParts(width,
 		part{prefix, labelStyle},
@@ -240,72 +234,6 @@ func (m Model) addressLine(lo layout) string {
 		part{"  " + padDisplay("订阅地址", optionLabelWidth()), labelStyle},
 		part{"  ", plainStyle},
 		part{value, valueStyle},
-	)
-}
-
-// recordLines 画记录表：节标题带进度、表头和滚动窗口里的结果行。
-func (m Model) recordLines(lo layout) []string {
-	lines := make([]string, 0, lo.recordsH)
-
-	progress := ""
-	switch {
-	case m.loading:
-		progress = "正在加载节点"
-	case m.testing:
-		progress = fmt.Sprintf("已测 %d/%d", len(m.records), m.total)
-	case m.testDone:
-		progress = fmt.Sprintf("完成 %d/%d", len(m.records), m.total)
-	default:
-		progress = "回车开始后显示测试记录"
-	}
-	title := joinParts(lo.width,
-		part{"▎", sectionMarkStyle},
-		part{" 测试记录", sectionStyle},
-		part{"  " + progress, dimStyle},
-	)
-	lines = append(lines, title)
-
-	rows := max(lo.recordsH-2, 0)
-	if m.loading {
-		lines = append(lines, m.recordHeader(lo.width))
-		for i := 1; i < rows; i++ {
-			lines = append(lines, "")
-		}
-		return lines
-	}
-	lines = append(lines, m.recordHeader(lo.width))
-
-	start := min(m.recordScroll, max(len(m.records)-rows, 0))
-	for i := 0; i < rows; i++ {
-		index := start + i
-		if index >= len(m.records) {
-			lines = append(lines, "")
-			continue
-		}
-		lines = append(lines, m.recordRow(lo.width, m.records[index]))
-	}
-	return lines
-}
-
-func (m Model) recordHeader(width int) string {
-	return joinParts(width,
-		part{padDisplay("节点", 28), labelStyle},
-		part{padDisplay("延迟", 8), labelStyle},
-		part{padDisplay("下载", 12), labelStyle},
-		part{"上传", labelStyle},
-	)
-}
-
-func (m Model) recordRow(width int, result *speedtester.Result) string {
-	nameStyle := plainStyle
-	if result.DownloadError != "" || result.Latency == 0 {
-		nameStyle = dimStyle
-	}
-	return joinParts(width,
-		part{padDisplay(truncatePlain(result.ProxyName, 28), 28), nameStyle},
-		part{padDisplay(result.FormatLatency(), 8), nameStyle},
-		part{padDisplay(result.FormatDownloadSpeed(), 12), nameStyle},
-		part{result.FormatUploadSpeed(), nameStyle},
 	)
 }
 
@@ -351,7 +279,7 @@ func (m Model) statusLine(width int) string {
 	case m.fetching:
 		return joinParts(width,
 			part{"● ", warnStyle},
-			part{m.status + " · 按 q 取消", warnStyle},
+			part{m.status + " · 按 Ctrl+C 取消", warnStyle},
 		)
 	case m.status != "":
 		style := warnStyle
@@ -364,41 +292,92 @@ func (m Model) statusLine(width int) string {
 	}
 }
 
+// helpSpan 是帮助行的一段。hit 标记段是哪个热区：渲染高亮和点击定位共用。
+type helpSpan struct {
+	key   string
+	label string
+	hit   int // helpHitNone / helpHitEnter / helpHitQuit
+}
+
+var helpSpans = []helpSpan{
+	{key: "空格", label: " 勾选/开关"},
+	{key: "←→", label: " 切区/调参数"},
+	{key: "↑↓/Tab", label: " 移动"},
+	{key: "Enter", label: " 开始测速", hit: helpHitEnter},
+	{key: "Ctrl+C", label: " 退出", hit: helpHitQuit},
+}
+
 func (m Model) helpLine(width int) string {
-	return joinParts(width,
-		part{"空格", keyStyle}, part{" 勾选/开关/换模式", labelStyle},
-		part{"   ", labelStyle},
-		part{"↑↓←→", keyStyle}, part{" 移动", labelStyle},
-		part{"   ", labelStyle},
-		part{"回车", keyStyle}, part{" 开始测速", labelStyle},
-		part{"   ", labelStyle},
-		part{"q", keyStyle}, part{" 退出", labelStyle},
-	)
+	parts := make([]part, 0, len(helpSpans)*3)
+	for i, span := range helpSpans {
+		if i > 0 {
+			parts = append(parts, part{"   ", labelStyle})
+		}
+		style := keyStyle
+		if span.hit != helpHitNone {
+			style = helpActiveStyle
+		}
+		parts = append(parts, part{span.key, style}, part{span.label, labelStyle})
+	}
+	return joinParts(width, parts...)
+}
+
+// helpZones 算出可点段在帮助行内的 X 范围（内容坐标）。
+// 帮助行怎么画就从这里怎么量，两处不会漂移。
+func helpZones() (enter, quit [2]int) {
+	x := 0
+	for i, span := range helpSpans {
+		if i > 0 {
+			x += 3
+		}
+		w := lipgloss.Width(span.key) + lipgloss.Width(span.label)
+		if span.hit != helpHitNone {
+			if span.hit == helpHitEnter {
+				enter = [2]int{x, x + w}
+			} else {
+				quit = [2]int{x, x + w}
+			}
+		}
+		x += w
+	}
+	return
 }
 
 func selectedLine(plain string, width int) string {
 	return selectedStyle.Render(padPlain(truncatePlain(plain, width), width))
 }
 
-// optionValue 给出该行显示的值。文本行留空时显示「默认」，
-// 输出路径例外：留空表示不输出文件。
+// optionValue 给出该行显示的值。可调行带「< >」符号提示点击方向，
+// 下载/上传大小显示 MB 单位；文本行留空显示「默认 (…)」，输出路径例外。
 func (m Model) optionValue(row optionRow, focused bool) string {
-	switch row.kind {
-	case kindMode:
-		label := modeLabel(m.options.Mode)
-		if focused {
-			return "‹ " + label + " ›"
-		}
-		return label
-	case kindBool:
+	if row.kind == kindBool {
 		return m.options.value(row.option)
+	}
+	if row.kind == kindMode {
+		return "< " + modeLabel(m.options.Mode) + " >"
 	}
 	value := m.options.value(row.option)
 	if strings.TrimSpace(value) == "" {
 		if row.option == OptionOutputPath {
 			return "不输出"
 		}
+		if hint := defaultHint(row.option); hint != "" {
+			return hint
+		}
 		return "默认"
+	}
+	if optionAdjustable(row.option) {
+		shown := value
+		if row.option == OptionDownloadSize || row.option == OptionUploadSize {
+			shown += "MB"
+		}
+		if focused {
+			shown = value + "▌"
+			if row.option == OptionDownloadSize || row.option == OptionUploadSize {
+				shown += "MB"
+			}
+		}
+		return "< " + shown + " >"
 	}
 	if focused {
 		return value + "▌"

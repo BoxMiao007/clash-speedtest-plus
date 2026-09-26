@@ -251,7 +251,9 @@ func (st *SpeedTester) LoadProxies() (map[string]*CProxy, error) {
 			if name == provider.ReservedName {
 				return nil, fmt.Errorf("can not defined a provider called `%s`", provider.ReservedName)
 			}
-			pd, err := provider.ParseProxyProvider(name, config)
+			// v1.19.31 起新增的 Tunnel 参数只是挂在节点上的 API 钩子，
+			// 测速场景没有 mihomo 的 tunnel 实例，传 nil 即可。
+			pd, err := provider.ParseProxyProvider(name, config, nil)
 			if err != nil {
 				return nil, fmt.Errorf("parse proxy provider %s error: %w", name, err)
 			}

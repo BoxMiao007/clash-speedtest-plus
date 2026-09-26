@@ -107,6 +107,36 @@ func (s OptionState) Enabled(option Option) bool {
 	}
 }
 
+// defaultHint 是文本行留空时在「默认」后标注的说明，让用户知道不填会沿用什么。
+func defaultHint(option Option) string {
+	switch option {
+	case OptionBlock:
+		return "默认 (不过滤)"
+	case OptionEarlyStop:
+		return "默认 (关闭)"
+	case OptionRenameTemplate:
+		return "默认 (自动格式)"
+	case OptionGistToken, OptionGistAddress, OptionRepoToken, OptionRepoAddress, OptionRepoFilePath, OptionRepoBranch:
+		return "默认 (不更新)"
+	case OptionServerURL:
+		return "默认 (Chrome 官方地址)"
+	case OptionUA:
+		return "默认 (mihomo 内核)"
+	}
+	return ""
+}
+
+// optionAdjustable 报告选项能否用左右键或点击步进（区别于纯打字的文本行）。
+func optionAdjustable(option Option) bool {
+	switch option {
+	case OptionDownloadSize, OptionUploadSize, OptionConcurrent, OptionParallel,
+		OptionEarlyStop, OptionTimeout, OptionMaxLatency, OptionMaxPacketLoss,
+		OptionMinDownload, OptionMinUpload:
+		return true
+	}
+	return false
+}
+
 // validateText 检查一个文本项当前填的字合不合法。空串交给默认值，不算错。
 func validateText(option Option, value string) error {
 	value = strings.TrimSpace(value)
@@ -268,6 +298,87 @@ func (o *Options) toggle(option Option) {
 	case OptionRename:
 		o.Rename = !o.Rename
 	}
+}
+
+// adjust 对数字类选项按 delta 步进，左右键调参数用。非数字类选项无操作。
+// 步长贴着日常调整习惯：大小 ±5MB、计数 ±1、超时 ±1s、延迟上限 ±100ms、
+// 丢包率 ±5%、速度门槛 ±1MB/s。上下限防止按出没有意义的值。
+func (o *Options) adjust(option Option, delta int) {
+	value := o.value(option)
+	switch option {
+	case OptionDownloadSize, OptionUploadSize:
+		if v, ok := stepInt(value, delta*5, 1, 4096); ok {
+			o.setText(option, v)
+		}
+	case OptionConcurrent, OptionParallel:
+		if v, ok := stepInt(value, delta, 1, 64); ok {
+			o.setText(option, v)
+		}
+	case OptionEarlyStop:
+		if v, ok := stepInt(value, delta, 0, 10000); ok {
+			o.setText(option, v)
+		}
+	case OptionTimeout:
+		if v, ok := stepDuration(value, time.Duration(delta)*time.Second, time.Second, 10*time.Minute); ok {
+			o.setText(option, v)
+		}
+	case OptionMaxLatency:
+		if v, ok := stepDuration(value, time.Duration(delta)*100*time.Millisecond, 0, time.Minute); ok {
+			o.setText(option, v)
+		}
+	case OptionMaxPacketLoss:
+		if v, ok := stepFloat(value, float64(delta)*5, 0, 100); ok {
+			o.setText(option, v)
+		}
+	case OptionMinDownload, OptionMinUpload:
+		if v, ok := stepFloat(value, float64(delta), 0, 1000); ok {
+			o.setText(option, v)
+		}
+	}
+}
+
+func stepInt(value string, delta, low, high int) (string, bool) {
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		// 值被手改坏了就不动，回车时校验会指出这一行。
+		return value, false
+	}
+	return strconv.Itoa(min(max(n+delta, low), high)), true
+}
+
+func stepDuration(value string, delta, low, high time.Duration) (string, bool) {
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return value, false
+	}
+	d += delta
+	if d < low {
+		d = low
+	}
+	if d > high {
+		d = high
+	}
+	return d.String(), true
+}
+
+func stepFloat(value string, delta, low, high float64) (string, bool) {
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return value, false
+	}
+	f = min(max(f+delta, low), high)
+	return strconv.FormatFloat(f, 'f', -1, 64), true
+}
+
+// cycleMode 在快速、下载、完整之间按 delta 方向循环。
+func cycleMode(mode string, delta int) string {
+	modes := []string{"fast", "download", "full"}
+	for i, m := range modes {
+		if m == mode {
+			return modes[(i+delta+len(modes))%len(modes)]
+		}
+	}
+	return "download"
 }
 
 // validateEnabledRows 校验所有可用行。返回第一个填错的行。

@@ -84,8 +84,15 @@ func (m *tuiModel) updateTableHeaders() {
 	if len(m.baseHeaders) == 0 {
 		return
 	}
-	columns := buildColumns(addSortIndicators(m.baseHeaders, m.sortColumn, m.sortAscending), m.windowWidth, m.mode)
+	// 列宽口径必须和 updateTableLayout 一致：有滚动条时让出 2 列，
+	// 否则点一次表头列宽就膨胀，行宽超窗，视觉行坐标全部错一倍。
+	tableWidth := m.windowWidth
+	if m.scrollbarVisible() {
+		tableWidth = max(tableWidth-2, 1)
+	}
+	columns := buildColumns(addSortIndicators(m.baseHeaders, m.sortColumn, m.sortAscending), tableWidth, m.mode)
 	m.table.SetColumns(columns)
+	m.table.SetWidth(tableWidth)
 }
 
 func buildColumns(headers []string, width int, mode speedtester.SpeedMode) []table.Column {
@@ -430,7 +437,10 @@ func (m tuiModel) scrollbarRange() (top, thumb int, ok bool) {
 	if span <= 0 {
 		return 0, thumb, true
 	}
-	if m.followSelection {
+	if m.followTail {
+		// 跟随最新条目时滑块贴底。
+		top = span
+	} else if m.followSelection {
 		cursor := m.table.Cursor()
 		if cursor < 0 {
 			cursor = 0
@@ -490,11 +500,13 @@ func (m *tuiModel) jumpScrollbar(markIndex int) {
 	}
 	// 只挪视口。选中行留给点击和方向键。
 	m.followSelection = false
+	m.followTail = false
 	m.scrollOffset = m.offsetForScrollbar(markIndex)
 }
 
 // viewportStart 是当前画面上第一条数据行的绝对下标。
 // 选中跟随开启时，要加上表格内部的滚动偏移，否则点击会落到上一行。
+// 跟随最新条目时视口直接贴着列表尾部。
 func (m tuiModel) viewportStart() int {
 	height := m.table.Height()
 	total := m.tableRowCount()
@@ -503,6 +515,9 @@ func (m tuiModel) viewportStart() int {
 		maxStart = total - height
 	}
 	start := m.scrollOffset
+	if m.followTail {
+		return maxStart
+	}
 	if m.followSelection {
 		start = tableStartIndex(m.table.Cursor(), height) + tableYOffset(m.table)
 	}
@@ -724,95 +739,4 @@ func clampInt(value int, low int, high int) int {
 		return high
 	}
 	return value
-}
-
-// colorizeRow applies color thresholds to a row
-func (m *tuiModel) colorizeRow(row []string, result *speedtester.Result) table.Row {
-	// Color thresholds matching ANSI colors in main.go
-	// Latency: <800ms green, <1500ms yellow, >=1500ms red
-	latencyStr := row[3]
-	if result.Latency > 0 {
-		if result.Latency < 800*time.Millisecond {
-			latencyStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")).Render(latencyStr) // green
-		} else if result.Latency < 1500*time.Millisecond {
-			latencyStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00")).Render(latencyStr) // yellow
-		} else {
-			latencyStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(latencyStr) // red
-		}
-	} else {
-		latencyStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(latencyStr) // red
-	}
-
-	if m.mode.IsFast() {
-		return table.Row{row[0], row[1], row[2], latencyStr}
-	}
-
-	// Jitter: <800ms green, <1500ms yellow, >=1500ms red
-	jitterStr := row[4]
-	if result.Jitter > 0 {
-		if result.Jitter < 800*time.Millisecond {
-			jitterStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")).Render(jitterStr) // green
-		} else if result.Jitter < 1500*time.Millisecond {
-			jitterStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00")).Render(jitterStr) // yellow
-		} else {
-			jitterStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(jitterStr) // red
-		}
-	} else {
-		jitterStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(jitterStr) // red
-	}
-
-	// Packet loss: <10% green, <20% yellow, >=20% red
-	packetLossStr := row[5]
-	if result.PacketLoss < 10 {
-		packetLossStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")).Render(packetLossStr) // green
-	} else if result.PacketLoss < 20 {
-		packetLossStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00")).Render(packetLossStr) // yellow
-	} else {
-		packetLossStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(packetLossStr) // red
-	}
-
-	// Download speed: >=10MB/s green, >=5MB/s yellow, <5MB/s red
-	downloadSpeed := result.DownloadSpeed / (1024 * 1024)
-	downloadSpeedStr := row[6]
-	if downloadSpeed >= 10 {
-		downloadSpeedStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")).Render(downloadSpeedStr) // green
-	} else if downloadSpeed >= 5 {
-		downloadSpeedStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00")).Render(downloadSpeedStr) // yellow
-	} else {
-		downloadSpeedStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(downloadSpeedStr) // red
-	}
-
-	if !m.mode.UploadEnabled() {
-		return table.Row{
-			row[0],
-			row[1],
-			row[2],
-			latencyStr,
-			jitterStr,
-			packetLossStr,
-			downloadSpeedStr,
-		}
-	}
-
-	// Upload speed: >=5MB/s green, >=2MB/s yellow, <2MB/s red
-	uploadSpeed := result.UploadSpeed / (1024 * 1024)
-	uploadSpeedStr := row[7]
-	if uploadSpeed >= 5 {
-		uploadSpeedStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")).Render(uploadSpeedStr) // green
-	} else if uploadSpeed >= 2 {
-		uploadSpeedStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00")).Render(uploadSpeedStr) // yellow
-	} else {
-		uploadSpeedStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Render(uploadSpeedStr) // red
-	}
-
-	return table.Row{
-		row[0],
-		row[1],
-		row[2],
-		latencyStr,
-		jitterStr,
-		packetLossStr,
-		downloadSpeedStr,
-		uploadSpeedStr,
-	}
 }

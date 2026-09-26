@@ -26,4 +26,10 @@ var (
 	keyStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("230"))
 	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	plainStyle = lipgloss.NewStyle()
+
+	// helpActiveStyle 标出帮助行里用鼠标点得动的段落。
+	helpActiveStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("114")).Underline(true)
+
+	// disabledStyle 是灰行行尾的「不可用」，斜体以便和灰掉的原因区分。
+	disabledStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Italic(true)
 )

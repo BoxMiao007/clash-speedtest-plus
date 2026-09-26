@@ -6,3 +6,5 @@ clash-speedtest
 test/test.yaml
 **/clash-speedtest.yaml
 *.local.yaml
+# 订阅拉取写出的临时配置含节点凭据，禁止入库
+clash-speedtest-sub-*.yaml

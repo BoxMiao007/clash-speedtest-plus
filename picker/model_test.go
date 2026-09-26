@@ -5,11 +5,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/faceair/clash-speedtest/speedtester"
 )
 
 func TestSelectionReturnsCheckedConfigsAndAddresses(t *testing.T) {
@@ -42,10 +40,13 @@ func TestEnterFetchesSubscriptionsThenStarts(t *testing.T) {
 	if model.started || !model.fetching {
 		t.Fatalf("应先获取: started=%v fetching=%v", model.started, model.fetching)
 	}
-	done, _ := model.Update(cmd())
+	done, quitCmd := model.Update(cmd())
 	model = done.(Model)
 	if !model.started || model.fetching {
 		t.Fatalf("获取成功应开始: started=%v fetching=%v", model.started, model.fetching)
+	}
+	if quitCmd == nil {
+		t.Fatal("回车确认后应返回 tea.Quit 结束选源界面")
 	}
 	if !reflect.DeepEqual(model.Selection(), []string{"/opt/sub-1.yaml"}) {
 		t.Fatalf("Selection = %#v", model.Selection())
@@ -72,14 +73,18 @@ func TestQuitKeysLeaveWhenIdle(t *testing.T) {
 	for _, key := range []tea.KeyMsg{
 		{Type: tea.KeyRunes, Runes: []rune{'q'}},
 		{Type: tea.KeyEsc},
-		{Type: tea.KeyCtrlC},
 	} {
 		model := New(sessionFixture())
 		updated, cmd := model.Update(key)
 		got := updated.(Model)
-		if !got.quitting || cmd == nil {
-			t.Fatalf("key %v did not leave: quitting=%v cmd=%v", key, got.quitting, cmd)
+		if got.quitting || cmd != nil {
+			t.Fatalf("key %v 不该退出: quitting=%v cmd=%v", key, got.quitting, cmd)
 		}
+	}
+	model := New(sessionFixture())
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if got := updated.(Model); !got.quitting || cmd == nil {
+		t.Fatalf("Ctrl+C 应退出: quitting=%v cmd=%v", got.quitting, cmd)
 	}
 }
 
@@ -182,35 +187,71 @@ func TestFastModeDisablesDownloadSizeOnScreen(t *testing.T) {
 	}
 }
 
-func TestDownFromModeEditsDownloadSizeOnly(t *testing.T) {
+func TestArrowKeysAdjustOptionValues(t *testing.T) {
 	model := New(sessionFixture())
 	for model.focus != focusOptions {
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(Model)
 	}
-	// 测速模式后依次是过滤正则、屏蔽关键字、下载大小。
+	// 停在模式行：左右键循环切换模式。
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if got := updated.(Model).options.Mode; got != "fast" {
+		t.Fatalf("左键应切到快速: %q", got)
+	}
+	updated, _ = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyRight})
+	if got := updated.(Model).options.Mode; got != "download" {
+		t.Fatalf("右键应切回下载: %q", got)
+	}
+	model = updated.(Model)
+
+	// 下到下载大小：按步长 5MB 增减，打到边界不再动。
 	for i := 0; i < 3; i++ {
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(Model)
 	}
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	model = updated.(Model)
-	if model.options.Mode != "download" {
-		t.Fatalf("左右键不该改模式: %q", model.options.Mode)
-	}
-	if model.optionIndex != 2 {
-		t.Fatalf("左键应移到上一项: %d", model.optionIndex)
+	if model.currentOption().option != OptionDownloadSize {
+		t.Fatalf("导航应停在下载大小: %d", model.optionIndex)
 	}
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRight})
-	model = updated.(Model)
-	if model.optionIndex != 3 {
-		t.Fatalf("右键应移回下载大小: %d", model.optionIndex)
+	if got := updated.(Model).options.DownloadSize; got != "55" {
+		t.Fatalf("右键应 +5MB: %q", got)
 	}
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("8")})
-	model = updated.(Model)
-	if model.options.DownloadSize != "508" {
-		t.Fatalf("下载大小 = %q", model.options.DownloadSize)
+	updated, _ = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if got := updated.(Model).options.DownloadSize; got != "50" {
+		t.Fatalf("左键应 -5MB: %q", got)
 	}
+
+	// 值被手改坏时左右键不动，回车校验会指出这一行。
+	broken := updated.(Model)
+	broken.options.DownloadSize = "abc"
+	if got, _ := broken.Update(tea.KeyMsg{Type: tea.KeyRight}); got.(Model).options.DownloadSize != "abc" {
+		t.Fatal("值不合法时左右键不该改值")
+	}
+
+	// 文本项（过滤正则）左右键无操作。
+	for i := 0; i < 2; i++ {
+		updated, _ = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyUp})
+		model = updated.(Model)
+	}
+	if model.currentOption().option != OptionFilter {
+		t.Fatalf("导航应停在过滤正则: %d", model.optionIndex)
+	}
+	if got, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight}); got.(Model).options.Filter != ".+" {
+		t.Fatalf("文本项左右键不该改值: %q", got.(Model).options.Filter)
+	}
+
+	// Tab 沿环往回走：选项栏头再 Tab 到地址行。
+	for model.optionIndex != 0 {
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyUp})
+		model = updated.(Model)
+	}
+	if got, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab}); got.(Model).focus != focusAddress {
+		t.Fatalf("Tab 应从选项栏头回到地址行: %v", got.(Model).focus)
+	}
+}
+
+func (m Model) currentOption() optionRow {
+	return optionOrder[m.optionIndex]
 }
 
 func TestFastModeGreysSpeedOptionsAndEmptyOutputGreysRename(t *testing.T) {
@@ -297,19 +338,23 @@ func TestEnterWithBadFilterStaysOnThatField(t *testing.T) {
 }
 
 func TestFetchingQuitCancelsAndLeaves(t *testing.T) {
+	// 获取中 q 和 Esc 不再是退出键，只有 Ctrl+C 取消。
 	model := New(sessionFixture())
 	model.fetching = true
-	keys := []tea.KeyMsg{
+	for _, key := range []tea.KeyMsg{
 		{Type: tea.KeyRunes, Runes: []rune{'q'}},
 		{Type: tea.KeyEsc},
-		{Type: tea.KeyCtrlC},
-	}
-	for _, key := range keys {
+	} {
 		updated, cmd := model.Update(key)
 		got := updated.(Model)
-		if !got.quitting || cmd == nil {
-			t.Fatalf("key %v did not leave: quitting=%v cmd=%v", key, got.quitting, cmd)
+		if got.quitting || cmd != nil || !got.fetching {
+			t.Fatalf("key %v 不该取消获取: quitting=%v cmd=%v", key, got.quitting, cmd)
 		}
+	}
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	got := updated.(Model)
+	if !got.quitting || cmd == nil {
+		t.Fatalf("Ctrl+C 应取消获取: quitting=%v cmd=%v", got.quitting, cmd)
 	}
 }
 
@@ -383,6 +428,275 @@ func TestClickFocusesOptionRowAtLayoutPosition(t *testing.T) {
 	}
 }
 
+func TestEnterWithCheckedConfigQuits(t *testing.T) {
+	model := New(sessionFixture())
+	// 空格勾上第一个配置（真实终端里空格以 KeyRunes 形式到达）。
+	toggled, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	model = toggled.(Model)
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := updated.(Model)
+	if !got.Started() {
+		t.Fatal("勾选后回车应确认开始")
+	}
+	if cmd == nil {
+		t.Fatal("回车确认后应返回 tea.Quit 结束选源界面")
+	}
+}
+
+func TestUpArrowWrapsTheFullRing(t *testing.T) {
+	model := New(sessionFixture()) // 光标停在 configs[0]
+	// 文件头 ↑ 绕环到选项栏末项。
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	got := updated.(Model)
+	if got.focus != focusOptions || got.optionIndex != len(optionOrder)-1 {
+		t.Fatalf("文件头 ↑ 应绕到选项栏末项: focus=%v index=%d", got.focus, got.optionIndex)
+	}
+	// 一直 ↑ 到选项头，再 ↑ 一次应到地址。
+	for got.optionIndex > 0 {
+		updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyUp})
+		got = updated.(Model)
+	}
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyUp})
+	got = updated.(Model)
+	if got.focus != focusAddress {
+		t.Fatalf("选项头 ↑ 应到地址: %v", got.focus)
+	}
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyUp})
+	got = updated.(Model)
+	if got.focus != focusConfigs || got.cursor != 1 {
+		t.Fatalf("地址 ↑ 应到文件末项: focus=%v cursor=%d", got.focus, got.cursor)
+	}
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyUp})
+	got = updated.(Model)
+	if got.focus != focusConfigs || got.cursor != 0 {
+		t.Fatalf("文件内 ↑: focus=%v cursor=%d", got.focus, got.cursor)
+	}
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyUp})
+	got = updated.(Model)
+	if got.focus != focusOptions || got.optionIndex != len(optionOrder)-1 {
+		t.Fatalf("文件头再 ↑ 应回选项栏末项: focus=%v index=%d", got.focus, got.optionIndex)
+	}
+}
+
+func TestArrowKeysFromFilesJumpToOptionsFirstRow(t *testing.T) {
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyLeft},
+		{Type: tea.KeyRight},
+	} {
+		model := New(sessionFixture()) // 焦点在文件栏
+		updated, _ := model.Update(key)
+		got := updated.(Model)
+		if got.focus != focusOptions || got.optionIndex != 0 {
+			t.Fatalf("文件栏 %v 应切到选项栏模式行: focus=%v index=%d", key.Type, got.focus, got.optionIndex)
+		}
+	}
+	// 地址行 ←→ 无操作。
+	model := New(sessionFixture())
+	model.focus = focusAddress
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if got := updated.(Model); got.focus != focusAddress || got.address != "" {
+		t.Fatalf("地址行 → 应无操作: focus=%v address=%q", got.focus, got.address)
+	}
+}
+
+func TestClickHelpZonesRunActions(t *testing.T) {
+	model := New(sessionFixture())
+	enter, quit := helpZones()
+	lo := model.computeLayout()
+
+	// 没勾选时点「回车」：留下提示，不开始。
+	updated, _ := model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: enter[0] + 1, Y: lo.helpY,
+	})
+	got := updated.(Model)
+	if got.started || got.fetching {
+		t.Fatalf("无源点回车不该开始: started=%v fetching=%v", got.started, got.fetching)
+	}
+	if !strings.Contains(got.status, "先勾选") {
+		t.Fatalf("status = %q", got.status)
+	}
+
+	// 勾上第一个配置再点「回车」：开始并退出。
+	toggled, _ := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	model = toggled.(Model)
+	updated, cmd := model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: enter[0] + 1, Y: lo.helpY,
+	})
+	got = updated.(Model)
+	if !got.started || cmd == nil {
+		t.Fatalf("点回车热区应开始并退出: started=%v cmd=%v", got.started, cmd)
+	}
+
+	// 点「Ctrl+C」热区：退出。
+	model = New(sessionFixture())
+	updated, cmd = model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: quit[0] + 1, Y: lo.helpY,
+	})
+	got = updated.(Model)
+	if !got.quitting || cmd == nil {
+		t.Fatalf("点 Ctrl+C 热区应退出: quitting=%v cmd=%v", got.quitting, cmd)
+	}
+
+	// 热区外的帮助行位置不触发。
+	model = New(sessionFixture())
+	updated, cmd = model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: 0, Y: lo.helpY,
+	})
+	if got := updated.(Model); got.quitting || got.started || cmd != nil {
+		t.Fatalf("点帮助行空白处不该有反应: quitting=%v started=%v", got.quitting, got.started)
+	}
+}
+
+func TestClickOptionSymbolAdjustsValueOnly(t *testing.T) {
+	model := New(sessionFixture())
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	model = updated.(Model)
+	lo := model.computeLayout()
+	y := lo.paneY + 1 + optionIndexFor(OptionDownloadSize) // 下载大小行
+
+	// 点值本身：只选中，不减不加。
+	clicked, _ := model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: lo.optionsX + 2 + optionLabelWidth() + 2 + 2, Y: y, // 落在「50」的数字上
+	})
+	got := clicked.(Model)
+	if got.options.DownloadSize != "50" || got.focus != focusOptions || got.optionIndex != optionIndexFor(OptionDownloadSize) {
+		t.Fatalf("点值应只选中: size=%q focus=%v", got.options.DownloadSize, got.focus)
+	}
+
+	// 点行左半但不在符号上：同样只选中。
+	clicked, _ = model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: lo.optionsX + 1, Y: y,
+	})
+	if got := clicked.(Model); got.options.DownloadSize != "50" {
+		t.Fatalf("点标签不该减值: %q", got.options.DownloadSize)
+	}
+
+	// 点「<」符号：减。
+	model = New(sessionFixture())
+	updated, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	model = updated.(Model)
+	left, right, ok := model.arrowSymbolX(lo, optionIndexFor(OptionDownloadSize))
+	if !ok || left <= 0 || right <= left {
+		t.Fatalf("符号位置应有效: left=%d right=%d ok=%v", left, right, ok)
+	}
+	clicked, _ = model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: left, Y: y,
+	})
+	if got := clicked.(Model); got.options.DownloadSize != "45" {
+		t.Fatalf("点 < 应减 5MB: %q", got.options.DownloadSize)
+	}
+
+	// 点「>」符号：加。
+	model = clicked.(Model)
+	clicked, _ = model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: right, Y: y,
+	})
+	if got := clicked.(Model); got.options.DownloadSize != "50" {
+		t.Fatalf("点 > 应加回 50MB: %q", got.options.DownloadSize)
+	}
+
+	// 符号两侧一格内仍算命中（容差），两格外不响应。
+	model = clicked.(Model)
+	clicked, _ = model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: left + 1, Y: y,
+	})
+	if got := clicked.(Model); got.options.DownloadSize != "45" {
+		t.Fatalf("符号相邻一格应命中: %q", got.options.DownloadSize)
+	}
+	model = clicked.(Model)
+	clicked, _ = model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: left + 2, Y: y, // 已落在值的空格/数字区
+	})
+	if got := clicked.(Model); got.options.DownloadSize != "45" {
+		t.Fatalf("容差之外不该减: %q", got.options.DownloadSize)
+	}
+
+	// 模式行同样只认符号。
+	model = New(sessionFixture())
+	updated, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	model = updated.(Model)
+	modeLeft, _, ok := model.arrowSymbolX(lo, optionIndexFor(OptionSpeedMode))
+	if !ok {
+		t.Fatal("模式行应有符号")
+	}
+	clicked, _ = model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: modeLeft, Y: lo.paneY + 1 + optionIndexFor(OptionSpeedMode),
+	})
+	if got := clicked.(Model); got.options.Mode != "fast" {
+		t.Fatalf("点模式行 < 应切到快速: %q", got.options.Mode)
+	}
+
+	// 开关行点哪儿都切换（无符号）。
+	model = New(sessionFixture())
+	updated, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	model = updated.(Model)
+	boolIndex := optionIndexFor(OptionNoImage)
+	if got, _ := model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: lo.optionsX + 4, Y: lo.paneY + 1 + boolIndex,
+	}); !got.(Model).options.NoImage {
+		t.Fatal("开关行点击应切换")
+	}
+}
+
+func TestFetchingLocksMouseClicks(t *testing.T) {
+	model := New(sessionFixture())
+	model.fetching = true
+	updated, _ := model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: 1, Y: model.computeLayout().paneY + 1,
+	})
+	got := updated.(Model)
+	if got.checked[0] || got.focus != focusConfigs {
+		t.Fatalf("获取中点击不该改勾选: checked=%v focus=%v", got.checked, got.focus)
+	}
+}
+
+func TestContentXShiftsForWideTerminal(t *testing.T) {
+	model := New(sessionFixture())
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	model = updated.(Model)
+	if got := model.contentX(30); got != 30-(120-maxContentWidth)/2 {
+		t.Fatalf("宽终端点击应减去居中偏移: %d", got)
+	}
+	narrow := New(sessionFixture())
+	if got := narrow.contentX(10); got != 10 {
+		t.Fatalf("窄于 100 列时无需换算: %d", got)
+	}
+}
+
+func TestHelpZonesAlignWithRenderedLine(t *testing.T) {
+	// 布局的 helpY 必须真的指向渲染出的帮助行，否则热区点击会落空。
+	// 坐标对坐标的测试自洽不了，只能拿 View 的实际行来对。
+	for _, size := range []tea.WindowSizeMsg{
+		{Width: 80, Height: 24},
+		{Width: 0, Height: 0}, // 无尺寸（测试/极小终端）同样要对齐
+	} {
+		model := New(sessionFixture())
+		updated, _ := model.Update(size)
+		model = updated.(Model)
+		lo := model.computeLayout()
+		lines := strings.Split(model.View(), "\n")
+		if lo.helpY < 0 || lo.helpY >= len(lines) {
+			t.Fatalf("helpY %d 超出渲染范围（%d 行）", lo.helpY, len(lines))
+		}
+		if !strings.Contains(lines[lo.helpY], "Ctrl+C") || !strings.Contains(lines[lo.helpY], "开始测速") {
+			t.Fatalf("helpY=%d 指向的不是帮助行:\n%s", lo.helpY, lines[lo.helpY])
+		}
+	}
+}
+
 func TestNumericOptionRejectsNonDigitsWhileTyping(t *testing.T) {
 	model := New(Session{})
 	model.focus = focusOptions
@@ -414,123 +728,6 @@ func optionIndexFor(option Option) int {
 		}
 	}
 	panic("未知的选项")
-}
-
-func TestEnterTriggersOnStart(t *testing.T) {
-	var gotRequest StartRequest
-	session := sessionFixture()
-	session.OnStart = func(req StartRequest) tea.Cmd {
-		gotRequest = req
-		return func() tea.Msg { return TestingStartedMsg{Total: 3} }
-	}
-	model := New(session)
-	model.checked[0] = true
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	got := updated.(Model)
-	if !got.started || !got.loading {
-		t.Fatalf("回车应进入加载: started=%v loading=%v", got.started, got.loading)
-	}
-	if cmd == nil {
-		t.Fatal("应返回 OnStart 的 Cmd")
-	}
-	started, _ := got.Update(cmd())
-	got = started.(Model)
-	if !got.testing || got.loading {
-		t.Fatalf("OnStart 完成应进入测试: testing=%v loading=%v", got.testing, got.loading)
-	}
-	if got.total != 3 {
-		t.Fatalf("total = %d", got.total)
-	}
-	if len(gotRequest.Selection) == 0 || gotRequest.Selection[0] != "/opt/a.yaml" {
-		t.Fatalf("OnStart 应收到勾选的配置: %#v", gotRequest.Selection)
-	}
-	if gotRequest.Options.Mode != "download" {
-		t.Fatalf("OnStart 应收到选项: %q", gotRequest.Options.Mode)
-	}
-}
-
-type picker_StartRequest = StartRequest
-
-func TestLoadFailureReturnsToEditable(t *testing.T) {
-	session := sessionFixture()
-	session.OnStart = func(StartRequest) tea.Cmd {
-		return func() tea.Msg { return LoadFailedMsg{Err: fmt.Errorf("加载节点失败: 坏文件")} }
-	}
-	model := New(session)
-	model.checked[0] = true
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	failed, _ := updated.(Model).Update(cmd())
-	got := failed.(Model)
-	if got.started || got.loading || got.testing {
-		t.Fatalf("加载失败应回到选源: started=%v loading=%v testing=%v", got.started, got.loading, got.testing)
-	}
-	if !strings.Contains(got.status, "坏文件") {
-		t.Fatalf("status = %q", got.status)
-	}
-	// 回到选源后还能重新勾选。
-	toggled, _ := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
-	if toggled.(Model).checked[0] || toggled.(Model).checked[1] {
-		t.Fatal("加载失败后应仍可编辑勾选")
-	}
-}
-
-func TestResultsFlowIntoRecordTable(t *testing.T) {
-	model := New(sessionFixture())
-	model.checked[0] = true
-	model.testing = true
-	model.total = 2
-	r1 := &speedtester.Result{ProxyName: "JP|01", Latency: 100 * time.Millisecond, DownloadSpeed: 1024 * 1024}
-	r2 := &speedtester.Result{ProxyName: "US|02", Latency: 200 * time.Millisecond, DownloadError: "超时"}
-	updated, _ := model.Update(TestResultMsg{Result: r1})
-	model = updated.(Model)
-	updated, _ = model.Update(TestResultMsg{Result: r2})
-	model = updated.(Model)
-	view := model.View()
-	if !strings.Contains(view, "测试记录") || !strings.Contains(view, "已测 2/2") {
-		t.Fatalf("记录表缺少进度:\n%s", view)
-	}
-	if !strings.Contains(view, "JP|01") || !strings.Contains(view, "100ms") || !strings.Contains(view, "1.00MB/s") {
-		t.Fatalf("记录行未画出:\n%s", view)
-	}
-	if !strings.Contains(view, "超时") {
-		t.Fatalf("失败结果未画出:\n%s", view)
-	}
-
-	done, _ := model.Update(TestDoneMsg{})
-	model = done.(Model)
-	if !model.TestDone() || model.testing {
-		t.Fatalf("测试应完成: done=%v testing=%v", model.TestDone(), model.testing)
-	}
-	if !strings.Contains(model.View(), "完成 2/2") {
-		t.Fatalf("完成后应显示汇总:\n%s", model.View())
-	}
-	// Results 交给调用方导出。
-	if len(model.Results()) != 2 || model.Results()[0] != r1 {
-		t.Fatalf("Results = %#v", model.Results())
-	}
-}
-
-func TestTestingPhaseIgnoresEditingButScrollsAndQuits(t *testing.T) {
-	model := New(sessionFixture())
-	model.checked[0] = true
-	model.testing = true
-	model.total = 5
-	for i := 0; i < 8; i++ {
-		model.records = append(model.records, &speedtester.Result{ProxyName: fmt.Sprintf("节点%02d", i)})
-	}
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
-	got := updated.(Model)
-	if got.cursor != 0 || got.optionIndex != 0 || got.recordScroll == 0 {
-		t.Fatalf("测试中 ↑↓ 应滚记录表而不是编辑: cursor=%d index=%d recordScroll=%d", got.cursor, got.optionIndex, got.recordScroll)
-	}
-	edited, _ := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
-	if edited.(Model).address != "" {
-		t.Fatal("测试中不应接受输入")
-	}
-	quitted, cmd := edited.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
-	if !quitted.(Model).quitting || cmd == nil {
-		t.Fatal("测试中 q 应退出")
-	}
 }
 
 func sessionFixture() Session {
