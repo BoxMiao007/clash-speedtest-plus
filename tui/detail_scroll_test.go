@@ -114,6 +114,7 @@ func TestScrollbarAppearsWhenRowsOverflow(t *testing.T) {
 
 func TestScrollbarClickAndDrag(t *testing.T) {
 	model := testingModel(t, 40)
+	model.followTail = false
 	model.windowHeight = 16
 	model.updateTableLayout()
 	startY := model.tableHeaderY() + dataRowOffset(model.table.View())
@@ -178,6 +179,7 @@ func TestScrollbarClickAndDrag(t *testing.T) {
 
 func TestThumbSitsOnCurrentRow(t *testing.T) {
 	model := testingModel(t, 30)
+	model.followTail = false
 	model.windowHeight = 20
 	model.updateTableLayout()
 	model.table.SetCursor(model.tableRowCount() - 1)
@@ -331,6 +333,7 @@ func TestClickEdgesAfterScroll(t *testing.T) {
 // 拖到后面再点画面上的行，应选中那一行，而不是拖之前的选中行。
 func TestClickAfterScrollbarDragSelectsVisibleRow(t *testing.T) {
 	model := testingModel(t, 40)
+	model.followTail = false
 	model.windowHeight = 16
 	model.updateTableLayout()
 	startY := model.tableHeaderY() + dataRowOffset(model.table.View())

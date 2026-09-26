@@ -123,7 +123,17 @@ func openFontFace(path string) (font.Face, error) {
 
 func findEmojiFont() string {
 	home, _ := os.UserHomeDir()
+	windir := os.Getenv("WINDIR")
+	if windir == "" {
+		windir = os.Getenv("SystemRoot")
+	}
+	if windir == "" {
+		windir = `C:\Windows`
+	}
 	candidates := []string{
+		filepath.Join(windir, "Fonts", "seguiemj.ttf"),
+		"/mnt/c/Windows/Fonts/seguiemj.ttf",
+		"/System/Library/Fonts/Apple Color Emoji.ttc",
 		filepath.Join(home, ".local/share/fonts/NotoEmoji.ttf"),
 		"/usr/share/fonts/noto/NotoEmoji-Regular.ttf",
 		"/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf",
@@ -203,25 +213,23 @@ func RenderResultImage(spec ImageSpec, fontFace imageFont) ([]byte, string, erro
 		lineHeight = resultImageFontSize + 4
 	}
 	rowHeight := lineHeight + resultImageRowPadY*2
-	source := sourceLabel(spec.Source)
-	titleRows := 0
-	if source != "" {
-		titleRows++
-	}
-	if spec.Summary != "" {
-		titleRows++
-	}
-	height := (titleRows+1+len(rows))*rowHeight + resultImageLineGap
 	width := sumWidths(colWidths)
 	if width < 200 {
 		width = 200
 	}
+	// 来源可能是一长串文件名或链接，超宽时按图宽折行，不遮出边界。
+	sourceLines := wrapTextByWidth(fontFace.face, sourceLabel(spec.Source), width)
+	titleRows := len(sourceLines)
+	if spec.Summary != "" {
+		titleRows++
+	}
+	height := (titleRows+1+len(rows))*rowHeight + resultImageLineGap
 	img := image.NewNRGBA(image.Rect(0, 0, width, height))
 	fill(img, color.NRGBA{255, 255, 255, 255})
 
 	y := 0
-	if source != "" {
-		drawRow(img, fontFace, y, rowHeight, colWidths, []string{source}, color.NRGBA{255, 255, 255, 255}, color.NRGBA{15, 23, 42, 255}, false)
+	for _, line := range sourceLines {
+		drawRow(img, fontFace, y, rowHeight, colWidths, []string{line}, color.NRGBA{255, 255, 255, 255}, color.NRGBA{15, 23, 42, 255}, false)
 		y += rowHeight
 	}
 	if spec.Summary != "" {
@@ -230,9 +238,9 @@ func RenderResultImage(spec ImageSpec, fontFace imageFont) ([]byte, string, erro
 	}
 	drawHeaderRow(img, fontFace, y, rowHeight, colWidths, headers)
 	y += rowHeight
-	maxSpeed := maxSpeedInRows(rows, spec.Mode)
+	scales := metricScales(rows, spec.Mode)
 	for _, row := range rows {
-		drawDataRow(img, fontFace, y, rowHeight, colWidths, spec.Mode, row, maxSpeed)
+		drawDataRow(img, fontFace, y, rowHeight, colWidths, spec.Mode, row, scales)
 		y += rowHeight
 	}
 	drawGrid(img, titleRows, rowHeight, colWidths)
@@ -397,7 +405,7 @@ func drawHeaderRow(img *image.NRGBA, faces imageFont, y, height int, colWidths [
 	}
 }
 
-func drawDataRow(img *image.NRGBA, faces imageFont, y, height int, colWidths []int, mode speedtester.SpeedMode, row ImageRow, maxSpeed float64) {
+func drawDataRow(img *image.NRGBA, faces imageFont, y, height int, colWidths []int, mode speedtester.SpeedMode, row ImageRow, scales map[int]metricScale) {
 	fillRect(img, 0, y, img.Bounds().Dx(), height, color.NRGBA{255, 255, 255, 255})
 	x := 0
 	for i, width := range colWidths {
@@ -415,7 +423,7 @@ func drawDataRow(img *image.NRGBA, faces imageFont, y, height int, colWidths []i
 		switch kindOfColumn(i, mode) {
 		case colMetric:
 			if !plainMetricCell(row.Result, i, text) {
-				bg, _ := metricColors(row.Result, i, mode, maxSpeed, text)
+				bg, _ := metricColors(row.Result, i, mode, scales, text)
 				fillRect(img, x, y, width, height, bg)
 			}
 			drawCellText(img, faces, x, y, width, height, text, fg, left)
@@ -454,7 +462,7 @@ func plainMetricCell(result *speedtester.Result, index int, text string) bool {
 	return index == 5 && result != nil && result.PacketLoss >= 100
 }
 
-func metricColors(result *speedtester.Result, index int, mode speedtester.SpeedMode, maxSpeed float64, text string) (color.NRGBA, color.NRGBA) {
+func metricColors(result *speedtester.Result, index int, mode speedtester.SpeedMode, scales map[int]metricScale, text string) (color.NRGBA, color.NRGBA) {
 	speedColumn := index == 6 || index == 7
 	if result == nil || text == "" || text == "N/A" || text == "测试中" {
 		if speedColumn {
@@ -462,32 +470,116 @@ func metricColors(result *speedtester.Result, index int, mode speedtester.SpeedM
 		}
 		return greenScale(0), scoreText(0)
 	}
-	score := metricScore(result, index, mode, maxSpeed)
+	score := metricScore(result, index, mode, scales)
 	if speedColumn {
 		return redScale(score), scoreText(score)
 	}
 	return greenScale(score), scoreText(score)
 }
 
-func metricScore(result *speedtester.Result, index int, mode speedtester.SpeedMode, maxSpeed float64) float64 {
-	switch index {
-	case 3:
-		return durationScore(result.Latency)
-	case 4:
-		return durationScore(result.Jitter)
-	case 5:
-		return 1 - clamp01(result.PacketLoss/30)
-	default:
-		return speedRatio(result, index, mode, maxSpeed)
-	}
+// metricScale 是一个指标列在本批结果里的取值范围，色阶的深浅两端点。
+type metricScale struct {
+	low, high float64
 }
 
-func durationScore(value time.Duration) float64 {
+// metricScales 收集每个指标列在本批结果里的最小、最大值，每列独立：
+// 下载列不看上传列的值，延迟列只看延迟。速度、延迟、抖动为 0 表示
+// 没测出来，不参加统计；丢包率 0% 是有效值，参加。
+func metricScales(rows []ImageRow, mode speedtester.SpeedMode) map[int]metricScale {
+	type bound struct {
+		low, high float64
+		count     int
+	}
+	accs := map[int]*bound{
+		3: {}, 4: {}, 5: {}, 6: {},
+	}
+	if mode.UploadEnabled() {
+		accs[7] = &bound{}
+	}
+	for _, row := range rows {
+		if row.Result == nil {
+			continue
+		}
+		r := row.Result
+		values := map[int]float64{
+			3: r.Latency.Seconds() * 1000,
+			4: r.Jitter.Seconds() * 1000,
+			5: r.PacketLoss,
+			6: r.DownloadSpeed,
+		}
+		if mode.UploadEnabled() {
+			values[7] = r.UploadSpeed
+		}
+		for index, value := range values {
+			b := accs[index]
+			if b == nil {
+				continue
+			}
+			if index != 5 && value <= 0 {
+				continue
+			}
+			if b.count == 0 {
+				b.low, b.high = value, value
+			} else {
+				b.low = min(b.low, value)
+				b.high = max(b.high, value)
+			}
+			b.count++
+		}
+	}
+	scales := make(map[int]metricScale, len(accs))
+	for index, b := range accs {
+		if b.count > 0 {
+			scales[index] = metricScale{low: b.low, high: b.high}
+		}
+	}
+	return scales
+}
+
+// metricScore 给出单元格颜色的深浅：0 最浅、1 最深。
+// 每列按本批的 min..max 归一化，全部同值时填最深。
+func metricScore(result *speedtester.Result, index int, mode speedtester.SpeedMode, scales map[int]metricScale) float64 {
+	if result == nil {
+		return 0
+	}
+	switch index {
+	case 3:
+		return lowerIsBetter(result.Latency.Seconds()*1000, scales[index], true)
+	case 4:
+		return lowerIsBetter(result.Jitter.Seconds()*1000, scales[index], true)
+	case 5:
+		return lowerIsBetter(result.PacketLoss, scales[index], false)
+	case 6:
+		return higherIsBetter(result.DownloadSpeed, scales[index])
+	case 7:
+		if mode.UploadEnabled() {
+			return higherIsBetter(result.UploadSpeed, scales[index])
+		}
+	}
+	return 0
+}
+
+// lowerIsBetter 越小越好的指标：本列最小值得最深色。
+// zeroMissing 为真时 0 表示没测出，按最浅处理（丢包率 0% 是有效值，照常归一化）。
+func lowerIsBetter(value float64, scale metricScale, zeroMissing bool) float64 {
+	if zeroMissing && value <= 0 {
+		return 0
+	}
+	if scale.high <= scale.low {
+		return 1 // 本批没有可比数据或全部同值：填最深。
+	}
+	return 1 - clamp01((value-scale.low)/(scale.high-scale.low))
+}
+
+// higherIsBetter 越大越好的指标：本列最大值得最深色，0 表示没测出。
+func higherIsBetter(value float64, scale metricScale) float64 {
 	if value <= 0 {
 		return 0
 	}
-	ms := value.Seconds() * 1000
-	return 1 - clamp01(ms/800)
+	if scale.high <= scale.low {
+		return 1
+	}
+	return clamp01((value - scale.low) / (scale.high - scale.low))
 }
 
 func clamp01(v float64) float64 {
@@ -676,40 +768,6 @@ func fillRect(img *image.NRGBA, x, y, w, h int, c color.NRGBA) {
 	}
 }
 
-func speedRatio(result *speedtester.Result, index int, mode speedtester.SpeedMode, maxSpeed float64) float64 {
-	speed := cellSpeed(result, index, mode)
-	if speed <= 0 || maxSpeed <= 0 {
-		return 0
-	}
-	return speed / maxSpeed
-}
-
-func maxSpeedInRows(rows []ImageRow, mode speedtester.SpeedMode) float64 {
-	var maxSpeed float64
-	indexes := []int{6}
-	if mode.UploadEnabled() {
-		indexes = append(indexes, 7)
-	}
-	for _, row := range rows {
-		for _, index := range indexes {
-			if speed := cellSpeed(row.Result, index, mode); speed > maxSpeed {
-				maxSpeed = speed
-			}
-		}
-	}
-	return maxSpeed
-}
-
-func cellSpeed(result *speedtester.Result, index int, mode speedtester.SpeedMode) float64 {
-	if result == nil {
-		return 0
-	}
-	if mode.UploadEnabled() && index == 7 {
-		return result.UploadSpeed
-	}
-	return result.DownloadSpeed
-}
-
 // RemovePartialImages 删除导出目录里未完成的结果图临时文件。
 func RemovePartialImages(dir string) error {
 	clean, err := safeImageDir(dir)
@@ -877,8 +935,9 @@ func inFlightCellHasSpeed(cells []string) bool {
 	return false
 }
 
-// AppendImageSpeedCounts 在摘要分数后补括号。某一项为 0 就省略，三项都是 0 不加括号。
-func AppendImageSpeedCounts(summary string, valid, invalid, testing int) string {
+// AppendImageSpeedCounts 在摘要分数后补括号。某一项为 0 就省略，各项都是 0 不加括号。
+// untested 是还没轮到测的节点数，通常等于总数减已完成减在测。
+func AppendImageSpeedCounts(summary string, valid, invalid, testing, untested int) string {
 	var parts []string
 	if valid > 0 {
 		parts = append(parts, fmt.Sprintf("有效 %d", valid))
@@ -888,6 +947,9 @@ func AppendImageSpeedCounts(summary string, valid, invalid, testing int) string 
 	}
 	if testing > 0 {
 		parts = append(parts, fmt.Sprintf("测试中 %d", testing))
+	}
+	if untested > 0 {
+		parts = append(parts, fmt.Sprintf("未测试 %d", untested))
 	}
 	if len(parts) == 0 {
 		return summary
@@ -913,6 +975,34 @@ func BuildImageRows(results []*speedtester.Result, mode speedtester.SpeedMode) [
 // SourceLabel 把配置路径或订阅地址收成顶部标题，不带查询参数。
 func SourceLabel(raw string) string {
 	return sourceLabel(raw)
+}
+
+// wrapTextByWidth 把文本按显示宽度折成多行，超宽逐字符断开。
+// 结果图顶部的文件名或链接可能很长，折起来画才不会遮出边界。
+func wrapTextByWidth(face font.Face, text string, maxWidth int) []string {
+	if text == "" {
+		return nil
+	}
+	if maxWidth <= 0 || textWidth(face, text) <= maxWidth {
+		return []string{text}
+	}
+	var lines []string
+	var current strings.Builder
+	currentWidth := 0
+	for _, r := range text {
+		w := textWidth(face, string(r))
+		if currentWidth > 0 && currentWidth+w > maxWidth {
+			lines = append(lines, current.String())
+			current.Reset()
+			currentWidth = 0
+		}
+		current.WriteRune(r)
+		currentWidth += w
+	}
+	if current.Len() > 0 {
+		lines = append(lines, current.String())
+	}
+	return lines
 }
 
 func sourceLabel(raw string) string {

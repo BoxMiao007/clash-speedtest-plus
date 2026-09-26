@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -19,6 +20,7 @@ import (
 	"github.com/faceair/clash-speedtest/gist"
 	"github.com/faceair/clash-speedtest/ip"
 	"github.com/faceair/clash-speedtest/output"
+	"github.com/faceair/clash-speedtest/picker"
 	"github.com/faceair/clash-speedtest/speedtester"
 	"github.com/faceair/clash-speedtest/tui"
 	mihomolog "github.com/metacubex/mihomo/log"
@@ -63,34 +65,45 @@ var (
 	userAgent         = flag.String("ua", "", "拉取 http(s) 配置时使用的 User-Agent（默认使用 mihomo 内核 UA）")
 )
 
-func main() {
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "用法：clash-speedtest [选项]\n")
-		printFlagDefaults(flag.CommandLine)
-	}
-	flag.Parse()
-	mihomolog.SetLevel(mihomolog.SILENT)
+type launchKind int
 
-	// Handle version flag
-	if *versionFlag {
-		fmt.Printf("clash-speedtest version %s (commit %s)\n", version, commit)
-		os.Exit(0)
-	}
+const (
+	launchCLI launchKind = iota
+	launchPicker
+)
 
-	if *configPathsConfig == "" {
-		log.Fatalln("请指定配置文件")
+// launchChoice 决定这次启动进选源界面还是命令行。
+// 只有不带任何参数、并且标准输出是终端时才进选源界面。
+func launchChoice(args []string, stdoutIsTerminal bool) launchKind {
+	if len(args) == 0 && stdoutIsTerminal {
+		return launchPicker
 	}
+	return launchCLI
+}
 
-	var err error
+// runPickerModel 跑一遍选源界面。model 可以是上一轮按 Esc 返回时保留的状态，
+// 勾选、地址和选项原样继续。
+func runPickerModel(model picker.Model) (picker.Model, bool) {
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())
+	final, err := program.Run()
+	if err != nil {
+		log.Fatalf("选源界面运行失败: %s", err)
+	}
+	finished := final.(picker.Model)
+	return finished, finished.Started()
+}
+
+// buildTester 按当前参数组装测速器。选源界面和命令行共用。
+func buildTester() (*speedtester.SpeedTester, speedtester.SpeedMode, resultFilter, *earlyStopper, error) {
 	requestedMode := speedtester.SpeedModeFast
+	var err error
 	if !*fastMode {
 		requestedMode, err = speedtester.ParseSpeedMode(*speedMode)
 		if err != nil {
-			log.Fatalf("解析测速模式失败: %s", err)
+			return nil, requestedMode, resultFilter{}, nil, fmt.Errorf("解析测速模式失败: %w", err)
 		}
 	}
-
-	speedTester, err := speedtester.New(&speedtester.Config{
+	tester, err := speedtester.New(&speedtester.Config{
 		ConfigPaths:      *configPathsConfig,
 		FilterRegex:      *filterRegexConfig,
 		BlockRegex:       *blockKeywords,
@@ -109,13 +122,150 @@ func main() {
 		UserAgent:        *userAgent,
 	})
 	if err != nil {
-		log.Fatalf("创建测速器失败: %s", err)
+		return nil, requestedMode, resultFilter{}, nil, err
 	}
-	effectiveMode := speedTester.Mode()
+	effectiveMode := tester.Mode()
 	resultFilter := newResultFilter(effectiveMode)
 	stopper, err := newEarlyStopper(*earlyStop, resultFilter)
 	if err != nil {
-		log.Fatalf("创建提前结束失败: %s", err)
+		return nil, effectiveMode, resultFilter, nil, err
+	}
+	return tester, effectiveMode, resultFilter, stopper, nil
+}
+
+// executableDir 是程序文件所在目录。选源和产物都以它为锚。
+func executableDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "."
+	}
+	return filepath.Dir(exe)
+}
+
+// applyPickerOptions 把选源界面选好的选项写进命令行参数。
+// 空值沿用命令行默认；解析失败也沿用默认，回车前界面已校验过一遍。
+func applyPickerOptions(o picker.Options) {
+	if o.Filter != "" {
+		*filterRegexConfig = o.Filter
+	}
+	*blockKeywords = o.Block
+	if mode, err := speedtester.ParseSpeedMode(o.Mode); err == nil {
+		*speedMode = string(mode)
+	}
+	if v, err := strconv.Atoi(o.DownloadSize); err == nil {
+		*downloadSize = v
+	}
+	if v, err := strconv.Atoi(o.UploadSize); err == nil {
+		*uploadSize = v
+	}
+	if v, err := strconv.Atoi(o.Concurrent); err == nil {
+		*concurrent = v
+	}
+	if v, err := strconv.Atoi(o.Parallel); err == nil {
+		*parallel = v
+	}
+	if v, err := time.ParseDuration(o.Timeout); err == nil {
+		*timeout = v
+	}
+	if v, err := strconv.Atoi(o.EarlyStop); err == nil {
+		*earlyStop = v
+	}
+	if v, err := time.ParseDuration(o.MaxLatency); err == nil {
+		*maxLatency = v
+	}
+	if v, err := strconv.ParseFloat(o.MaxPacketLoss, 64); err == nil {
+		*maxPacketLoss = v
+	}
+	if v, err := strconv.ParseFloat(o.MinDownload, 64); err == nil {
+		*minDownloadSpeed = v
+	}
+	if v, err := strconv.ParseFloat(o.MinUpload, 64); err == nil {
+		*minUploadSpeed = v
+	}
+	*imageSpeedOnly = o.ImageSpeedOnly
+	*noImage = o.NoImage
+	if o.OutputPath != "" {
+		*outputPath = o.OutputPath
+	}
+	*renameNodes = o.Rename
+	*renameTemplate = o.RenameTemplate
+	*gistToken = o.GistToken
+	*gistAddress = o.GistAddress
+	*repoToken = o.RepoToken
+	*repoAddress = o.RepoAddress
+	*repoFilePath = o.RepoFilePath
+	*repoBranch = o.RepoBranch
+	if o.ServerURL != "" {
+		*serverURL = o.ServerURL
+	}
+	*userAgent = o.UserAgent
+}
+
+func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "用法：clash-speedtest [选项]\n")
+		printFlagDefaults(flag.CommandLine)
+	}
+	flag.Parse()
+	mihomolog.SetLevel(mihomolog.SILENT)
+
+	execDir := executableDir()
+
+	// Handle version flag
+	if *versionFlag {
+		fmt.Printf("clash-speedtest version %s (commit %s)\n", version, commit)
+		os.Exit(0)
+	}
+
+	args := os.Args[1:]
+	switch {
+	case launchChoice(args, output.IsTerminalFile(os.Stdout)) == launchPicker:
+		configs, err := picker.ListConfigs(execDir)
+		if err != nil {
+			log.Printf("读取程序目录失败: %s", err)
+		}
+		model := picker.New(picker.Session{Configs: configs, ExecDir: execDir})
+		for {
+			finished, started := runPickerModel(model)
+			if !started {
+				return
+			}
+			*configPathsConfig = strings.Join(finished.Selection(), ",")
+			imageSource := finished.SourceLabel()
+			applyPickerOptions(finished.Options())
+			for _, used := range finished.UsedFlagged() {
+				fmt.Fprintf(os.Stderr, "已用补过参数的地址: %s\n", used)
+			}
+			if !runSpeedTest(execDir, imageSource, true) {
+				return
+			}
+			// 测试界面按 Esc 返回：保留勾选、地址和选项，改完再测一轮。
+			model = finished
+		}
+	case len(args) == 0:
+		// 没有终端，进不了选源界面。
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	runSpeedTest(execDir, "", false)
+}
+
+// runSpeedTest 按当前参数跑完整测速流程（交互表格或 TSV）。
+// escapeToParent 为真时测试界面允许用 Esc 返回上一级（选源界面）；
+// 返回 true 表示这次是按 Esc 返回，调用方应回到选源界面。
+func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
+	if *configPathsConfig == "" {
+		log.Fatalln("请指定配置文件")
+	}
+
+	// 相对路径的输出锚在程序目录，和选源、结果图一致。
+	*outputPath = picker.ResolveOutputPath(execDir, *outputPath)
+
+	var err error
+	speedTester, effectiveMode, resultFilter, stopper, err := buildTester()
+	if err != nil {
+		log.Fatalf("%s", err)
 	}
 
 	allProxies, err := speedTester.LoadProxies()
@@ -184,10 +334,13 @@ func main() {
 
 		// Create and run TUI
 		model := tui.NewTUIModelWithEngine(effectiveMode, len(allProxies), resultChannel, speedTester, progressChannel, earlyStopSignal)
-		model.SetImageExport(".", !*noImage)
+		if escapeToParent {
+			model.SetEscapeToParent(true)
+		}
+		model.SetImageExport(execDir, !*noImage)
 		model.SetImageSpeedOnly(*imageSpeedOnly)
 		model.NoteFastImageSpeedIgnored()
-		model.SetImageSource(*configPathsConfig)
+		model.SetImageSource(imageSource)
 		if collectResults {
 			model.SetConfigSaver(func(done []*speedtester.Result) (string, error) {
 				sorted := output.SortResults(append([]*speedtester.Result(nil), done...), effectiveMode)
@@ -218,6 +371,10 @@ func main() {
 			log.Fatalf("界面运行失败: %s", err)
 		}
 		finished, _ := finalModel.(tui.Model)
+		if finished.EscapedToParent() {
+			// 按下 Esc 返回上一级：本轮不写产物，选源界面原样恢复。
+			return true
+		}
 		status, failed := finished.ExitStatus()
 		if status != "" {
 			fmt.Fprintf(os.Stderr, "%s\n", status)
@@ -225,7 +382,7 @@ func main() {
 		if failed {
 			os.Exit(1)
 		}
-		return
+		return false
 	}
 
 	// TSV mode: collect results synchronously
@@ -255,34 +412,35 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%s\n", tui.FastImageSpeedIgnored())
 	}
 	if !*noImage {
-		exportNonInteractiveImage(results, effectiveMode, len(allProxies), imageSpeedFilterEnabled(effectiveMode))
+		exportNonInteractiveImage(execDir, imageSource, results, effectiveMode, len(allProxies), imageSpeedFilterEnabled(effectiveMode))
 	}
 	waitForUpload()
+	return false
 }
 
 func imageSpeedFilterEnabled(mode speedtester.SpeedMode) bool {
 	return *imageSpeedOnly && !mode.IsFast()
 }
 
-func exportNonInteractiveImage(results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
+func exportNonInteractiveImage(execDir, imageSource string, results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		writeNonInteractiveImage(ctx, results, mode, total, speedOnly)
+		writeNonInteractiveImage(ctx, execDir, imageSource, results, mode, total, speedOnly)
 	}()
 	select {
 	case <-done:
 	case <-ctx.Done():
-		if err := output.RemovePartialImages("."); err != nil {
+		if err := output.RemovePartialImages(execDir); err != nil {
 			fmt.Fprintf(os.Stderr, "删除半截图失败: %s\n", err)
 		}
 		os.Exit(1)
 	}
 }
 
-func writeNonInteractiveImage(ctx context.Context, results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
+func writeNonInteractiveImage(ctx context.Context, execDir, imageSource string, results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -295,17 +453,18 @@ func writeNonInteractiveImage(ctx context.Context, results []*speedtester.Result
 	filtered := output.FilterImageRowsBySpeed(rows, speedOnly)
 	summary := output.SummaryLine(time.Now(), mode, status, len(results), total)
 	if speedOnly {
-		summary = output.AppendImageSpeedCounts(summary, len(filtered.Rows), filtered.Invalid, filtered.Testing)
+		untested := max(total-len(results)-filtered.Testing, 0)
+		summary = output.AppendImageSpeedCounts(summary, len(filtered.Rows), filtered.Invalid, filtered.Testing, untested)
 	}
 	spec := output.ImageSpec{
 		Mode:    mode,
-		Source:  *configPathsConfig,
+		Source:  imageSource,
 		Summary: summary,
 		Headers: output.GetHeaders(mode),
 		Rows:    filtered.Rows,
 		Now:     time.Now(),
 	}
-	path, warning, err := output.WriteResultImage(".", spec)
+	path, warning, err := output.WriteResultImage(execDir, spec)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "保存结果图失败: %s\n", err)
 		os.Exit(1)

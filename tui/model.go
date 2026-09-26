@@ -132,6 +132,12 @@ type tuiModel struct {
 	// followSelection 为真时视口跟着当前选中行。拖滚动条时关掉，只滚动不改选中。
 	followSelection bool
 	scrollOffset    int
+	// followTail 为真时光标跟着最新测试条目走，视口随之贴着列表尾部滚动；
+	// 向上滚就取消，滚回尾部自动恢复。
+	followTail bool
+	// escapeToParent 让 Esc 在详情面板之外生效：中断本轮测试返回上一级（选源界面）。
+	escapeToParent    bool
+	returningToParent bool
 }
 
 const (
@@ -237,6 +243,7 @@ func newTUIModel(
 		autoImage:       true,
 		imageDir:        ".",
 		followSelection: true,
+		followTail:      true,
 	}
 }
 
@@ -340,6 +347,21 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateTableLayout()
 				return m, nil
 			}
+			if m.escapeToParent {
+				// 中断本轮测试、不写产物，返回上一级（选源界面）。
+				if stopper, ok := m.pauseCtl.(interface{ Stop() }); ok {
+					stopper.Stop()
+				}
+				if m.uploadCancel != nil {
+					m.uploadCancel()
+				}
+				if err := output.RemovePartialImages(m.imageDir); err != nil {
+					m.saveFailed = true
+					m.statusText = "删除半截图失败: " + err.Error()
+				}
+				m.returningToParent = true
+				return m, tea.Quit
+			}
 		case "q", "ctrl+c":
 			if m.quittingAfterSave {
 				m.forceQuit = true
@@ -414,6 +436,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.table, cmd = m.table.Update(msg)
 		m.followSelection = true
+		switch msg.String() {
+		case "up", "pgup", "home", "k":
+			m.followTail = false
+		case "down", "pgdown", "end", "j":
+			m.followTail = m.cursorAtTail()
+		}
 		m.syncSelectionFromCursor()
 		return m, cmd
 
@@ -422,6 +450,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.Button == tea.MouseButtonWheelUp {
+			m.followTail = false
 			m.table.MoveUp(1)
 			m.followSelection = true
 			m.syncSelectionFromCursor()
@@ -429,6 +458,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Button == tea.MouseButtonWheelDown {
 			m.table.MoveDown(1)
+			m.followTail = m.cursorAtTail()
 			m.followSelection = true
 			m.syncSelectionFromCursor()
 			return m, nil
@@ -465,6 +495,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.sortColumn = columnIndex
 						m.sortAscending = defaultSortAscending(columnIndex)
 					}
+					// 排序是用户主动整理视图：取消跟随并回到顶部，
+					// 否则视口还贴着尾部，看不到排序结果。
+					m.followTail = false
+					m.followSelection = true
+					m.scrollOffset = 0
+					m.table.SetCursor(0)
 					m.sortResults()
 					m.updateTableHeaders()
 					m.updateTableRows()
@@ -487,6 +523,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.followSelection = false
 				m.scrollOffset = pinned
+				m.followTail = false
 				return m, nil
 			}
 		}
@@ -774,6 +811,30 @@ func (m tuiModel) ExitStatus() (string, bool) {
 // Model 是交互模式结束后可读取的结果。
 type Model interface {
 	ExitStatus() (string, bool)
+	// EscapedToParent 报告这次是按 Esc 返回上一级（选源界面），而非正常退出。
+	EscapedToParent() bool
+}
+
+// SetEscapeToParent 让 Esc 在详情面板之外也生效：中断本轮测试并返回上一级。
+func (m *tuiModel) SetEscapeToParent(enabled bool) {
+	m.escapeToParent = enabled
+}
+
+func (m tuiModel) EscapedToParent() bool {
+	return m.returningToParent
+}
+
+// cursorAtTail 报告光标是否已到列表末尾：向下滚到这里才恢复跟随最新条目。
+func (m tuiModel) cursorAtTail() bool {
+	total := m.tableRowCount()
+	if total <= 0 {
+		return true
+	}
+	height := m.table.Height()
+	if total <= height {
+		return true
+	}
+	return m.table.Cursor() >= total-1
 }
 
 func (m tuiModel) imageSpec(finished bool) output.ImageSpec {
@@ -801,7 +862,9 @@ func (m tuiModel) imageSpec(finished bool) output.ImageSpec {
 	filtered := output.FilterImageRowsBySpeed(rows, m.imageSpeedOnly)
 	summary := output.SummaryLine(time.Now(), m.mode, status, m.currentProxy, m.totalProxies)
 	if m.imageSpeedOnly {
-		summary = output.AppendImageSpeedCounts(summary, len(filtered.Rows), filtered.Invalid, filtered.Testing)
+		// 未测试 = 总数 - 已完成 - 正在测的，避免和在测行重复计数。
+		untested := max(m.totalProxies-len(m.results)-len(m.inFlightOrder), 0)
+		summary = output.AppendImageSpeedCounts(summary, len(filtered.Rows), filtered.Invalid, filtered.Testing, untested)
 	}
 	return output.ImageSpec{
 		Mode:    m.mode,
@@ -875,7 +938,7 @@ func (m tuiModel) View() string {
 
 	// Layout: progress bar at top, table below
 	tableView := m.table.View()
-	if !m.followSelection {
+	if m.followTail || !m.followSelection {
 		tableView = m.renderScrolledTable()
 	}
 	tableView = grayInFlightLines(tableView, len(m.results), m.table.Cursor(), m.viewportStart())

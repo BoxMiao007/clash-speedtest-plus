@@ -116,3 +116,29 @@ func TestQuitBeforeAutoSaveStillSaves(t *testing.T) {
 		t.Fatal("保存完成后应退出")
 	}
 }
+
+// Esc 返回上一级：仅在启用时生效，详情面板打开时仍只关面板。
+func TestEscReturnsToParentWhenEnabled(t *testing.T) {
+	model := NewTUIModel(speedtester.SpeedModeDownload, 1, make(chan *speedtester.Result, 1))
+	model.SetEscapeToParent(true)
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := updated.(tuiModel)
+	if !got.EscapedToParent() || cmd == nil {
+		t.Fatalf("Esc 应中断并返回上一级: escaped=%v cmd=%v", got.EscapedToParent(), cmd)
+	}
+
+	withDetail := NewTUIModel(speedtester.SpeedModeDownload, 1, make(chan *speedtester.Result, 1))
+	withDetail.SetEscapeToParent(true)
+	withDetail.detailVisible = true
+	updated, cmd = withDetail.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got = updated.(tuiModel)
+	if got.EscapedToParent() || got.detailVisible {
+		t.Fatalf("详情开着时 Esc 应只关详情: escaped=%v detail=%v", got.EscapedToParent(), got.detailVisible)
+	}
+
+	plain := NewTUIModel(speedtester.SpeedModeDownload, 1, make(chan *speedtester.Result, 1))
+	updated, _ = plain.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if got := updated.(tuiModel); got.EscapedToParent() {
+		t.Fatal("未启用时 Esc 不应返回上一级")
+	}
+}
