@@ -5,6 +5,9 @@ import (
 	"flag"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/faceair/clash-speedtest/picker"
 )
 
 func TestLaunchOpensPickerOnlyWithoutArgsOnTerminal(t *testing.T) {
@@ -19,14 +22,59 @@ func TestLaunchOpensPickerOnlyWithoutArgsOnTerminal(t *testing.T) {
 	}
 }
 
-func TestMissingConfigOnCLIPrintsUsage(t *testing.T) {
-	var buf bytes.Buffer
-	code := runCLI(nil, false, &buf)
-	if code == 0 {
-		t.Fatal("无参数且没有终端应失败")
+func TestApplyPickerOptionsWritesFlags(t *testing.T) {
+	applyPickerOptions(picker.Options{
+		Filter: "HK", Block: "x1", Mode: "full",
+		DownloadSize: "80", UploadSize: "30", Concurrent: "8", Parallel: "4",
+		Timeout: "9s", EarlyStop: "20", MaxLatency: "2s", MaxPacketLoss: "50",
+		MinDownload: "6", MinUpload: "3", ImageSpeedOnly: true, NoImage: true,
+		OutputPath: "out.yaml", Rename: false, RenameTemplate: "{{.Index}}",
+		GistToken: "gt", GistAddress: "ga", RepoToken: "rt", RepoAddress: "user/repo",
+		RepoFilePath: "p.yaml", RepoBranch: "dev", ServerURL: "https://s.example.com", UserAgent: "ua/1",
+	})
+	switch {
+	case *filterRegexConfig != "HK":
+		t.Fatalf("filter = %q", *filterRegexConfig)
+	case *blockKeywords != "x1":
+		t.Fatalf("block = %q", *blockKeywords)
+	case *speedMode != "full":
+		t.Fatalf("mode = %q", *speedMode)
+	case *downloadSize != 80 || *uploadSize != 30:
+		t.Fatalf("size = %d/%d", *downloadSize, *uploadSize)
+	case *concurrent != 8 || *parallel != 4:
+		t.Fatalf("concurrency = %d/%d", *concurrent, *parallel)
+	case *timeout != 9*time.Second || *maxLatency != 2*time.Second:
+		t.Fatalf("durations = %v/%v", *timeout, *maxLatency)
+	case *earlyStop != 20 || *maxPacketLoss != 50:
+		t.Fatalf("early-stop/loss = %v/%v", *earlyStop, *maxPacketLoss)
+	case *minDownloadSpeed != 6 || *minUploadSpeed != 3:
+		t.Fatalf("speeds = %v/%v", *minDownloadSpeed, *minUploadSpeed)
+	case !*imageSpeedOnly || !*noImage:
+		t.Fatalf("image flags = %v/%v", *imageSpeedOnly, *noImage)
+	case *outputPath != "out.yaml":
+		t.Fatalf("output = %q", *outputPath)
+	case *renameNodes:
+		t.Fatal("rename 应关上")
+	case *renameTemplate != "{{.Index}}":
+		t.Fatalf("template = %q", *renameTemplate)
+	case *gistToken != "gt" || *gistAddress != "ga":
+		t.Fatalf("gist = %q/%q", *gistToken, *gistAddress)
+	case *repoToken != "rt" || *repoAddress != "user/repo":
+		t.Fatalf("repo = %q/%q", *repoToken, *repoAddress)
+	case *repoFilePath != "p.yaml" || *repoBranch != "dev":
+		t.Fatalf("repo path/branch = %q/%q", *repoFilePath, *repoBranch)
+	case *serverURL != "https://s.example.com":
+		t.Fatalf("server = %q", *serverURL)
+	case *userAgent != "ua/1":
+		t.Fatalf("ua = %q", *userAgent)
 	}
-	if !strings.Contains(buf.String(), "用法：clash-speedtest") {
-		t.Fatalf("应打印用法，得到:\n%s", buf.String())
+}
+
+func TestApplyPickerOptionsKeepsDefaultsOnEmpty(t *testing.T) {
+	before := *filterRegexConfig
+	applyPickerOptions(picker.Options{})
+	if *filterRegexConfig != before {
+		t.Fatalf("filter 被清空: %q", *filterRegexConfig)
 	}
 }
 

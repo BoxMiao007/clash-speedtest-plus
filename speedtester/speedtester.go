@@ -2,6 +2,7 @@ package speedtester
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -202,11 +203,21 @@ func (st *SpeedTester) LoadProxies() (map[string]*CProxy, error) {
 		var body []byte
 		var err error
 		if strings.HasPrefix(configPath, "http") {
-			body, err = st.fetchHTTPConfig(strings.TrimSpace(configPath))
-			if err != nil {
-				log.Printf("failed to fetch config: %s", err)
+			normalized, used, normalizeErr := NormalizeSubscription(strings.TrimSpace(configPath), func(target string) (string, error) {
+				fetched, fetchErr := st.fetchHTTPConfig(target)
+				return string(fetched), fetchErr
+			})
+			if normalizeErr != nil {
+				if errors.Is(normalizeErr, ErrNotClashSubscription) {
+					return nil, fmt.Errorf("%s: %w", strings.TrimSpace(configPath), normalizeErr)
+				}
+				log.Printf("failed to fetch config: %s", normalizeErr)
 				continue
 			}
+			if used != strings.TrimSpace(configPath) {
+				log.Printf("已用补过参数的地址: %s", used)
+			}
+			body = []byte(normalized)
 		} else {
 			body, err = os.ReadFile(configPath)
 		}

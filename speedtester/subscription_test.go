@@ -1,4 +1,4 @@
-package picker
+package speedtester
 
 import (
 	"encoding/base64"

@@ -1,8 +1,8 @@
-package picker
+package speedtester
 
 import (
 	"encoding/base64"
-	"fmt"
+	"errors"
 	"net/url"
 	"strings"
 
@@ -16,6 +16,9 @@ type clashDocument struct {
 	Proxies   []any `yaml:"proxies"`
 	Providers any   `yaml:"proxy-providers"`
 }
+
+// ErrNotClashSubscription 表示订阅内容按 yaml、base64、补 flag=meta 都解不出节点。
+var ErrNotClashSubscription = errors.New("订阅内容不是 Clash/Mihomo 配置")
 
 // NormalizeSubscription 把订阅正文变成 Clash/Mihomo yaml。
 // 顺序是原样 yaml、整段 base64、再在没有 flag 参数时补 flag=meta 重试。
@@ -31,7 +34,7 @@ func NormalizeSubscription(rawURL string, fetch FetchFunc) (body string, used st
 
 	withFlag, flagged := appendFlagMeta(rawURL)
 	if !flagged {
-		return "", "", fmt.Errorf("订阅内容不是 Clash/Mihomo 配置")
+		return "", "", ErrNotClashSubscription
 	}
 	retried, err := fetch(withFlag)
 	if err != nil {
@@ -40,20 +43,26 @@ func NormalizeSubscription(rawURL string, fetch FetchFunc) (body string, used st
 	if normalized, ok := acceptClash(retried); ok {
 		return normalized, withFlag, nil
 	}
-	return "", "", fmt.Errorf("订阅内容不是 Clash/Mihomo 配置")
+	return "", "", ErrNotClashSubscription
 }
 
 func acceptClash(text string) (string, bool) {
 	for _, candidate := range candidates(text) {
-		var doc clashDocument
-		if err := yaml.Unmarshal([]byte(candidate), &doc); err != nil {
-			continue
-		}
-		if len(doc.Proxies) > 0 || hasProviders(doc.Providers) {
+		if HasClashProxies([]byte(candidate)) {
 			return candidate, true
 		}
 	}
 	return "", false
+}
+
+// HasClashProxies 判断一段内容是不是含节点的 Clash/Mihomo yaml。
+// proxies 或 proxy-providers 至少有一项才算。选源列表和订阅规范化共用。
+func HasClashProxies(body []byte) bool {
+	var doc clashDocument
+	if err := yaml.Unmarshal(body, &doc); err != nil {
+		return false
+	}
+	return len(doc.Proxies) > 0 || hasProviders(doc.Providers)
 }
 
 func candidates(text string) []string {

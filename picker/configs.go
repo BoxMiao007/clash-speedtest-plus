@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/faceair/clash-speedtest/speedtester"
 	"gopkg.in/yaml.v2"
 )
 
@@ -43,11 +44,11 @@ func classifyConfig(name, path string) ConfigEntry {
 	if err != nil {
 		return ConfigEntry{Name: name, Path: path, Reason: "无法读取"}
 	}
-	var doc clashDocument
-	if err := yaml.Unmarshal(body, &doc); err != nil {
+	var probe map[string]any
+	if err := yaml.Unmarshal(body, &probe); err != nil {
 		return ConfigEntry{Name: name, Path: path, Reason: "不是合法的 yaml"}
 	}
-	if len(doc.Proxies) == 0 && !hasProviders(doc.Providers) {
+	if !speedtester.HasClashProxies(body) {
 		return ConfigEntry{Name: name, Path: path, Reason: "没有节点"}
 	}
 	return ConfigEntry{Name: name, Path: path, Selectable: true}
