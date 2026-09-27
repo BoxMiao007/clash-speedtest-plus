@@ -9,7 +9,7 @@ func TestEveryOptionHasValue(t *testing.T) {
 		Filter: "f", Block: "b", Mode: "full", DownloadSize: "50", UploadSize: "20",
 		Concurrent: "4", Parallel: "6", Timeout: "5s", EarlyStop: "9", MaxLatency: "1s",
 		MaxPacketLoss: "100", MinDownload: "5", MinUpload: "2",
-		ImageSpeedOnly: true, NameFromConfig: true, NoImage: true,
+		ImageSpeedOnly: true, NoImage: true,
 		OutputPath: "o.yaml", Rename: true, RenameTemplate: "t",
 		GistToken: "g", GistAddress: "ga", RepoToken: "r", RepoAddress: "ra",
 		RepoFilePath: "p", RepoBranch: "br", ServerURL: "s", UserAgent: "ua",
@@ -18,9 +18,6 @@ func TestEveryOptionHasValue(t *testing.T) {
 		if got := options.value(row.option); got == "" {
 			t.Fatalf("选项 %d 的值为空", row.option)
 		}
-	}
-	if options.value(OptionNameFromConfig) != "开" {
-		t.Fatalf("NameFromConfig 值 = %q, want 开", options.value(OptionNameFromConfig))
 	}
 }
 

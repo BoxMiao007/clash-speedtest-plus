@@ -22,14 +22,20 @@ func TestLaunchOpensPickerOnlyWithoutArgsOnTerminal(t *testing.T) {
 	}
 }
 
+func TestNameFromConfigFlagRemoved(t *testing.T) {
+	// 「产物跟随文件名」已写死为开（ADR-0013），老脚本传该 flag 应报 unknown flag。
+	if flag.CommandLine.Lookup("name-from-config") != nil {
+		t.Fatal("-name-from-config 应已删除")
+	}
+}
+
 func TestApplyPickerOptionsWritesFlags(t *testing.T) {
 	applyPickerOptions(picker.Options{
 		Filter: "HK", Block: "x1", Mode: "full",
 		DownloadSize: "80", UploadSize: "30", Concurrent: "8", Parallel: "4",
 		Timeout: "9s", EarlyStop: "20", MaxLatency: "2s", MaxPacketLoss: "50",
 		MinDownload: "6", MinUpload: "3", ImageSpeedOnly: true, NoImage: true,
-		NameFromConfig: true,
-		OutputPath:     "out.yaml", Rename: false, RenameTemplate: "{{.Index}}",
+		OutputPath: "out.yaml", Rename: false, RenameTemplate: "{{.Index}}",
 		GistToken: "gt", GistAddress: "ga", RepoToken: "rt", RepoAddress: "user/repo",
 		RepoFilePath: "p.yaml", RepoBranch: "dev", ServerURL: "https://s.example.com", UserAgent: "ua/1",
 	})
@@ -52,8 +58,6 @@ func TestApplyPickerOptionsWritesFlags(t *testing.T) {
 		t.Fatalf("speeds = %v/%v", *minDownloadSpeed, *minUploadSpeed)
 	case !*imageSpeedOnly || !*noImage:
 		t.Fatalf("image flags = %v/%v", *imageSpeedOnly, *noImage)
-	case !*nameFromConfig:
-		t.Fatalf("name-from-config = %v", *nameFromConfig)
 	case *outputPath != "out.yaml":
 		t.Fatalf("output = %q", *outputPath)
 	case *renameNodes:

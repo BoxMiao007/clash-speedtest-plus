@@ -83,9 +83,6 @@ func TestNewPicksInterfaceDefaults(t *testing.T) {
 	if !model.options.ImageSpeedOnly {
 		t.Fatal("结果图只留有速度应默认开")
 	}
-	if !model.options.NameFromConfig {
-		t.Fatal("产物跟随文件名应默认开")
-	}
 }
 
 // 粘贴带进来的控制字符（如 \x00）必须被剥掉：界面输入一层，
