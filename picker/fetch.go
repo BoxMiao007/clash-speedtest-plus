@@ -17,10 +17,10 @@ const defaultSubscriptionUA = "clash.meta"
 
 // fetchSubscriptions 把地址框里的订阅地址逐个规范化，
 // 内容写成程序目录下的临时文件，供本次测速当配置用。
-// ua 是本次请求用的 User-Agent。返回写出的文件和实际用过的地址。
+// ua 是本次请求用的 User-Agent。返回源（临时文件 + 原地址）和实际用过的地址。
 // 任何一条失败都算失败。
-func fetchSubscriptions(execDir, ua string, urls []string) ([]string, []string, error) {
-	var files []string
+func fetchSubscriptions(execDir, ua string, urls []string) ([]SourceSpec, []string, error) {
+	var sources []SourceSpec
 	var used []string
 	for _, rawURL := range urls {
 		body, usedURL, err := speedtester.NormalizeSubscription(rawURL, fetchWithUA(ua))
@@ -34,12 +34,16 @@ func fetchSubscriptions(execDir, ua string, urls []string) ([]string, []string, 
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s：%s", rawURL, err)
 		}
-		files = append(files, file)
+		sources = append(sources, SourceSpec{
+			Value:            file,
+			DisplayName:      rawURL,
+			FromSubscription: true,
+		})
 		if usedURL != rawURL {
 			used = append(used, usedURL)
 		}
 	}
-	return files, used, nil
+	return sources, used, nil
 }
 
 // fetchWithUA 构造带 User-Agent 的拉取函数。UA 为空时用默认的 clash 标识。
@@ -85,8 +89,8 @@ func writeSubscriptionFile(execDir, body string) (string, error) {
 }
 
 // defaultFetch 是没有注入时的拉取实现。
-func defaultFetch(execDir, ua string) func([]string) ([]string, []string, error) {
-	return func(urls []string) ([]string, []string, error) {
+func defaultFetch(execDir, ua string) func([]string) ([]SourceSpec, []string, error) {
+	return func(urls []string) ([]SourceSpec, []string, error) {
 		return fetchSubscriptions(execDir, ua, urls)
 	}
 }

@@ -13,7 +13,10 @@ import (
 func TestSelectionReturnsCheckedConfigsAndAddresses(t *testing.T) {
 	model := New(sessionFixture())
 	model.checked[0] = true
-	model.fetchedFiles = []string{"/opt/sub-1.yaml", "/opt/sub-2.yaml"}
+	model.fetchedSources = []SourceSpec{
+		{Value: "/opt/sub-1.yaml", DisplayName: "https://example.com/1", FromSubscription: true},
+		{Value: "/opt/sub-2.yaml", DisplayName: "https://example.com/2", FromSubscription: true},
+	}
 	got := model.Selection()
 	want := []string{"/opt/a.yaml", "/opt/sub-1.yaml", "/opt/sub-2.yaml"}
 	if !reflect.DeepEqual(got, want) {
@@ -24,9 +27,9 @@ func TestSelectionReturnsCheckedConfigsAndAddresses(t *testing.T) {
 func TestEnterFetchesSubscriptionsThenStarts(t *testing.T) {
 	var requested []string
 	session := sessionFixture()
-	session.Fetch = func(urls []string) ([]string, []string, error) {
+	session.Fetch = func(urls []string) ([]SourceSpec, []string, error) {
 		requested = append(requested, urls...)
-		return []string{"/opt/sub-1.yaml"}, []string{"https://example.com/a&flag=meta"}, nil
+		return []SourceSpec{{Value: "/opt/sub-1.yaml", DisplayName: "https://example.com/a", FromSubscription: true}}, []string{"https://example.com/a&flag=meta"}, nil
 	}
 	model := New(session)
 	for model.focus != focusAddress {
@@ -293,7 +296,7 @@ func TestTypedSubscriptionStartsWithoutCheckedConfig(t *testing.T) {
 	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("https://example.com/a")})
 	session := sessionFixture()
-	session.Fetch = func(urls []string) ([]string, []string, error) {
+	session.Fetch = func(urls []string) ([]SourceSpec, []string, error) {
 		return nil, nil, fmt.Errorf("%s: 订阅内容不是 Clash/Mihomo 配置", strings.Join(urls, "，"))
 	}
 	withFetch := updated.(Model)

@@ -21,15 +21,18 @@ func TestFetchSendsUserAgent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	files, used, err := fetchSubscriptions(t.TempDir(), "my-ua/1.0", []string{server.URL})
+	sources, used, err := fetchSubscriptions(t.TempDir(), "my-ua/1.0", []string{server.URL})
 	if err != nil {
 		t.Fatalf("拉取失败: %s", err)
 	}
 	if gotUA != "my-ua/1.0" {
 		t.Fatalf("服务器收到的 UA = %q", gotUA)
 	}
-	if len(files) != 1 || len(used) != 0 {
-		t.Fatalf("files=%v used=%v", files, used)
+	if len(sources) != 1 || len(used) != 0 {
+		t.Fatalf("sources=%v used=%v", sources, used)
+	}
+	if !sources[0].FromSubscription {
+		t.Fatal("拉取写出的源应标记为订阅源")
 	}
 }
 
