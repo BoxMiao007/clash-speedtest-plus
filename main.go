@@ -259,9 +259,12 @@ func runSourceQueue(sources []picker.SourceSpec, execDir string, escapeToParent 
 	if len(sources) == 0 {
 		log.Fatalln("请指定配置文件")
 	}
+	// 输出路径只锚一次；每轮从原始路径算自己的产物名，免得基名层层叠加。
+	*outputPath = picker.ResolveOutputPath(execDir, *outputPath)
+	originalOutputPath := *outputPath
 	for i, src := range sources {
 		label := fmt.Sprintf("第 %d/%d 轮 %s", i+1, len(sources), src.DisplayName)
-		switch runSpeedTest(execDir, src, escapeToParent, label, i < len(sources)-1) {
+		switch runSpeedTest(execDir, src, escapeToParent, label, i < len(sources)-1, originalOutputPath) {
 		case roundEscaped:
 			return true
 		case roundSkipped:
@@ -284,7 +287,7 @@ const (
 // 每轮只测 src 这一个源；roundLabel 画在进度行最前面，hasMore 表示
 // 之后还有轮（本轮测完保存完自动退出）。escapeToParent 为真时测试界面
 // 允许用 Esc 中断本轮返回选源界面。
-func runSpeedTest(execDir string, src picker.SourceSpec, escapeToParent bool, roundLabel string, hasMore bool) roundOutcome {
+func runSpeedTest(execDir string, src picker.SourceSpec, escapeToParent bool, roundLabel string, hasMore bool, originalOutputPath string) roundOutcome {
 	*configPathsConfig = src.Value
 	if *configPathsConfig == "" {
 		log.Fatalln("请指定配置文件")
@@ -296,8 +299,12 @@ func runSpeedTest(execDir string, src picker.SourceSpec, escapeToParent bool, ro
 		nameBase = output.CleanNameBase(src.DisplayName)
 	}
 
-	// 相对路径的输出锚在程序目录，和选源、结果图一致。
-	*outputPath = picker.ResolveOutputPath(execDir, *outputPath)
+	// 每轮从用户原始输出路径算起：文件轮加基名前缀，订阅轮加时间戳防
+	// 多个链接轮互相覆盖；开关关着就原样写。保存与上传都读这个最终路径。
+	*outputPath = originalOutputPath
+	if *nameFromConfig && *outputPath != "" {
+		*outputPath = output.FollowedConfigExportPath(*outputPath, nameBase, time.Now())
+	}
 
 	var err error
 	speedTester, effectiveMode, resultFilter, stopper, err := buildTester()

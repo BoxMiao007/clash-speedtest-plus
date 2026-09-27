@@ -837,6 +837,24 @@ func ImageFileName(dir string, now time.Time, nameBase string) (string, error) {
 	return "", fmt.Errorf("too many result images in the same second")
 }
 
+// FollowedConfigExportPath 是「产物跟随文件名」开着时输出配置的最终路径：
+// 文件轮把基名插在用户指定文件名前（机场A-result.yaml）；订阅轮没有基名
+// 可跟，插时间戳防多个链接轮互相覆盖（result-20260927-153001.yaml）。
+// path 为空原样返回（不导出的场景）。
+func FollowedConfigExportPath(path, nameBase string, now time.Time) string {
+	if path == "" {
+		return path
+	}
+	dir := filepath.Dir(path)
+	file := filepath.Base(path)
+	ext := filepath.Ext(file)
+	stem := strings.TrimSuffix(file, ext)
+	if nameBase != "" {
+		return filepath.Join(dir, nameBase+"-"+stem+ext)
+	}
+	return filepath.Join(dir, stem+"-"+now.Format("20060102-150405")+ext)
+}
+
 // CleanNameBase 把源文件名收成产物名前缀：取基名、剥 yaml 扩展、
 // 剔除文件系统非法字符和空白边、超长截断到 40；收不出有效字符时回空串。
 func CleanNameBase(name string) string {

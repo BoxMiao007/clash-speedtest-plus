@@ -133,6 +133,30 @@ func TestImageFileNameFollowsSourceBase(t *testing.T) {
 	}
 }
 
+// FollowedConfigExportPath 是「产物跟随文件名」开着时输出配置的最终路径：
+// 文件轮把基名插在用户指定的文件名前（机场A-result.yaml）；
+// 订阅轮没有基名可跟，插时间戳防多个链接轮互相覆盖（result-20260927-153001.yaml）。
+// path 为空原样返回（不导出）。
+func TestFollowedConfigExportPath(t *testing.T) {
+	now := time.Date(2026, 9, 27, 15, 30, 1, 0, time.Local)
+	cases := []struct {
+		path, base, want string
+	}{
+		{"result.yaml", "机场A", "机场A-result.yaml"},
+		{"/exec/result.yaml", "机场A", "/exec/机场A-result.yaml"},
+		{"result.yaml", "", "result-20260927-153001.yaml"},
+		{"/exec/result.yaml", "", "/exec/result-20260927-153001.yaml"},
+		{"/exec/out", "机场A", "/exec/机场A-out"},
+		{"/exec/out", "", "/exec/out-20260927-153001"},
+		{"", "机场A", ""},
+	}
+	for _, c := range cases {
+		if got := FollowedConfigExportPath(c.path, c.base, now); got != c.want {
+			t.Fatalf("FollowedConfigExportPath(%q, %q) = %q, want %q", c.path, c.base, got, c.want)
+		}
+	}
+}
+
 // CleanNameBase 把配置文件名收成产物名前缀：剥扩展、剥路径、剔非法字符、
 // 限长；洗不出来就回空串（调用方退化到默认命名）。
 func TestCleanNameBase(t *testing.T) {
