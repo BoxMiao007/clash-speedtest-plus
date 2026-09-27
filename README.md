@@ -10,6 +10,8 @@ Features:
 3. 不依赖额外的 Clash/Mihomo 进程实例，单一工具即可完成测试
 4. 代码开源。各平台二进制在本仓库 [Releases](https://github.com/BoxMiao007/clash-speedtest-plus/releases) 下载，也可自行从源码构建
 
+> **Windows 首次运行提示**：exe 没有购买代码签名证书，首次打开可能弹出 SmartScreen「发布者未知」提示，属正常现象——点「仍要运行」即可；同一文件放行过一次后 Windows 不再提示，重新下载的新版本第一次打开仍会提示。
+
 <img width="1346" height="682" alt="Image" src="https://github.com/user-attachments/assets/9fea1d47-251f-4c49-b059-05b5962d4e72" />
 
 ## Prerequisites/注意事项
