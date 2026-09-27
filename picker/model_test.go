@@ -160,9 +160,13 @@ func TestViewShowsNodeCountRightAligned(t *testing.T) {
 		if !strings.Contains(lines[i], name) || !strings.HasSuffix(strings.TrimRight(lines[i], " "), count) {
 			t.Fatalf("%s 行未以 %s 结尾: %q", name, count, lines[i])
 		}
+		if strings.Contains(lines[i], "0+") {
+			t.Fatalf("纯 providers 不应显示 0+: %q", lines[i])
+		}
 	}
 	assertCount(0, "a.yaml", "37")
 	assertCount(1, "b.yaml", "2+")
+	// 纯 providers 显示 +，不是 0+。
 	assertCount(2, "c.yaml", "+")
 	if strings.Contains(lines[3], "+") || strings.Contains(lines[3], " 0") {
 		t.Fatalf("灰行不应显示节点数: %q", lines[3])

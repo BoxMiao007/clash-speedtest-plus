@@ -174,14 +174,9 @@ func (m Model) entryRows(lo layout, index int) []string {
 	markStyle := dimStyle
 	nameStyle := plainStyle
 	text := m.entryText(config)
-	// 节点数右对齐到文件栏右缘；远程 providers 的数量不可知，用 + 兜底。
-	count := ""
-	if config.Selectable {
-		count = strconv.Itoa(config.Nodes)
-		if config.More {
-			count += "+"
-		}
-	}
+	// 节点数右对齐到文件栏右缘；远程 providers 的数量不可知：
+	// 本地 37 个加远程写作 37+，纯 providers 只写 +。
+	count := nodeCountText(config)
 	if config.Selectable && m.checked[index] {
 		mark = "✓"
 		markStyle = okStyle
@@ -234,18 +229,26 @@ func (m Model) entryText(config ConfigEntry) string {
 	return config.Name
 }
 
+// nodeCountText 是可勾选条目的节点数文案：本地个数，加远程未补 +。
+func nodeCountText(config ConfigEntry) string {
+	if !config.Selectable {
+		return ""
+	}
+	if config.Nodes == 0 && config.More {
+		return "+"
+	}
+	count := strconv.Itoa(config.Nodes)
+	if config.More {
+		count += "+"
+	}
+	return count
+}
+
 // maxCountWidth 是可勾选条目里节点数文案（如 37+）的最大显示宽度，没有则为 0。
 func (m Model) maxCountWidth() int {
 	w := 0
 	for _, config := range m.configs {
-		if !config.Selectable {
-			continue
-		}
-		cw := len(strconv.Itoa(config.Nodes))
-		if config.More {
-			cw++
-		}
-		if cw > w {
+		if cw := lipgloss.Width(nodeCountText(config)); cw > w {
 			w = cw
 		}
 	}
