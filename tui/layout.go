@@ -42,7 +42,7 @@ func (m tuiModel) progressLine() string {
 		return m.savingProgressLine()
 	}
 	if m.statusText != "" && (m.statusUntil.IsZero() || time.Now().Before(m.statusUntil)) {
-		return m.statusText
+		return m.roundPrefix() + m.statusText
 	}
 	// 暂停时已用时与剩余冻结：总耗时扣除历史及当前暂停时长。
 	elapsed := m.testingElapsed()
@@ -75,7 +75,7 @@ func (m tuiModel) progressLine() string {
 	}
 	// 保留原来的渐变方块，按已派发比例直接画，不跟逐帧动画重绘。
 	bar := progressModel.ViewAs(percent)
-	return fmt.Sprintf("%s %s | %s", info, bar, metrics)
+	return m.roundPrefix() + fmt.Sprintf("%s %s | %s", info, bar, metrics)
 }
 
 func (m tuiModel) savingProgressLine() string {
@@ -83,7 +83,15 @@ func (m tuiModel) savingProgressLine() string {
 	if inFlight := m.inFlightCount(); inFlight > 0 {
 		info += fmt.Sprintf("，%d 在测", inFlight)
 	}
-	return info + " | 已用时 " + formatDuration(m.testingElapsed())
+	return m.roundPrefix() + info + " | 已用时 " + formatDuration(m.testingElapsed())
+}
+
+// roundPrefix 多源分别测速时给出「第 X/N 轮 源名 · 」前缀；单源为空串。
+func (m tuiModel) roundPrefix() string {
+	if m.roundLabel == "" {
+		return ""
+	}
+	return m.roundLabel + " · "
 }
 
 // testingElapsed 返回扣除暂停时段后的已测时长；暂停中冻结在当前值。

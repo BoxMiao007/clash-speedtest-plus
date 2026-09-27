@@ -230,31 +230,60 @@ func main() {
 			if !started {
 				return
 			}
-			*configPathsConfig = strings.Join(finished.Selection(), ",")
-			imageSource := finished.SourceLabel()
 			applyPickerOptions(finished.Options())
 			for _, used := range finished.UsedFlagged() {
 				fmt.Fprintf(os.Stderr, "已用补过参数的地址: %s\n", used)
 			}
-			if !runSpeedTest(execDir, imageSource, true) {
-				return
+			// 多源一一分开：每个源各自一轮、各出各的产物，互不混合。
+			if runSourceQueue(finished.SourceList(), execDir, true) {
+				// 按过 Esc：本轮中断、剩余轮作废，回选源界面重排。
+				model = finished
+				continue
 			}
-			// 测试界面按 Esc 返回：保留勾选、地址和选项，改完再测一轮。
-			model = finished
+			return
 		}
 	case len(args) == 0:
 		// 没有终端，进不了选源界面。
 		flag.Usage()
 		os.Exit(1)
+	default:
+		runSourceQueue(picker.SplitConfigArg(*configPathsConfig), execDir, false)
 	}
-
-	runSpeedTest(execDir, "", false)
 }
 
-// runSpeedTest 按当前参数跑完整测速流程（交互表格或 TSV）。
-// escapeToParent 为真时测试界面允许用 Esc 返回上一级（选源界面）；
-// 返回 true 表示这次是按 Esc 返回，调用方应回到选源界面。
-func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
+// runSourceQueue 逐源跑完整测速：每个源一轮，测完自动进下一轮；
+// 选源路径按 Esc 中断本轮并作废剩余轮（返回 true），命令行路径返回恒为 false。
+func runSourceQueue(sources []picker.SourceSpec, execDir string, escapeToParent bool) bool {
+	if len(sources) == 0 {
+		log.Fatalln("请指定配置文件")
+	}
+	for i, src := range sources {
+		label := fmt.Sprintf("第 %d/%d 轮 %s", i+1, len(sources), src.DisplayName)
+		switch runSpeedTest(execDir, src, escapeToParent, label, i < len(sources)-1) {
+		case roundEscaped:
+			return true
+		case roundSkipped:
+			continue
+		}
+	}
+	return false
+}
+
+// roundOutcome 是一轮测速的结局：正常结束、Esc 中断（选源路径）、源加载不出节点跳过。
+type roundOutcome int
+
+const (
+	roundDone roundOutcome = iota
+	roundEscaped
+	roundSkipped
+)
+
+// runSpeedTest 按当前参数跑一个源的完整测速流程（交互表格或 TSV）。
+// 每轮只测 src 这一个源；roundLabel 画在进度行最前面，hasMore 表示
+// 之后还有轮（本轮测完保存完自动退出）。escapeToParent 为真时测试界面
+// 允许用 Esc 中断本轮返回选源界面。
+func runSpeedTest(execDir string, src picker.SourceSpec, escapeToParent bool, roundLabel string, hasMore bool) roundOutcome {
+	*configPathsConfig = src.Value
 	if *configPathsConfig == "" {
 		log.Fatalln("请指定配置文件")
 	}
@@ -271,6 +300,11 @@ func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
 	allProxies, err := speedTester.LoadProxies()
 	if err != nil {
 		log.Fatalf("加载节点失败: %s", err)
+	}
+	if len(allProxies) == 0 {
+		// 多源队列里一个源空了不该废掉整个队列：说明原因后跳过继续。
+		fmt.Fprintf(os.Stderr, "%s：%s 解析出 0 个节点，跳过这一轮\n", roundLabel, src.DisplayName)
+		return roundSkipped
 	}
 
 	outputMode := output.DetermineOutputMode(output.IsTerminalFile)
@@ -340,7 +374,9 @@ func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
 		model.SetImageExport(execDir, !*noImage)
 		model.SetImageSpeedOnly(*imageSpeedOnly)
 		model.NoteFastImageSpeedIgnored()
-		model.SetImageSource(imageSource)
+		model.SetImageSource(src.DisplayName)
+		model.SetRoundLabel(roundLabel)
+		model.SetAutoAdvance(hasMore)
 		if collectResults {
 			model.SetConfigSaver(func(done []*speedtester.Result) (string, error) {
 				sorted := output.SortResults(append([]*speedtester.Result(nil), done...), effectiveMode)
@@ -373,7 +409,7 @@ func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
 		finished, _ := finalModel.(tui.Model)
 		if finished.EscapedToParent() {
 			// 按下 Esc 返回上一级：本轮不写产物，选源界面原样恢复。
-			return true
+			return roundEscaped
 		}
 		status, failed := finished.ExitStatus()
 		if status != "" {
@@ -382,7 +418,7 @@ func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
 		if failed {
 			os.Exit(1)
 		}
-		return false
+		return roundDone
 	}
 
 	// TSV mode: collect results synchronously
@@ -412,10 +448,10 @@ func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
 		fmt.Fprintf(os.Stderr, "%s\n", tui.FastImageSpeedIgnored())
 	}
 	if !*noImage {
-		exportNonInteractiveImage(execDir, imageSource, results, effectiveMode, len(allProxies), imageSpeedFilterEnabled(effectiveMode))
+		exportNonInteractiveImage(execDir, src.DisplayName, results, effectiveMode, len(allProxies), imageSpeedFilterEnabled(effectiveMode))
 	}
 	waitForUpload()
-	return false
+	return roundDone
 }
 
 func imageSpeedFilterEnabled(mode speedtester.SpeedMode) bool {

@@ -138,6 +138,10 @@ type tuiModel struct {
 	// escapeToParent 让 Esc 在详情面板之外生效：中断本轮测试返回上一级（选源界面）。
 	escapeToParent    bool
 	returningToParent bool
+	// 多源各测一轮：roundLabel 画在进度行最前面（如「第 2/3 轮 机场B」）；
+	// autoAdvance 表示后面还有轮，本轮测完保存完自动退出进下一轮。
+	roundLabel  string
+	autoAdvance bool
 }
 
 const (
@@ -547,7 +551,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flushScheduled = true
 			cmds = append(cmds, scheduleFlushCmd())
 		}
-		if cmd := m.startFinalSave(false); cmd != nil {
+		if cmd := m.startFinalSave(m.autoAdvance); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
@@ -561,7 +565,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.setPaused(false)
 		m.progress.SetPercent(1.0)
 		var cmds []tea.Cmd
-		if cmd := m.startFinalSave(false); cmd != nil {
+		if cmd := m.startFinalSave(m.autoAdvance); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
@@ -818,6 +822,18 @@ type Model interface {
 // SetEscapeToParent 让 Esc 在详情面板之外也生效：中断本轮测试并返回上一级。
 func (m *tuiModel) SetEscapeToParent(enabled bool) {
 	m.escapeToParent = enabled
+}
+
+// SetRoundLabel 设置画在进度行最前面的轮次提示（如「第 2/3 轮 机场B」）。
+// 多源分别测速时由调用方逐轮设置；单源不设，进度行维持原样。
+func (m *tuiModel) SetRoundLabel(label string) {
+	m.roundLabel = label
+}
+
+// SetAutoAdvance 标记本轮之后还有下一轮：本轮测完、产物保存完自动退出。
+// 最后一轮不设，测完照旧停在界面等退出键。
+func (m *tuiModel) SetAutoAdvance(hasMore bool) {
+	m.autoAdvance = hasMore
 }
 
 func (m tuiModel) EscapedToParent() bool {

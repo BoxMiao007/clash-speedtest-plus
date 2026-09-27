@@ -162,19 +162,6 @@ func (m Model) Options() Options { return m.options }
 // UsedFlagged 返回实际用了补过 flag=meta 的地址。
 func (m Model) UsedFlagged() []string { return m.usedFlagged }
 
-// SourceLabel 返回画在结果图顶部的来源：勾选的配置文件名加用户填的订阅地址，
-// 不含拉取写出的临时文件名。
-func (m Model) SourceLabel() string {
-	var parts []string
-	for i, config := range m.configs {
-		if config.Selectable && m.checked[i] {
-			parts = append(parts, config.Name)
-		}
-	}
-	parts = append(parts, SplitSubscriptionText(m.address)...)
-	return strings.Join(parts, ",")
-}
-
 func (m Model) optionState() OptionState {
 	return OptionState{Mode: m.options.Mode, OutputPath: m.options.OutputPath}
 }
@@ -264,7 +251,7 @@ func (m Model) helpHit(x, y int) int {
 	if y != lo.helpY {
 		return helpHitNone
 	}
-	enter, quit := helpZones()
+	enter, quit := m.helpZones()
 	if x >= enter[0] && x < enter[1] {
 		return helpHitEnter
 	}
@@ -585,20 +572,6 @@ func (m *Model) move(delta int) {
 		}
 		m.optionIndex = next
 	}
-}
-
-// Selection 返回这次要测的源路径：先是勾选的配置，再是拉取写出的临时文件。
-func (m Model) Selection() []string {
-	var sources []string
-	for i, config := range m.configs {
-		if config.Selectable && m.checked[i] {
-			sources = append(sources, config.Path)
-		}
-	}
-	for _, source := range m.fetchedSources {
-		sources = append(sources, source.Value)
-	}
-	return sources
 }
 
 // SourceList 返回参与测速的源，每个源各自一轮：
