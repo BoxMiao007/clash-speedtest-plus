@@ -403,9 +403,18 @@ func (m *Model) clickConfig(lo layout, y int) {
 	if len(m.configs) == 0 {
 		return
 	}
-	index := y - lo.paneY - 1 + m.configScroll // 第 0 行是节标题
-	if index < 0 || index >= len(m.configs) {
+	offsets, total := m.entryOffsets(lo)
+	abs := y - lo.paneY - 1 + offsets[m.configScroll] // 第 0 行是节标题
+	if abs < 0 || abs >= total {
 		return
+	}
+	// 条目折行后占多行，点中任何一行都算命中这个条目。
+	index := m.configScroll
+	for i := m.configScroll; i < len(m.configs); i++ {
+		if offsets[i] > abs {
+			break
+		}
+		index = i
 	}
 	m.focus = focusConfigs
 	m.cursor = index
@@ -609,15 +618,47 @@ func (m *Model) toggle(index int) {
 // Init 满足 bubbletea 的界面接口。选源界面打开时没有后台任务。
 func (m Model) Init() tea.Cmd { return nil }
 
-// ensureVisible 让焦点行留在各自栏的窗口里。
+// ensureVisible 让焦点行留在各自栏的窗口里。文件栏条目可能折行占多行：
+// 滚动以条目为单位，光标条目要么完整可见要么整个滚出（比窗口还高的条目
+// 让它的顶部贴窗顶）。
 func (m *Model) ensureVisible() {
 	lo := m.computeLayout()
 	switch m.focus {
 	case focusConfigs:
-		m.configScroll = clampScroll(m.configScroll, m.cursor, len(m.configs), lo.paneH-1)
+		if len(m.configs) == 0 || lo.paneH <= 1 {
+			m.configScroll = 0
+			return
+		}
+		offsets, _ := m.entryOffsets(lo)
+		viewport := lo.paneH - 1
+		s := min(max(m.configScroll, 0), m.maxConfigScroll(lo))
+		if m.cursor < s {
+			s = m.cursor
+		}
+		for s < m.cursor && offsets[m.cursor]+m.entryHeight(lo, m.cursor) > offsets[s]+viewport {
+			s++
+		}
+		m.configScroll = s
 	case focusOptions:
 		m.optionScroll = clampScroll(m.optionScroll, m.optionIndex, len(optionOrder), lo.paneH-1)
 	}
+}
+
+// maxConfigScroll 是能作为窗口首条目的最大下标：从它起到末尾的内容仍能把
+// 窗口放满，避免末尾滚出大段空白。
+func (m Model) maxConfigScroll(lo layout) int {
+	offsets, total := m.entryOffsets(lo)
+	viewport := lo.paneH - 1
+	if len(m.configs) == 0 || viewport <= 0 || total <= viewport {
+		return 0
+	}
+	maxS := 0
+	for i := range m.configs {
+		if total-offsets[i] >= viewport {
+			maxS = i
+		}
+	}
+	return maxS
 }
 
 func clampScroll(scroll, focus, count, visible int) int {
@@ -634,12 +675,18 @@ func clampScroll(scroll, focus, count, visible int) int {
 }
 
 // wheelScroll 滚焦点所在的栏：文件或选项，窗口动、光标不动。
+// 文件栏按条目滚动（条目折行时占多行），选项栏按行滚动。
 func (m *Model) wheelScroll(down bool, y int) {
 	lo := m.computeLayout()
 	step := 3
 	if y >= lo.paneY && y < lo.paneY+lo.paneH {
 		if m.focus == focusConfigs {
-			m.configScroll = stepScroll(m.configScroll, down, step, len(m.configs), lo.paneH-1)
+			maxS := m.maxConfigScroll(lo)
+			if down {
+				m.configScroll = min(m.configScroll+step, maxS)
+			} else {
+				m.configScroll = max(m.configScroll-step, 0)
+			}
 			return
 		}
 		m.optionScroll = stepScroll(m.optionScroll, down, step, len(optionOrder), lo.paneH-1)

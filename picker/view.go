@@ -16,6 +16,10 @@ const (
 
 	// 终端超过这个宽度时内容不再拉宽，整块居中，长行不再稀疏。
 	maxContentWidth = 100
+
+	// 名称列固定宽度上限：到 32 个显示格（中文按 2 格）自动折行。
+	// 序号列与节点数列不占这 32 格。
+	nameColumnMaxWidth = 32
 )
 
 // layout 是一次渲染的分区位置。View 按它画，鼠标和滚轮按它定位，
@@ -39,15 +43,21 @@ func (m Model) computeLayout() layout {
 
 	longest := 0
 	for _, config := range m.configs {
-		if w := lipgloss.Width(config.Name); w > longest {
+		if w := lipgloss.Width(m.entryText(config)); w > longest {
 			longest = w
 		}
 	}
 	if len(m.configs) == 0 {
 		longest = lipgloss.Width("（程序目录里没有可勾选的 .yaml）")
 	}
-	// 文件名之外再给序号列和灰行原因留出宽度，但最多占一半屏宽。
-	filesW := max(longest+m.indexWidth()+20, 24)
+	// 名称列最多 32 显示格，超出的部分靠折行而不是撑栏；名称之外依次是
+	// 勾选符、序号列、节点数列，整栏宽度最多占一半屏宽。
+	nameW := min(longest, nameColumnMaxWidth)
+	filesW := 2 + m.indexWidth() + nameW
+	if countW := m.maxCountWidth(); countW > 0 {
+		filesW += 2 + countW
+	}
+	filesW = max(filesW, 24)
 	if width > 0 {
 		filesW = min(filesW, width/2)
 	}
@@ -60,7 +70,12 @@ func (m Model) computeLayout() layout {
 		lo.optionsW = 0
 	}
 
-	need := max(len(m.configs), len(optionOrder)) + 1
+	// 分栏高度按折行后的条目总高预算。
+	entryRows := 0
+	for i := range m.configs {
+		entryRows += m.entryHeight(lo, i)
+	}
+	need := max(entryRows, len(optionOrder)) + 1
 	if m.height <= 0 {
 		lo.paneH = need
 		lo.addressY = headerLines + need + 1
@@ -87,8 +102,13 @@ func (m Model) View() string {
 	lines := make([]string, 0, m.height+2)
 
 	lines = append(lines, m.headerLine(lo.width), ruleLine(lo.width, ""))
+	leftRows := m.filePaneRows(lo)
 	for row := 0; row < lo.paneH; row++ {
-		lines = append(lines, m.paneLine(lo, row))
+		left := ""
+		if row < len(leftRows) {
+			left = leftRows[row]
+		}
+		lines = append(lines, m.paneLine(lo, left, row))
 	}
 	lines = append(lines, ruleLine(lo.width, ""), m.addressLine(lo), ruleLine(lo.width, ""))
 	lines = append(lines, m.statusLine(lo.width), m.helpLine(lo.width))
@@ -101,8 +121,7 @@ func (m Model) View() string {
 }
 
 // paneLine 拼出分栏的一行：左文件、分隔线、右选项。
-func (m Model) paneLine(lo layout, row int) string {
-	left := m.fileLine(lo, m.configScroll+row)
+func (m Model) paneLine(lo layout, left string, row int) string {
 	if lo.width <= 0 {
 		return left + " " + sectionMarkStyle.Render("│") + " " + m.optionLine(lo, m.optionScroll+row)
 	}
@@ -113,33 +132,51 @@ func (m Model) paneLine(lo layout, row int) string {
 		padPlain(truncatePlain(m.optionLine(lo, m.optionScroll+row), rightW), rightW)
 }
 
-// fileLine 画文件栏的一行：row 越界时是空白。
-func (m Model) fileLine(lo layout, row int) string {
+// filePaneRows 渲染文件栏可见的一窗：row 0 是节标题，之后从 configScroll 条目起
+// 按条目整块放入（名称折行的条目占多行），放不下的条目整块留白；
+// 首条目比窗口还高是唯一的例外，只截断它自己。宽度未知时各栏按内容展开。
+func (m Model) filePaneRows(lo layout) []string {
+	width := lo.filesW
+	rows := make([]string, 0, lo.paneH)
+	rows = append(rows, joinParts(width,
+		part{"▎", sectionMarkStyle},
+		part{" 文件", sectionStyle},
+	))
+	if len(m.configs) == 0 {
+		if lo.paneH > 1 {
+			rows = append(rows, joinParts(width, part{"（程序目录里没有可勾选的 .yaml）", greyStyle}))
+		}
+		return padRows(rows, lo.paneH)
+	}
+	for i := m.configScroll; i < len(m.configs) && len(rows) < lo.paneH; i++ {
+		entry := m.entryRows(lo, i)
+		if len(rows)+len(entry) > lo.paneH && len(rows) > 1 {
+			break
+		}
+		rows = append(rows, entry...)
+	}
+	return padRows(rows, lo.paneH)
+}
+
+func padRows(rows []string, height int) []string {
+	for len(rows) < height {
+		rows = append(rows, "")
+	}
+	return rows
+}
+
+// entryRows 渲染一个条目的全部行：首行是勾选符+序号+名称首段+右对齐节点数，
+// 折行的续行缩进对齐名称起点。选中时整条高亮。
+func (m Model) entryRows(lo layout, index int) []string {
 	width := lo.filesW
 	if lo.width <= 0 {
 		width = 0 // 宽度未知时不截断
-	}
-	if row == 0 {
-		return joinParts(width,
-			part{"▎", sectionMarkStyle},
-			part{" 文件", sectionStyle},
-		)
-	}
-	index := row - 1
-	if len(m.configs) == 0 {
-		if index == 0 {
-			return joinParts(width, part{"（程序目录里没有可勾选的 .yaml）", greyStyle})
-		}
-		return ""
-	}
-	if index >= len(m.configs) {
-		return ""
 	}
 	config := m.configs[index]
 	mark := "○"
 	markStyle := dimStyle
 	nameStyle := plainStyle
-	text := config.Name
+	text := m.entryText(config)
 	// 节点数右对齐到文件栏右缘；远程 providers 的数量不可知，用 + 兜底。
 	count := ""
 	if config.Selectable {
@@ -156,30 +193,115 @@ func (m Model) fileLine(lo layout, row int) string {
 		mark = "×"
 		markStyle = greyStyle
 		nameStyle = greyStyle
-		if config.Reason != "" {
-			text += "  " + config.Reason
-		}
 	}
-	// 序号纯展示：跟着名称的样式走，灰行连序号一起灰。
-	left := mark + " " + m.indexPrefix(index) + text
-	if m.focus == focusConfigs && m.cursor == index {
-		return selectedLine(withTrailingCount(left, count, width), width)
+	// 续行缩进对齐名称起点：勾选符 + 空格 + 序号列。
+	indent := strings.Repeat(" ", 2+m.indexWidth())
+	chunks := wrapDisplay(text, m.nameColWidth(lo))
+	selected := m.focus == focusConfigs && m.cursor == index
+	rows := make([]string, 0, len(chunks))
+	left := mark + " " + m.indexPrefix(index) + chunks[0]
+	if selected {
+		rows = append(rows, selectedLine(withTrailingCount(left, count, width), width))
+		for _, chunk := range chunks[1:] {
+			rows = append(rows, selectedLine(indent+chunk, width))
+		}
+		return rows
 	}
 	if count == "" {
-		return joinParts(width,
+		rows = append(rows, joinParts(width,
 			part{mark, markStyle},
 			part{strings.TrimPrefix(left, mark), nameStyle},
-		)
+		))
+	} else {
+		// 节点数颜色压暗；名称太长时截短，数字始终完整露出。
+		line := withTrailingCount(left, count, width)
+		idx := strings.LastIndex(line, count)
+		head, tail := line[:idx], line[idx:]
+		rows = append(rows, joinParts(width,
+			part{mark, markStyle},
+			part{strings.TrimPrefix(head, mark), nameStyle},
+			part{tail, dimStyle},
+		))
 	}
-	// 节点数右对齐到栏右缘且颜色压暗；名称太长时截短，数字始终完整露出。
-	line := withTrailingCount(left, count, width)
-	idx := strings.LastIndex(line, count)
-	head, tail := line[:idx], line[idx:]
-	return joinParts(width,
-		part{mark, markStyle},
-		part{strings.TrimPrefix(head, mark), nameStyle},
-		part{tail, dimStyle},
-	)
+	for _, chunk := range chunks[1:] {
+		rows = append(rows, joinParts(width, part{indent + chunk, nameStyle}))
+	}
+	return rows
+}
+
+// entryText 是条目参与折行的完整文本：灰行把原因文案接在名称后面。
+func (m Model) entryText(config ConfigEntry) string {
+	if !config.Selectable && config.Reason != "" {
+		return config.Name + "  " + config.Reason
+	}
+	return config.Name
+}
+
+// maxCountWidth 是可勾选条目里节点数文案（如 37+）的最大显示宽度，没有则为 0。
+func (m Model) maxCountWidth() int {
+	w := 0
+	for _, config := range m.configs {
+		if !config.Selectable {
+			continue
+		}
+		cw := len(strconv.Itoa(config.Nodes))
+		if config.More {
+			cw++
+		}
+		if cw > w {
+			w = cw
+		}
+	}
+	return w
+}
+
+// nameColWidth 是名称列的实际折行宽度：栏宽扣掉勾选符、序号列、节点数列，
+// 窄终端优先压名称列。
+func (m Model) nameColWidth(lo layout) int {
+	w := lo.filesW
+	if w <= 0 {
+		return nameColumnMaxWidth
+	}
+	w -= 2 + m.indexWidth()
+	if countW := m.maxCountWidth(); countW > 0 {
+		w -= 2 + countW
+	}
+	return max(w, 4)
+}
+
+// entryHeight 是条目折行后占的行数。
+func (m Model) entryHeight(lo layout, index int) int {
+	return len(wrapDisplay(m.entryText(m.configs[index]), m.nameColWidth(lo)))
+}
+
+// entryOffsets 给出每个条目在文件栏内容里的起始行，及内容总行数。
+func (m Model) entryOffsets(lo layout) ([]int, int) {
+	offsets := make([]int, len(m.configs))
+	row := 0
+	for i := range m.configs {
+		offsets[i] = row
+		row += m.entryHeight(lo, i)
+	}
+	return offsets, row
+}
+
+// wrapDisplay 按显示宽度把文本折行：中文按 2 格计，到格即折，不保留整词。
+func wrapDisplay(text string, width int) []string {
+	if width <= 0 {
+		width = nameColumnMaxWidth
+	}
+	lines := []string{""}
+	cur := 0
+	for _, r := range text {
+		rw := runewidth.RuneWidth(r)
+		if cur+rw > width {
+			lines = append(lines, "")
+			cur = 0
+		}
+		lines[len(lines)-1] += string(r)
+		cur += rw
+	}
+	return lines
 }
 
 // withTrailingCount 把节点数右对齐拼到行尾。行宽未知时不补齐，直接跟在名称后。
