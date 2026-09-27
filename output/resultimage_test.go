@@ -88,7 +88,7 @@ func TestRenderResultImagePNG(t *testing.T) {
 func TestImageFileNameConflict(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 7, 22, 12, 30, 1, 0, time.Local)
-	first, err := ImageFileName(dir, now, "")
+	first, err := ImageFileName(dir, now, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestImageFileNameConflict(t *testing.T) {
 	if err := os.WriteFile(first, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	second, err := ImageFileName(dir, now, "")
+	second, err := ImageFileName(dir, now, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestImageFileNameConflict(t *testing.T) {
 func TestImageFileNameFollowsSourceBase(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 9, 27, 15, 30, 0, 0, time.Local)
-	first, err := ImageFileName(dir, now, "机场A")
+	first, err := ImageFileName(dir, now, "机场A", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestImageFileNameFollowsSourceBase(t *testing.T) {
 	if err := os.WriteFile(first, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	second, err := ImageFileName(dir, now, "机场A")
+	second, err := ImageFileName(dir, now, "机场A", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestFollowedConfigExportPath(t *testing.T) {
 		{"", "机场A", ""},
 	}
 	for _, c := range cases {
-		if got := FollowedConfigExportPath(c.path, c.base, now); got != c.want {
+		if got := FollowedConfigExportPath(c.path, c.base, now, 0); got != c.want {
 			t.Fatalf("FollowedConfigExportPath(%q, %q) = %q, want %q", c.path, c.base, got, c.want)
 		}
 	}

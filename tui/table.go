@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/BoxMiao007/clash-speedtest-plus/output"
 	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
+	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // updateTableRows updates the table rows with current results

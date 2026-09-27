@@ -3,8 +3,8 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestTableScrollWithKeyboard(t *testing.T) {

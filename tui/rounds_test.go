@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // 多源分别测速时，进度行最前面画「第 X/N 轮 源名」；单源不画。
@@ -109,6 +109,33 @@ func TestAutoAdvanceQuitsWithoutArtifacts(t *testing.T) {
 	}
 	if _, ok := quitCmd().(tea.QuitMsg); !ok {
 		t.Fatalf("应返回退出命令: %T", quitCmd())
+	}
+}
+
+// 产物序号加在图名最前，手动 s 与自动导出同一套命名。
+func TestAutoSaveImageNameCarriesSequence(t *testing.T) {
+	dir := inRepoTempDir(t)
+	resultChannel := make(chan *speedtester.Result, 10)
+	model := NewTUIModel(speedtester.SpeedModeDownload, 1, resultChannel)
+	model.SetImageExport(dir, true)
+	model.SetImageNameBase("机场A")
+	model.SetImageSeq(7)
+	model.results = append(model.results, &speedtester.Result{
+		ProxyName: "香港 01",
+		ProxyType: "SS",
+		Latency:   100 * time.Millisecond,
+	})
+	model.updateTableRows()
+
+	updated, cmd := model.Update(doneMsg{})
+	_ = updated.(tuiModel)
+	msg := cmd()
+	saved, ok := msg.(imageSavedMsg)
+	if !ok {
+		t.Fatalf("应完成自动保存: %#v", msg)
+	}
+	if !strings.Contains(saved.text, "7.机场A-") {
+		t.Fatalf("图名应带序号前缀: %q", saved.text)
 	}
 }
 

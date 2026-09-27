@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -51,6 +52,8 @@ type ImageSpec struct {
 	Now      time.Time
 	// NameBase 非空时结果图文件名用它替换默认前缀（产物跟随文件名）。
 	NameBase string
+	// Seq 大于 0 时把产物序号加在文件名最前（3.机场A-…），跨运行接续目录历史。
+	Seq int
 }
 
 type imageFont struct {
@@ -818,18 +821,15 @@ func safeImageDir(dir string) (string, error) {
 
 // ImageFileName 生成本地时间戳文件名；同一秒冲突则加 -1、-2。
 // nameBase 非空时替换默认的 clash-speedtest-plus 前缀（「产物跟随文件名」），
-// 空串维持默认命名。
-func ImageFileName(dir string, now time.Time, nameBase string) (string, error) {
-	if nameBase == "" {
-		nameBase = "clash-speedtest-plus"
-	}
-	base := now.Format("20060102-150405")
-	path := filepath.Join(dir, fmt.Sprintf("%s-%s.png", nameBase, base))
+// 空串维持默认命名。seq 大于 0 时把产物序号加在文件名最前（如 3.机场A-…）。
+func ImageFileName(dir string, now time.Time, nameBase string, seq int) (string, error) {
+	fileName, stem := imageNameParts(now, nameBase, seq)
+	path := filepath.Join(dir, fileName)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return path, nil
 	}
 	for i := 1; i < 1000; i++ {
-		candidate := filepath.Join(dir, fmt.Sprintf("%s-%s-%d.png", nameBase, base, i))
+		candidate := filepath.Join(dir, fmt.Sprintf("%s-%d.png", stem, i))
 		if _, err := os.Stat(candidate); os.IsNotExist(err) {
 			return candidate, nil
 		}
@@ -837,11 +837,66 @@ func ImageFileName(dir string, now time.Time, nameBase string) (string, error) {
 	return "", fmt.Errorf("too many result images in the same second")
 }
 
+// imageNameParts 给出无冲突时的文件名和追加序号前的主干，冲突时在主干后拼 -N。
+func imageNameParts(now time.Time, nameBase string, seq int) (name, stem string) {
+	if nameBase == "" {
+		nameBase = "clash-speedtest-plus"
+	}
+	if seq > 0 {
+		nameBase = sequencePrefix(seq, nameBase)
+	}
+	stem = fmt.Sprintf("%s-%s", nameBase, now.Format("20060102-150405"))
+	return stem + ".png", stem
+}
+
+// sequencePrefix 把产物序号加在名字最前（3.机场A）；序号停用返回原名。
+func sequencePrefix(seq int, name string) string {
+	if seq <= 0 {
+		return name
+	}
+	return fmt.Sprintf("%d.%s", seq, name)
+}
+
+// NextImageSequence 扫目录里已有的带号结果图，给出本次该接的产物序号：
+// 文件名以「数字.」开头的 png 取最大号 + 1；没有带号图（含旧版无号图）从 1 起。
+// 旧版图没有序号，不算进历史。目录读不了就当没有历史、从 1 起——
+// 后面写图时 safeImageDir 仍会把真正的问题报出来，这里不必提前拦。
+func NextImageSequence(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 1
+	}
+	max := 0
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".png" {
+			continue
+		}
+		if n := leadingSequence(entry.Name()); n > max {
+			max = n
+		}
+	}
+	return max + 1
+}
+
+// leadingSequence 解析文件名开头的「数字.」序号；没有则返回 0。
+func leadingSequence(name string) int {
+	dot := strings.Index(name, ".")
+	if dot <= 0 {
+		return 0
+	}
+	n, err := strconv.Atoi(name[:dot])
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
 // FollowedConfigExportPath 是「产物跟随文件名」开着时输出配置的最终路径：
 // 文件轮把基名插在用户指定文件名前（机场A-result.yaml）；订阅轮没有基名
 // 可跟，插时间戳防多个链接轮互相覆盖（result-20260927-153001.yaml）。
+// seq 大于 0 时把产物序号加在最前（3.机场A-result.yaml），与结果图同轮同号。
 // path 为空原样返回（不导出的场景）。
-func FollowedConfigExportPath(path, nameBase string, now time.Time) string {
+func FollowedConfigExportPath(path, nameBase string, now time.Time, seq int) string {
 	if path == "" {
 		return path
 	}
@@ -849,10 +904,18 @@ func FollowedConfigExportPath(path, nameBase string, now time.Time) string {
 	file := filepath.Base(path)
 	ext := filepath.Ext(file)
 	stem := strings.TrimSuffix(file, ext)
-	if nameBase != "" {
-		return filepath.Join(dir, nameBase+"-"+stem+ext)
+	switch {
+	case nameBase != "":
+		stem = nameBase + "-" + stem
+	case seq > 0:
+		// 没有可跟的基名时才用时间戳防覆盖；带序号后同轮已经唯一。
+	default:
+		stem = stem + "-" + now.Format("20060102-150405")
 	}
-	return filepath.Join(dir, stem+"-"+now.Format("20060102-150405")+ext)
+	if seq > 0 {
+		stem = sequencePrefix(seq, stem)
+	}
+	return filepath.Join(dir, stem+ext)
 }
 
 // CleanNameBase 把源文件名收成产物名前缀：取基名、剥 yaml 扩展、
@@ -900,7 +963,7 @@ func WriteResultImage(dir string, spec ImageSpec) (string, string, error) {
 	if err != nil {
 		return "", warning, err
 	}
-	path, err := ImageFileName(dir, spec.Now, spec.NameBase)
+	path, err := ImageFileName(dir, spec.Now, spec.NameBase, spec.Seq)
 	if err != nil {
 		return "", warning, err
 	}

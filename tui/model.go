@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BoxMiao007/clash-speedtest-plus/output"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/BoxMiao007/clash-speedtest-plus/output"
-	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 )
 
 // Messages for TUI updates
@@ -116,6 +116,8 @@ type tuiModel struct {
 	imageSource    string
 	// imageNameBase 非空时结果图文件名用它替换默认前缀（产物跟随文件名）。
 	imageNameBase string
+	// imageSeq 是产物序号，加在结果图文件名最前（3.机场A-…）。
+	imageSeq      int
 	savingImage   bool
 	statusText    string
 	statusUntil   time.Time
@@ -291,6 +293,11 @@ func (m *tuiModel) SetImageSource(source string) {
 // 空串保持默认 clash-speedtest-plus 前缀。订阅源轮由调用方传空。
 func (m *tuiModel) SetImageNameBase(base string) {
 	m.imageNameBase = base
+}
+
+// SetImageSeq 设置结果图文件名最前的产物序号；小于等于 0 不加。
+func (m *tuiModel) SetImageSeq(seq int) {
+	m.imageSeq = seq
 }
 
 // SetConfigSaver 在整轮结束时写本地 yaml。gist/仓库上传由调用方自行后台处理。
@@ -903,6 +910,7 @@ func (m tuiModel) imageSpec(finished bool) output.ImageSpec {
 		Rows:     filtered.Rows,
 		Now:      time.Now(),
 		NameBase: m.imageNameBase,
+		Seq:      m.imageSeq,
 	}
 }
 

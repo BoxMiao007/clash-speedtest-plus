@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // inRepoTempDir 在工作目录内建临时目录，避免 safeImageDir 拒绝逃逸路径。

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestPerfTrackerRecordsSortAndRowsOnResultUpdate(t *testing.T) {

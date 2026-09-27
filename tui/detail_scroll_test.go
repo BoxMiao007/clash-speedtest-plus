@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 )
 
 func testingModel(t *testing.T, finished int) tuiModel {
