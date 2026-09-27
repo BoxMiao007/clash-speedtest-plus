@@ -403,18 +403,22 @@ func (m *Model) clickConfig(lo layout, y int) {
 	if len(m.configs) == 0 {
 		return
 	}
-	offsets, total := m.entryOffsets(lo)
+	offsets, _ := m.entryOffsets(lo)
 	abs := y - lo.paneY - 1 + offsets[m.configScroll] // 第 0 行是节标题
-	if abs < 0 || abs >= total {
+	if abs < 0 {
 		return
 	}
-	// 条目折行后占多行，点中任何一行都算命中这个条目。
-	index := m.configScroll
-	for i := m.configScroll; i < len(m.configs); i++ {
-		if offsets[i] > abs {
-			break
+	end := m.visibleEntriesEnd(lo)
+	// 条目折行后占多行，点中任何一行都算命中这个条目；
+	// 装不下留白的行不算命中。
+	index := -1
+	for i := m.configScroll; i < end; i++ {
+		if offsets[i] <= abs && abs < offsets[i]+m.entryHeight(lo, i) {
+			index = i
 		}
-		index = i
+	}
+	if index < 0 {
+		return
 	}
 	m.focus = focusConfigs
 	m.cursor = index
@@ -642,6 +646,22 @@ func (m *Model) ensureVisible() {
 	case focusOptions:
 		m.optionScroll = clampScroll(m.optionScroll, m.optionIndex, len(optionOrder), lo.paneH-1)
 	}
+}
+
+// visibleEntriesEnd 是窗口实际装下的最后一个条目下标（开区间），装法与
+// filePaneRows 一致：按条目整块放，放不下的留白，首条目超高是例外。
+func (m Model) visibleEntriesEnd(lo layout) int {
+	rows := 1 // 节标题
+	end := m.configScroll
+	for i := m.configScroll; i < len(m.configs) && rows < lo.paneH; i++ {
+		h := m.entryHeight(lo, i)
+		if rows+h > lo.paneH && rows > 1 {
+			break
+		}
+		rows += h
+		end = i + 1
+	}
+	return end
 }
 
 // maxConfigScroll 是能作为窗口首条目的最大下标：从它起到末尾的内容仍能把

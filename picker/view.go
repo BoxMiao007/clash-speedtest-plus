@@ -148,12 +148,9 @@ func (m Model) filePaneRows(lo layout) []string {
 		}
 		return padRows(rows, lo.paneH)
 	}
-	for i := m.configScroll; i < len(m.configs) && len(rows) < lo.paneH; i++ {
-		entry := m.entryRows(lo, i)
-		if len(rows)+len(entry) > lo.paneH && len(rows) > 1 {
-			break
-		}
-		rows = append(rows, entry...)
+	end := m.visibleEntriesEnd(lo)
+	for i := m.configScroll; i < end && len(rows) < lo.paneH; i++ {
+		rows = append(rows, m.entryRows(lo, i)...)
 	}
 	return padRows(rows, lo.paneH)
 }
