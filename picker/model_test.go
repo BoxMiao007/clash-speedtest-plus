@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func TestSelectionReturnsCheckedConfigsAndAddresses(t *testing.T) {
@@ -165,6 +166,114 @@ func TestViewShowsNodeCountRightAligned(t *testing.T) {
 	assertCount(2, "c.yaml", "+")
 	if strings.Contains(lines[3], "+") || strings.Contains(lines[3], " 0") {
 		t.Fatalf("灰行不应显示节点数: %q", lines[3])
+	}
+}
+
+// filePaneLines 取出渲染结果中文件栏的可见行（剥颜色、截去选项栏）。
+func filePaneLines(t *testing.T, m Model) []string {
+	t.Helper()
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	m = updated.(Model)
+	lo := m.computeLayout()
+	raw := strings.Split(stripANSI(m.View()), "\n")
+	lines := make([]string, 0, lo.paneH)
+	for _, line := range raw[lo.paneY : lo.paneY+lo.paneH] {
+		lines = append(lines, strings.Split(line, "│")[0])
+	}
+	return lines
+}
+
+func TestViewWrapsLongNameAtNameColumn(t *testing.T) {
+	model := New(Session{Configs: []ConfigEntry{
+		{Name: strings.Repeat("a", 40) + ".yaml", Path: "/x", Selectable: true, Nodes: 3},
+		{Name: "b.yaml", Path: "/y", Selectable: true, Nodes: 1},
+	}})
+	lines := filePaneLines(t, model)
+	// lines[0] 是节标题「▎ 文件」，之后是条目行。
+	if len(lines) < 4 || strings.Contains(lines[1], "…") {
+		t.Fatalf("长名称应折成两行且不截断: %q", lines)
+	}
+	// 名称列 32 显示格：首段 32 个 a，续行接剩下的 8 个 a 与 .yaml。
+	if !strings.Contains(lines[1], strings.Repeat("a", 32)) {
+		t.Fatalf("首段应填满 32 格: %q", lines[1])
+	}
+	indent := strings.Repeat(" ", 2+model.indexWidth())
+	if got := lines[2]; !strings.HasPrefix(got, indent+strings.Repeat("a", 8)) {
+		t.Fatalf("续行应对齐名称起点: %q", got)
+	}
+	// 节点数只在首行末尾。
+	if !strings.HasSuffix(strings.TrimRight(lines[1], " "), "3") {
+		t.Fatalf("节点数应在首行末尾: %q", lines[1])
+	}
+}
+
+func TestViewHighlightsAllRowsOfSelectedWrappedEntry(t *testing.T) {
+	// 测试环境不是 TTY，lipgloss 会剥掉转义序列；强制彩色输出以便断言高亮。
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+	model := New(Session{Configs: []ConfigEntry{
+		{Name: strings.Repeat("a", 40) + ".yaml", Path: "/x", Selectable: true},
+		{Name: "b.yaml", Path: "/y", Selectable: true},
+	}})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	model = updated.(Model)
+	lo := model.computeLayout()
+	rawLines := strings.Split(model.View(), "\n")
+	var raw []string
+	for _, line := range rawLines[lo.paneY : lo.paneY+lo.paneH] {
+		if strings.Contains(stripANSI(line), "aaaa") {
+			raw = append(raw, line)
+		}
+	}
+	if len(raw) != 2 {
+		t.Fatalf("期望两行折行: %d", len(raw))
+	}
+	// 选中条目整条高亮：两行都整行套了选中样式（行首就是转义序列）。
+	for i, line := range raw {
+		if !strings.HasPrefix(line, "\x1b[") {
+			t.Fatalf("第 %d 行未被选中高亮: %q", i, line)
+		}
+	}
+}
+
+func TestClickWrappedEntryHitsOnContinuationRow(t *testing.T) {
+	model := New(Session{Configs: []ConfigEntry{
+		{Name: strings.Repeat("a", 40) + ".yaml", Path: "/x", Selectable: true},
+		{Name: "b.yaml", Path: "/y", Selectable: true},
+	}})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	model = updated.(Model)
+	lo := model.computeLayout()
+	clicked, _ := model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: 2, Y: lo.paneY + 2, // 第一个条目的折行续行
+	})
+	got := clicked.(Model)
+	if got.cursor != 0 || !got.checked[0] || got.checked[1] {
+		t.Fatalf("点折行续行应命中条目本身: cursor=%d checked=%v", got.cursor, got.checked)
+	}
+}
+
+func TestScrollMovesByWholeEntries(t *testing.T) {
+	configs := make([]ConfigEntry, 6)
+	for i := range configs {
+		// 每条名称都折成两行。
+		configs[i] = ConfigEntry{
+			Name: strings.Repeat(string(rune('a'+i)), 40) + ".yaml",
+			Path: "/x", Selectable: true,
+		}
+	}
+	model := New(Session{Configs: configs})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	model = updated.(Model) // paneH=3，窗口只能放 2 行
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := updated.(Model)
+	if got.configScroll != 1 {
+		t.Fatalf("光标移到第二条目时应整个滚动一条目: scroll=%d", got.configScroll)
+	}
+	lines := strings.Split(stripANSI(got.View()), "\n")
+	if !strings.Contains(lines[got.computeLayout().paneY+1], "2. bbb") {
+		t.Fatalf("窗口首条目应是第二个:\n%s", strings.Join(lines, "\n"))
 	}
 }
 
