@@ -2,6 +2,7 @@ package picker
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -139,6 +140,14 @@ func (m Model) fileLine(lo layout, row int) string {
 	markStyle := dimStyle
 	nameStyle := plainStyle
 	text := config.Name
+	// 节点数右对齐到文件栏右缘；远程 providers 的数量不可知，用 + 兜底。
+	count := ""
+	if config.Selectable {
+		count = strconv.Itoa(config.Nodes)
+		if config.More {
+			count += "+"
+		}
+	}
 	if config.Selectable && m.checked[index] {
 		mark = "✓"
 		markStyle = okStyle
@@ -152,12 +161,37 @@ func (m Model) fileLine(lo layout, row int) string {
 		}
 	}
 	if m.focus == focusConfigs && m.cursor == index {
-		return selectedLine(mark+" "+text, width)
+		return selectedLine(withTrailingCount(mark+" "+text, count, width), width)
 	}
+	if count == "" {
+		return joinParts(width,
+			part{mark, markStyle},
+			part{" " + text, nameStyle},
+		)
+	}
+	// 节点数右对齐到栏右缘且颜色压暗；名称太长时截短，数字始终完整露出。
+	line := withTrailingCount(mark+" "+text, count, width)
+	idx := strings.LastIndex(line, count)
+	head, tail := line[:idx], line[idx:]
 	return joinParts(width,
 		part{mark, markStyle},
-		part{" " + text, nameStyle},
+		part{strings.TrimPrefix(head, mark), nameStyle},
+		part{tail, dimStyle},
 	)
+}
+
+// withTrailingCount 把节点数右对齐拼到行尾。行宽未知时不补齐，直接跟在名称后。
+func withTrailingCount(left, count string, width int) string {
+	if width <= 0 {
+		return left + "  " + count
+	}
+	gap := width - lipgloss.Width(left) - lipgloss.Width(count)
+	if gap < 2 {
+		// 名称太长就把名称截短，让节点数始终完整露出。
+		left = truncatePlain(left, width-lipgloss.Width(count)-2)
+		gap = width - lipgloss.Width(left) - lipgloss.Width(count)
+	}
+	return left + strings.Repeat(" ", gap) + count
 }
 
 // optionLine 画选项栏的一行。row 0 是节标题，之后每个选项一行。

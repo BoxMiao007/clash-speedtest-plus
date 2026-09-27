@@ -3,6 +3,7 @@ package picker
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -132,6 +133,38 @@ func TestViewShowsCheckAndUnselectableReason(t *testing.T) {
 	}
 	if !strings.Contains(view, "bad.yaml") || !strings.Contains(view, "不是合法的 yaml") {
 		t.Fatalf("不可选配置未显示原因:\n%s", view)
+	}
+}
+
+func TestViewShowsNodeCountRightAligned(t *testing.T) {
+	model := New(Session{Configs: []ConfigEntry{
+		{Name: "a.yaml", Path: "/opt/a.yaml", Selectable: true, Nodes: 37},
+		{Name: "b.yaml", Path: "/opt/b.yaml", Selectable: true, Nodes: 2, More: true},
+		{Name: "c.yaml", Path: "/opt/c.yaml", Selectable: true, More: true},
+		{Name: "bad.yaml", Path: "/opt/bad.yaml", Reason: "不是合法的 yaml"},
+	}})
+	model.width, model.height = 80, 20
+	var lines []string
+	for _, line := range strings.Split(model.View(), "\n") {
+		if strings.Contains(line, ".yaml") {
+			// 分栏右半边是选项栏，行尾在分隔线 │ 之前。
+			lines = append(lines, stripANSI(strings.Split(line, "│")[0]))
+		}
+	}
+	if len(lines) != 4 {
+		t.Fatalf("lines = %d:\n%s", len(lines), model.View())
+	}
+	assertCount := func(i int, name, count string) {
+		t.Helper()
+		if !strings.Contains(lines[i], name) || !strings.HasSuffix(strings.TrimRight(lines[i], " "), count) {
+			t.Fatalf("%s 行未以 %s 结尾: %q", name, count, lines[i])
+		}
+	}
+	assertCount(0, "a.yaml", "37")
+	assertCount(1, "b.yaml", "2+")
+	assertCount(2, "c.yaml", "+")
+	if strings.Contains(lines[3], "+") || strings.Contains(lines[3], " 0") {
+		t.Fatalf("灰行不应显示节点数: %q", lines[3])
 	}
 }
 
@@ -782,6 +815,13 @@ func optionIndexFor(option Option) int {
 	}
 	panic("未知的选项")
 }
+
+// stripANSI 剥掉颜色转义序列，只留可见文本。
+func stripANSI(s string) string {
+	return ansiPattern.ReplaceAllString(s, "")
+}
+
+var ansiPattern = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func sessionFixture() Session {
 	return Session{
