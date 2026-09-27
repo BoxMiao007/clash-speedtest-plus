@@ -36,3 +36,40 @@ func TestListConfigsSortsSelectableAndKeepsBrokenVisible(t *testing.T) {
 		}
 	}
 }
+
+func TestListConfigsCountsNodesAndProviders(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("local.yaml", "proxies:\n  - {name: a, type: ss}\n  - {name: b, type: ss}\n")
+	write("mixed.yaml", "proxies:\n  - {name: a, type: ss}\nproxy-providers:\n  airport:\n    type: http\n    url: https://example.com/p\n")
+	write("remote.yaml", "proxy-providers:\n  airport:\n    type: http\n    url: https://example.com/p\n")
+
+	got, err := ListConfigs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := map[string]ConfigEntry{}
+	for _, entry := range got {
+		entries[entry.Name] = entry
+	}
+	checks := []struct {
+		name  string
+		nodes int
+		more  bool
+	}{
+		{"local.yaml", 2, false},
+		{"mixed.yaml", 1, true},
+		{"remote.yaml", 0, true},
+	}
+	for _, want := range checks {
+		entry := entries[want.name]
+		if !entry.Selectable || entry.Nodes != want.nodes || entry.More != want.more {
+			t.Fatalf("%s = %+v", want.name, entry)
+		}
+	}
+}

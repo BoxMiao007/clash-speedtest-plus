@@ -36,9 +36,6 @@ type Options struct {
 	MinDownload    string
 	MinUpload      string
 	ImageSpeedOnly bool
-	// NameFromConfig 是「产物跟随文件名」开关：结果图与输出配置的文件名
-	// 带上所测配置的基名；纯订阅源没有可跟的文件名，保持默认命名。
-	NameFromConfig bool
 	NoImage        bool
 	OutputPath     string
 	Rename         bool
@@ -137,7 +134,6 @@ func New(session Session) Model {
 			Concurrent: "4", Parallel: "6", Timeout: "5s", MaxLatency: "1s",
 			MaxPacketLoss: "100", MinDownload: "5", MinUpload: "2", Rename: true,
 			ImageSpeedOnly: true,
-			NameFromConfig: true,
 		},
 	}
 }
@@ -407,8 +403,21 @@ func (m *Model) clickConfig(lo layout, y int) {
 	if len(m.configs) == 0 {
 		return
 	}
-	index := y - lo.paneY - 1 + m.configScroll // 第 0 行是节标题
-	if index < 0 || index >= len(m.configs) {
+	offsets, _ := m.entryOffsets(lo)
+	abs := y - lo.paneY - 1 + offsets[m.configScroll] // 第 0 行是节标题
+	if abs < 0 {
+		return
+	}
+	end := m.visibleEntriesEnd(lo)
+	// 条目折行后占多行，点中任何一行都算命中这个条目；
+	// 装不下留白的行不算命中。
+	index := -1
+	for i := m.configScroll; i < end; i++ {
+		if offsets[i] <= abs && abs < offsets[i]+m.entryHeight(lo, i) {
+			index = i
+		}
+	}
+	if index < 0 {
 		return
 	}
 	m.focus = focusConfigs
@@ -613,15 +622,63 @@ func (m *Model) toggle(index int) {
 // Init 满足 bubbletea 的界面接口。选源界面打开时没有后台任务。
 func (m Model) Init() tea.Cmd { return nil }
 
-// ensureVisible 让焦点行留在各自栏的窗口里。
+// ensureVisible 让焦点行留在各自栏的窗口里。文件栏条目可能折行占多行：
+// 滚动以条目为单位，光标条目要么完整可见要么整个滚出（比窗口还高的条目
+// 让它的顶部贴窗顶）。
 func (m *Model) ensureVisible() {
 	lo := m.computeLayout()
 	switch m.focus {
 	case focusConfigs:
-		m.configScroll = clampScroll(m.configScroll, m.cursor, len(m.configs), lo.paneH-1)
+		if len(m.configs) == 0 || lo.paneH <= 1 {
+			m.configScroll = 0
+			return
+		}
+		offsets, _ := m.entryOffsets(lo)
+		viewport := lo.paneH - 1
+		s := min(max(m.configScroll, 0), m.maxConfigScroll(lo))
+		if m.cursor < s {
+			s = m.cursor
+		}
+		for s < m.cursor && offsets[m.cursor]+m.entryHeight(lo, m.cursor) > offsets[s]+viewport {
+			s++
+		}
+		m.configScroll = s
 	case focusOptions:
 		m.optionScroll = clampScroll(m.optionScroll, m.optionIndex, len(optionOrder), lo.paneH-1)
 	}
+}
+
+// visibleEntriesEnd 是窗口实际装下的最后一个条目下标（开区间），装法与
+// filePaneRows 一致：按条目整块放，放不下的留白，首条目超高是例外。
+func (m Model) visibleEntriesEnd(lo layout) int {
+	rows := 1 // 节标题
+	end := m.configScroll
+	for i := m.configScroll; i < len(m.configs) && rows < lo.paneH; i++ {
+		h := m.entryHeight(lo, i)
+		if rows+h > lo.paneH && rows > 1 {
+			break
+		}
+		rows += h
+		end = i + 1
+	}
+	return end
+}
+
+// maxConfigScroll 是能作为窗口首条目的最大下标：从它起到末尾的内容仍能把
+// 窗口放满，避免末尾滚出大段空白。
+func (m Model) maxConfigScroll(lo layout) int {
+	offsets, total := m.entryOffsets(lo)
+	viewport := lo.paneH - 1
+	if len(m.configs) == 0 || viewport <= 0 || total <= viewport {
+		return 0
+	}
+	maxS := 0
+	for i := range m.configs {
+		if total-offsets[i] >= viewport {
+			maxS = i
+		}
+	}
+	return maxS
 }
 
 func clampScroll(scroll, focus, count, visible int) int {
@@ -638,12 +695,18 @@ func clampScroll(scroll, focus, count, visible int) int {
 }
 
 // wheelScroll 滚焦点所在的栏：文件或选项，窗口动、光标不动。
+// 文件栏按条目滚动（条目折行时占多行），选项栏按行滚动。
 func (m *Model) wheelScroll(down bool, y int) {
 	lo := m.computeLayout()
 	step := 3
 	if y >= lo.paneY && y < lo.paneY+lo.paneH {
 		if m.focus == focusConfigs {
-			m.configScroll = stepScroll(m.configScroll, down, step, len(m.configs), lo.paneH-1)
+			maxS := m.maxConfigScroll(lo)
+			if down {
+				m.configScroll = min(m.configScroll+step, maxS)
+			} else {
+				m.configScroll = max(m.configScroll-step, 0)
+			}
 			return
 		}
 		m.optionScroll = stepScroll(m.optionScroll, down, step, len(optionOrder), lo.paneH-1)

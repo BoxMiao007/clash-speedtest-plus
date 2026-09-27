@@ -3,11 +3,13 @@ package picker
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func TestSelectionReturnsCheckedConfigsAndAddresses(t *testing.T) {
@@ -135,6 +137,150 @@ func TestViewShowsCheckAndUnselectableReason(t *testing.T) {
 	}
 }
 
+func TestViewShowsNodeCountRightAligned(t *testing.T) {
+	model := New(Session{Configs: []ConfigEntry{
+		{Name: "a.yaml", Path: "/opt/a.yaml", Selectable: true, Nodes: 37},
+		{Name: "b.yaml", Path: "/opt/b.yaml", Selectable: true, Nodes: 2, More: true},
+		{Name: "c.yaml", Path: "/opt/c.yaml", Selectable: true, More: true},
+		{Name: "bad.yaml", Path: "/opt/bad.yaml", Reason: "不是合法的 yaml"},
+	}})
+	model.width, model.height = 80, 20
+	var lines []string
+	for _, line := range strings.Split(model.View(), "\n") {
+		if strings.Contains(line, ".yaml") {
+			// 分栏右半边是选项栏，行尾在分隔线 │ 之前。
+			lines = append(lines, stripANSI(strings.Split(line, "│")[0]))
+		}
+	}
+	if len(lines) != 4 {
+		t.Fatalf("lines = %d:\n%s", len(lines), model.View())
+	}
+	assertCount := func(i int, name, count string) {
+		t.Helper()
+		if !strings.Contains(lines[i], name) || !strings.HasSuffix(strings.TrimRight(lines[i], " "), count) {
+			t.Fatalf("%s 行未以 %s 结尾: %q", name, count, lines[i])
+		}
+		if strings.Contains(lines[i], "0+") {
+			t.Fatalf("纯 providers 不应显示 0+: %q", lines[i])
+		}
+	}
+	assertCount(0, "a.yaml", "37")
+	assertCount(1, "b.yaml", "2+")
+	// 纯 providers 显示 +，不是 0+。
+	assertCount(2, "c.yaml", "+")
+	if strings.Contains(lines[3], "+") || strings.Contains(lines[3], " 0") {
+		t.Fatalf("灰行不应显示节点数: %q", lines[3])
+	}
+}
+
+// filePaneLines 取出渲染结果中文件栏的可见行（剥颜色、截去选项栏）。
+func filePaneLines(t *testing.T, m Model) []string {
+	t.Helper()
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	m = updated.(Model)
+	lo := m.computeLayout()
+	raw := strings.Split(stripANSI(m.View()), "\n")
+	lines := make([]string, 0, lo.paneH)
+	for _, line := range raw[lo.paneY : lo.paneY+lo.paneH] {
+		lines = append(lines, strings.Split(line, "│")[0])
+	}
+	return lines
+}
+
+func TestViewWrapsLongNameAtNameColumn(t *testing.T) {
+	model := New(Session{Configs: []ConfigEntry{
+		{Name: strings.Repeat("a", 40) + ".yaml", Path: "/x", Selectable: true, Nodes: 3},
+		{Name: "b.yaml", Path: "/y", Selectable: true, Nodes: 1},
+	}})
+	lines := filePaneLines(t, model)
+	// lines[0] 是节标题「▎ 文件」，之后是条目行。
+	if len(lines) < 4 || strings.Contains(lines[1], "…") {
+		t.Fatalf("长名称应折成两行且不截断: %q", lines)
+	}
+	// 名称列 32 显示格：首段 32 个 a，续行接剩下的 8 个 a 与 .yaml。
+	if !strings.Contains(lines[1], strings.Repeat("a", 32)) {
+		t.Fatalf("首段应填满 32 格: %q", lines[1])
+	}
+	indent := strings.Repeat(" ", 2+model.indexWidth())
+	if got := lines[2]; !strings.HasPrefix(got, indent+strings.Repeat("a", 8)) {
+		t.Fatalf("续行应对齐名称起点: %q", got)
+	}
+	// 节点数只在首行末尾。
+	if !strings.HasSuffix(strings.TrimRight(lines[1], " "), "3") {
+		t.Fatalf("节点数应在首行末尾: %q", lines[1])
+	}
+}
+
+func TestViewHighlightsAllRowsOfSelectedWrappedEntry(t *testing.T) {
+	// 测试环境不是 TTY，lipgloss 会剥掉转义序列；强制彩色输出以便断言高亮。
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+	model := New(Session{Configs: []ConfigEntry{
+		{Name: strings.Repeat("a", 40) + ".yaml", Path: "/x", Selectable: true},
+		{Name: "b.yaml", Path: "/y", Selectable: true},
+	}})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	model = updated.(Model)
+	lo := model.computeLayout()
+	rawLines := strings.Split(model.View(), "\n")
+	var raw []string
+	for _, line := range rawLines[lo.paneY : lo.paneY+lo.paneH] {
+		if strings.Contains(stripANSI(line), "aaaa") {
+			raw = append(raw, line)
+		}
+	}
+	if len(raw) != 2 {
+		t.Fatalf("期望两行折行: %d", len(raw))
+	}
+	// 选中条目整条高亮：两行都整行套了选中样式（行首就是转义序列）。
+	for i, line := range raw {
+		if !strings.HasPrefix(line, "\x1b[") {
+			t.Fatalf("第 %d 行未被选中高亮: %q", i, line)
+		}
+	}
+}
+
+func TestClickWrappedEntryHitsOnContinuationRow(t *testing.T) {
+	model := New(Session{Configs: []ConfigEntry{
+		{Name: strings.Repeat("a", 40) + ".yaml", Path: "/x", Selectable: true},
+		{Name: "b.yaml", Path: "/y", Selectable: true},
+	}})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	model = updated.(Model)
+	lo := model.computeLayout()
+	clicked, _ := model.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: 2, Y: lo.paneY + 2, // 第一个条目的折行续行
+	})
+	got := clicked.(Model)
+	if got.cursor != 0 || !got.checked[0] || got.checked[1] {
+		t.Fatalf("点折行续行应命中条目本身: cursor=%d checked=%v", got.cursor, got.checked)
+	}
+}
+
+func TestScrollMovesByWholeEntries(t *testing.T) {
+	configs := make([]ConfigEntry, 6)
+	for i := range configs {
+		// 每条名称都折成两行。
+		configs[i] = ConfigEntry{
+			Name: strings.Repeat(string(rune('a'+i)), 40) + ".yaml",
+			Path: "/x", Selectable: true,
+		}
+	}
+	model := New(Session{Configs: configs})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	model = updated.(Model) // paneH=3，窗口只能放 2 行
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := updated.(Model)
+	if got.configScroll != 1 {
+		t.Fatalf("光标移到第二条目时应整个滚动一条目: scroll=%d", got.configScroll)
+	}
+	lines := strings.Split(stripANSI(got.View()), "\n")
+	if !strings.Contains(lines[got.computeLayout().paneY+1], "2. bbb") {
+		t.Fatalf("窗口首条目应是第二个:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
 func TestSpaceTogglesConfigAsRunes(t *testing.T) {
 	// bubbletea 在真实终端里把空格报成 KeyRunes{' '}，不是 KeySpace。
 	model := New(sessionFixture())
@@ -165,6 +311,46 @@ func TestSpaceAndClickToggleOnlySelectableConfigs(t *testing.T) {
 	skipped, _ = skipped.Update(tea.KeyMsg{Type: tea.KeySpace})
 	if skipped.(Model).checked[1] {
 		t.Fatal("unselectable config was checked")
+	}
+}
+
+var ansiPattern = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// stripANSI 去掉颜色码，方便断言纯文本的对齐。
+func stripANSI(s string) string { return ansiPattern.ReplaceAllString(s, "") }
+
+func TestViewNumbersRowsWithRightAlignedIndex(t *testing.T) {
+	configs := make([]ConfigEntry, 0, 12)
+	for i := 1; i <= 11; i++ {
+		name := fmt.Sprintf("f%02d.yaml", i)
+		configs = append(configs, ConfigEntry{Name: name, Path: "/opt/" + name, Selectable: true})
+	}
+	configs = append(configs, ConfigEntry{Name: "bad.yaml", Path: "/opt/bad.yaml", Reason: "不是合法的 yaml"})
+	model := New(Session{Configs: configs})
+	model.checked[0] = true
+
+	lines := strings.Split(stripANSI(model.View()), "\n")
+	row := func(name string) string {
+		for _, line := range lines {
+			if strings.Contains(line, name) {
+				return line
+			}
+		}
+		t.Fatalf("渲染里找不到 %s:\n%s", name, strings.Join(lines, "\n"))
+		return ""
+	}
+	first, last, grey := row("f01.yaml"), row("f11.yaml"), row("bad.yaml")
+	if !strings.Contains(first, "✓  1. f01.yaml") {
+		t.Fatalf("勾选行序号补齐不对: %q", first)
+	}
+	if !strings.Contains(last, "○ 11. f11.yaml") {
+		t.Fatalf("未勾选行序号不对: %q", last)
+	}
+	if !strings.Contains(grey, "× 12. bad.yaml") {
+		t.Fatalf("灰行也应带序号: %q", grey)
+	}
+	if strings.Index(first, "f01.yaml") != strings.Index(last, "f11.yaml") {
+		t.Fatalf("名称列起点没对齐:\n%q\n%q", first, last)
 	}
 }
 
