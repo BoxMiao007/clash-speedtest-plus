@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/faceair/clash-speedtest/output"
-	"github.com/faceair/clash-speedtest/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/output"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 )
 
 // defaultSubscriptionUA 是拉订阅的默认 User-Agent。多数机场订阅
@@ -79,7 +79,7 @@ func writeSubscriptionFile(execDir, body string) (string, error) {
 	if execDir == "" {
 		execDir = "."
 	}
-	file, err := os.CreateTemp(execDir, "clash-speedtest-sub-*.yaml")
+	file, err := os.CreateTemp(execDir, "clash-speedtest-plus-sub-*.yaml")
 	if err != nil {
 		return "", err
 	}

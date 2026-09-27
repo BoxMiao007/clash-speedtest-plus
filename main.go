@@ -17,12 +17,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/faceair/clash-speedtest/gist"
-	"github.com/faceair/clash-speedtest/ip"
-	"github.com/faceair/clash-speedtest/output"
-	"github.com/faceair/clash-speedtest/picker"
-	"github.com/faceair/clash-speedtest/speedtester"
-	"github.com/faceair/clash-speedtest/tui"
+	"github.com/BoxMiao007/clash-speedtest-plus/gist"
+	"github.com/BoxMiao007/clash-speedtest-plus/ip"
+	"github.com/BoxMiao007/clash-speedtest-plus/output"
+	"github.com/BoxMiao007/clash-speedtest-plus/picker"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/tui"
 	mihomolog "github.com/metacubex/mihomo/log"
 	"gopkg.in/yaml.v2"
 )
@@ -205,7 +205,7 @@ func applyPickerOptions(o picker.Options) {
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "用法：clash-speedtest [选项]\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "用法：clash-speedtest-plus [选项]\n")
 		printFlagDefaults(flag.CommandLine)
 	}
 	flag.Parse()
@@ -215,7 +215,7 @@ func main() {
 
 	// Handle version flag
 	if *versionFlag {
-		fmt.Printf("clash-speedtest version %s (commit %s)\n", version, commit)
+		fmt.Printf("clash-speedtest-plus version %s (commit %s)\n", version, commit)
 		os.Exit(0)
 	}
 

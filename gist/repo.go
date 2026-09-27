@@ -72,7 +72,7 @@ func (u *Uploader) UpdateRepoFile(token, address, filePath, branch string, conte
 	}
 
 	payload := repoUpdateRequest{
-		Message: fmt.Sprintf("update %s via clash-speedtest", trimmedPath),
+		Message: fmt.Sprintf("update %s via clash-speedtest-plus", trimmedPath),
 		Content: base64.StdEncoding.EncodeToString(content),
 		SHA:     sha,
 		Branch:  trimmedBranch,

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/faceair/clash-speedtest/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 )
 
 // GetHeaders returns table headers based on speed mode.

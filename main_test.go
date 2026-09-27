@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/faceair/clash-speedtest/picker"
+	"github.com/BoxMiao007/clash-speedtest-plus/picker"
 )
 
 func TestLaunchOpensPickerOnlyWithoutArgsOnTerminal(t *testing.T) {

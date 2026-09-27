@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/faceair/clash-speedtest/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 )
 
 // 在测行的类型和延迟必须完整出现在表格里，不能被样式转义码挤掉。

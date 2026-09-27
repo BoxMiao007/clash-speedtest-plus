@@ -1,13 +1,13 @@
 .vscode
 *.exe
-clash-speedtest
+clash-speedtest-plus
 
 # 真实订阅/节点配置含服务器地址与凭据，禁止入库
 test/test.yaml
-**/clash-speedtest.yaml
+**/clash-speedtest-plus.yaml
 *.local.yaml
 # 订阅拉取写出的临时配置含节点凭据，禁止入库
-clash-speedtest-sub-*.yaml
+clash-speedtest-plus-sub-*.yaml
 
 # agent 技能安装产物，不入库
 .agents/

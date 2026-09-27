@@ -22,13 +22,13 @@ func TestParseRepoAddress(t *testing.T) {
 			name:          "owner repo",
 			input:         "faceair/clash-speedtest",
 			expectedOwner: "faceair",
-			expectedRepo:  "clash-speedtest",
+			expectedRepo: "clash-speedtest",
 		},
 		{
 			name:          "github url",
 			input:         "https://github.com/faceair/clash-speedtest",
 			expectedOwner: "faceair",
-			expectedRepo:  "clash-speedtest",
+			expectedRepo: "clash-speedtest",
 		},
 		{
 			name:          "github url without scheme",
@@ -40,7 +40,7 @@ func TestParseRepoAddress(t *testing.T) {
 			name:          "git suffix",
 			input:         "https://github.com/faceair/clash-speedtest.git",
 			expectedOwner: "faceair",
-			expectedRepo:  "clash-speedtest",
+			expectedRepo: "clash-speedtest",
 		},
 		{
 			name:    "empty",

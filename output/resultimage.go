@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/faceair/clash-speedtest/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
@@ -784,7 +784,7 @@ func RemovePartialImages(dir string) error {
 	var first error
 	for _, entry := range entries {
 		name := entry.Name()
-		if !strings.HasPrefix(name, ".clash-speedtest-") || !strings.HasSuffix(name, ".png.part") {
+		if !strings.HasPrefix(name, ".clash-speedtest-plus-") || !strings.HasSuffix(name, ".png.part") {
 			continue
 		}
 		if err := os.Remove(filepath.Join(clean, name)); err != nil && first == nil {
@@ -817,11 +817,11 @@ func safeImageDir(dir string) (string, error) {
 }
 
 // ImageFileName 生成本地时间戳文件名；同一秒冲突则加 -1、-2。
-// nameBase 非空时替换默认的 clash-speedtest 前缀（「产物跟随文件名」），
+// nameBase 非空时替换默认的 clash-speedtest-plus 前缀（「产物跟随文件名」），
 // 空串维持默认命名。
 func ImageFileName(dir string, now time.Time, nameBase string) (string, error) {
 	if nameBase == "" {
-		nameBase = "clash-speedtest"
+		nameBase = "clash-speedtest-plus"
 	}
 	base := now.Format("20060102-150405")
 	path := filepath.Join(dir, fmt.Sprintf("%s-%s.png", nameBase, base))
@@ -904,7 +904,7 @@ func WriteResultImage(dir string, spec ImageSpec) (string, string, error) {
 	if err != nil {
 		return "", warning, err
 	}
-	tmp, err := os.CreateTemp(dir, ".clash-speedtest-*.png.part")
+	tmp, err := os.CreateTemp(dir, ".clash-speedtest-plus-*.png.part")
 	if err != nil {
 		return "", warning, err
 	}

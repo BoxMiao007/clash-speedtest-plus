@@ -9,8 +9,8 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/faceair/clash-speedtest/output"
-	"github.com/faceair/clash-speedtest/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/output"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 )
 
 // Messages for TUI updates
@@ -288,7 +288,7 @@ func (m *tuiModel) SetImageSource(source string) {
 }
 
 // SetImageNameBase 设置结果图文件名的基名前缀（产物跟随文件名）；
-// 空串保持默认 clash-speedtest 前缀。订阅源轮由调用方传空。
+// 空串保持默认 clash-speedtest-plus 前缀。订阅源轮由调用方传空。
 func (m *tuiModel) SetImageNameBase(base string) {
 	m.imageNameBase = base
 }

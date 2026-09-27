@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/faceair/clash-speedtest/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
@@ -92,7 +92,7 @@ func TestImageFileNameConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(first) != "clash-speedtest-20260722-123001.png" {
+	if filepath.Base(first) != "clash-speedtest-plus-20260722-123001.png" {
 		t.Fatalf("默认名 = %s", first)
 	}
 	if err := os.WriteFile(first, []byte("x"), 0o644); err != nil {
@@ -401,8 +401,8 @@ func TestNodeNameColumnWidthRespects64Chars(t *testing.T) {
 }
 
 func TestJoinStatus(t *testing.T) {
-	got := JoinStatus("已保存 clash-speedtest.png", "缺少中文字体，节点名可能显示为方框")
-	if got != "已保存 clash-speedtest.png；缺少中文字体，节点名可能显示为方框" {
+	got := JoinStatus("已保存 clash-speedtest-plus.png", "缺少中文字体，节点名可能显示为方框")
+	if got != "已保存 clash-speedtest-plus.png；缺少中文字体，节点名可能显示为方框" {
 		t.Fatalf("got %q", got)
 	}
 }

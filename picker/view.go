@@ -239,7 +239,7 @@ func (m Model) addressLine(lo layout) string {
 
 func (m Model) headerLine(width int) string {
 	left := joinParts(0,
-		part{"clash-speedtest", titleStyle},
+		part{"clash-speedtest-plus", titleStyle},
 		part{" · 选源界面", titleDimStyle},
 	)
 	if len(m.configs) == 0 || width <= 0 {

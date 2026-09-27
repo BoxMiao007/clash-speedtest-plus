@@ -9,8 +9,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/faceair/clash-speedtest/output"
-	"github.com/faceair/clash-speedtest/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/output"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 )
 
 // updateTableRows updates the table rows with current results

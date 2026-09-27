@@ -7,7 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/faceair/clash-speedtest/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 )
 
 // 多源分别测速时，进度行最前面画「第 X/N 轮 源名」；单源不画。

@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/faceair/clash-speedtest/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 )
 
 // TSVWriter writes tab-separated values output without ANSI colors

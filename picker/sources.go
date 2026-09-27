@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/faceair/clash-speedtest/output"
+	"github.com/BoxMiao007/clash-speedtest-plus/output"
 )
 
 // SourceSpec 是参与测速的一个源。多源时每个源各自一轮。

@@ -61,12 +61,12 @@ func TestSourceListMarksSubscriptionSources(t *testing.T) {
 	model := New(sessionFixture())
 	model.checked[0] = true
 	model.fetchedSources = []SourceSpec{
-		{Value: "/exec/clash-speedtest-sub-1.yaml", DisplayName: "https://example.com/sub?token=x", FromSubscription: true},
+		{Value: "/exec/clash-speedtest-plus-sub-1.yaml", DisplayName: "https://example.com/sub?token=x", FromSubscription: true},
 	}
 	got := model.SourceList()
 	want := []SourceSpec{
 		{Value: "/opt/a.yaml", DisplayName: "a.yaml"},
-		{Value: "/exec/clash-speedtest-sub-1.yaml", DisplayName: "https://example.com/sub?token=x", FromSubscription: true},
+		{Value: "/exec/clash-speedtest-plus-sub-1.yaml", DisplayName: "https://example.com/sub?token=x", FromSubscription: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("SourceList = %#v, want %#v", got, want)

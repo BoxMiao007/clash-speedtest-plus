@@ -18,17 +18,17 @@ Features:
 在 OpenWRT 环境下使用本工具时，建议临时关闭 OpenClash/Clash/Mihomo 等代理服务，以避免路由冲突影响测速结果的准确性。或者给 OpenClash/Clash/Mihomo 配置进程规则绕过代理：
 ```
 rules:
-  - PROCESS-NAME,clash-speedtest,DIRECT
+  - PROCESS-NAME,clash-speedtest-plus,DIRECT
 ```
 
 ### Windows CMD 用户
 在 Windows CMD 中使用时，如果订阅地址包含 `&` 字符，必须使用双引号而非单引号：
 ```bash
 # 正确
-> clash-speedtest -c "https://domain.com/api/v1/client/subscribe?token=secret&flag=meta"
+> clash-speedtest-plus -c "https://domain.com/api/v1/client/subscribe?token=secret&flag=meta"
 
 # 错误
-> clash-speedtest -c 'https://domain.com/api/v1/client/subscribe?token=secret&flag=meta'
+> clash-speedtest-plus -c 'https://domain.com/api/v1/client/subscribe?token=secret&flag=meta'
 ```
 
 ## 双击启动（无参数选源界面）
@@ -46,7 +46,7 @@ rules:
 「产物跟随文件名」开着时（界面默认开，命令行 `-name-from-config` 默认关）：
 - 结果图文件名用所测配置的基名替换默认前缀，如勾选 `机场A.yaml` 测完得到 `机场A-20260927-153000.png`；
 - 填了输出路径时输出配置同样跟名，如 `机场A-result.yaml`；
-- 纯订阅的轮没有可跟的文件名：结果图保持默认 `clash-speedtest-时间戳.png`，输出配置加时间戳（`result-20260927-153001.yaml`）防多个订阅轮互相覆盖。
+- 纯订阅的轮没有可跟的文件名：结果图保持默认 `clash-speedtest-plus-时间戳.png`，输出配置加时间戳（`result-20260927-153001.yaml`）防多个订阅轮互相覆盖。
 
 脚本、管道等没有终端的环境里不带参数启动，则打印用法并以非 0 退出，不会假装打开了界面。
 
@@ -72,11 +72,11 @@ rules:
 > go install github.com/BoxMiao007/clash-speedtest-plus@latest
 
 # 查看版本
-> clash-speedtest -v
+> clash-speedtest-plus -v
 
 # 查看帮助
-> clash-speedtest -h
-用法：clash-speedtest [选项]
+> clash-speedtest-plus -h
+用法：clash-speedtest-plus [选项]
   -c string
         配置文件路径，也支持 http(s) 地址；逗号分隔多个源，每个源各自一轮分别测速
   -f string
@@ -109,16 +109,16 @@ rules:
   -image-speed-only
         结果图只保留下载或上传速度大于 0 的行；快速模式会忽略
 
-完整参数以 `clash-speedtest -h` 为准。`-o` 与 `-output` 相同，`-p` 与 `-parallel` 相同。下载、上传大小按 MB 填写。交互界面里空格暂停或继续，q 或 Ctrl+C 退出，点某一行打开详情，拖滚动条只滚动不改选中。测试进行中列表**默认跟随最新条目滚动**：向上滚取消跟随，滚回底部自动恢复。整轮结束后会在程序所在目录写出结果图；类型列按类型名撑开。结果图顶部的文件名或链接超宽会自动折行；速度筛选开启时，摘要括号里给出有效、无效、测试中和未测试四项计数（某项为 0 时省略）。结果图里各指标列的颜色深浅按**本批结果该列的最小到最大值**独立归一化：最小值最浅、最大值最深，下载列和上传列互不干扰。
+完整参数以 `clash-speedtest-plus -h` 为准。`-o` 与 `-output` 相同，`-p` 与 `-parallel` 相同。下载、上传大小按 MB 填写。交互界面里空格暂停或继续，q 或 Ctrl+C 退出，点某一行打开详情，拖滚动条只滚动不改选中。测试进行中列表**默认跟随最新条目滚动**：向上滚取消跟随，滚回底部自动恢复。整轮结束后会在程序所在目录写出结果图；类型列按类型名撑开。结果图顶部的文件名或链接超宽会自动折行；速度筛选开启时，摘要括号里给出有效、无效、测试中和未测试四项计数（某项为 0 时省略）。结果图里各指标列的颜色深浅按**本批结果该列的最小到最大值**独立归一化：最小值最浅、最大值最深，下载列和上传列互不干扰。
 
 # 演示：
 
 # 1. 测试全部节点，使用 HTTP 订阅地址
 # 不是 Clash 配置的订阅会自动尝试 base64 和补 flag=meta（见上文「订阅地址自动规范化」）
-> clash-speedtest -c 'https://domain.com/api/v1/client/subscribe?token=secret&flag=meta'
+> clash-speedtest-plus -c 'https://domain.com/api/v1/client/subscribe?token=secret&flag=meta'
 
 # 2. 测试香港节点，使用正则表达式过滤，使用本地文件
-> clash-speedtest -c ~/.config/clash/config.yaml -f 'HK|港'
+> clash-speedtest-plus -c ~/.config/clash/config.yaml -f 'HK|港'
 节点                                        	带宽          	延迟
 Premium|广港|IEPL|01                        	484.80KB/s  	815.00ms
 Premium|广港|IEPL|02                        	N/A         	N/A
@@ -127,20 +127,20 @@ Premium|广港|IEPL|04                        	1.46MB/s    	272.00ms
 Premium|广港|IEPL|05                        	3.87MB/s    	249.00ms
 
 # 3. 当然你也可以混合使用
-> clash-speedtest -c "https://domain.com/api/v1/client/subscribe?token=secret&flag=meta,/home/.config/clash/config.yaml"
+> clash-speedtest-plus -c "https://domain.com/api/v1/client/subscribe?token=secret&flag=meta,/home/.config/clash/config.yaml"
 
 # 4. 筛选出延迟低于 800ms 且下载速度大于 5MB/s 的节点，并输出到 filtered.yaml
-> clash-speedtest -c "https://domain.com/api/v1/client/subscribe?token=secret&flag=meta" -output filtered.yaml -max-latency 800ms -min-download-speed 5
+> clash-speedtest-plus -c "https://domain.com/api/v1/client/subscribe?token=secret&flag=meta" -output filtered.yaml -max-latency 800ms -min-download-speed 5
 # 筛选后的配置文件可以直接粘贴到 Clash/Mihomo 中使用，或是贴到 Github\Gist 上通过 Proxy Provider 引用。
 # 如果只需要前 20 个满足筛选条件的节点，可以加 -early-stop 20，达到数量后会停止继续测速。
 
 # 5. 使用 -rename 选项按照 IP 地区和下载速度重命名节点
-> clash-speedtest -c config.yaml -output result.yaml -rename
+> clash-speedtest-plus -c config.yaml -output result.yaml -rename
 # 重命名后的节点名称格式：🇺🇸 US 001 | ⬇️ 15.67MB/s
 # 包含国旗 emoji、国家代码和下载速度
 
 # 6. 快速测试模式
-> clash-speedtest -f 'HK' -fast -c ~/.config/clash/config.yaml
+> clash-speedtest-plus -f 'HK' -fast -c ~/.config/clash/config.yaml
 # 此命令将只测试节点延迟，跳过其他测试项目，适用于：
 # - 快速检查节点是否可用
 # - 只需要检查延迟的场景
@@ -154,17 +154,17 @@ Premium|广港|IEPL|05                        	3.87MB/s    	249.00ms
 5.      🇭🇰 香港 HK-12           Trojan          667ms
 
 # 7. 上传到 GitHub Gist
-> clash-speedtest -c config.yaml -output result.yaml -gist-token "ghp_xxx" -gist-address "https://gist.github.com/user/abc123"
+> clash-speedtest-plus -c config.yaml -output result.yaml -gist-token "ghp_xxx" -gist-address "https://gist.github.com/user/abc123"
 # 测试完成后，会将 result.yaml 上传到指定的 Gist，文件名与 -output 保持一致（去除目录前缀）
 # gist-address 可以是完整的 Gist URL，也可以是 Gist ID（如 abc123）
 # Gist/Repo 上传与远程配置 URL 加载默认遵循环境代理变量（HTTPS_PROXY/HTTP_PROXY）。
 
 # 8. 上传到 GitHub 仓库文件（默认写入 output 文件名）
-> clash-speedtest -c config.yaml -output result.yaml -repo-token "ghp_xxx" -repo-address "user/repo"
+> clash-speedtest-plus -c config.yaml -output result.yaml -repo-token "ghp_xxx" -repo-address "user/repo"
 # 测试完成后，会将 result.yaml 上传到仓库默认分支下的 result.yaml
 
 # 9. 上传到 GitHub 仓库指定分支与路径
-> clash-speedtest -c config.yaml -output result.yaml -repo-token "ghp_xxx" -repo-address "https://github.com/user/repo" -repo-file-path "configs/subscriptions/result.yaml" -repo-branch "main"
+> clash-speedtest-plus -c config.yaml -output result.yaml -repo-token "ghp_xxx" -repo-address "https://github.com/user/repo" -repo-file-path "configs/subscriptions/result.yaml" -repo-branch "main"
 ```
 
 ## GitHub Token 创建与权限
@@ -219,7 +219,7 @@ Premium|广港|IEPL|05                        	3.87MB/s    	249.00ms
 
 如果你确认 https://speed.cloudflare.com 可以访问并希望测试上传，请显式设置为 full 模式，例如：
 ```shell
-clash-speedtest --server-url "https://speed.cloudflare.com" --speed-mode full
+clash-speedtest-plus --server-url "https://speed.cloudflare.com" --speed-mode full
 ```
 或者你也可以自己搭建一个测速服务器，用来测试下载和上传速度：
 
@@ -229,7 +229,7 @@ clash-speedtest --server-url "https://speed.cloudflare.com" --speed-mode full
 > download-server
 
 # 此时在本地使用 http://your-server-ip:8080 作为 server-url 即可
-> clash-speedtest --server-url "http://your-server-ip:8080" --speed-mode full
+> clash-speedtest-plus --server-url "http://your-server-ip:8080" --speed-mode full
 ```
 
 
