@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/faceair/clash-speedtest/picker"
+	"github.com/BoxMiao007/clash-speedtest-plus/picker"
 )
 
 func TestLaunchOpensPickerOnlyWithoutArgsOnTerminal(t *testing.T) {
@@ -28,7 +28,8 @@ func TestApplyPickerOptionsWritesFlags(t *testing.T) {
 		DownloadSize: "80", UploadSize: "30", Concurrent: "8", Parallel: "4",
 		Timeout: "9s", EarlyStop: "20", MaxLatency: "2s", MaxPacketLoss: "50",
 		MinDownload: "6", MinUpload: "3", ImageSpeedOnly: true, NoImage: true,
-		OutputPath: "out.yaml", Rename: false, RenameTemplate: "{{.Index}}",
+		NameFromConfig: true,
+		OutputPath:     "out.yaml", Rename: false, RenameTemplate: "{{.Index}}",
 		GistToken: "gt", GistAddress: "ga", RepoToken: "rt", RepoAddress: "user/repo",
 		RepoFilePath: "p.yaml", RepoBranch: "dev", ServerURL: "https://s.example.com", UserAgent: "ua/1",
 	})
@@ -51,6 +52,8 @@ func TestApplyPickerOptionsWritesFlags(t *testing.T) {
 		t.Fatalf("speeds = %v/%v", *minDownloadSpeed, *minUploadSpeed)
 	case !*imageSpeedOnly || !*noImage:
 		t.Fatalf("image flags = %v/%v", *imageSpeedOnly, *noImage)
+	case !*nameFromConfig:
+		t.Fatalf("name-from-config = %v", *nameFromConfig)
 	case *outputPath != "out.yaml":
 		t.Fatalf("output = %q", *outputPath)
 	case *renameNodes:

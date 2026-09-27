@@ -21,15 +21,22 @@ func TestFetchSendsUserAgent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	files, used, err := fetchSubscriptions(t.TempDir(), "my-ua/1.0", []string{server.URL})
+	sources, used, err := fetchSubscriptions(t.TempDir(), "my-ua/1.0", []string{server.URL + "/sub?token=secret"})
 	if err != nil {
 		t.Fatalf("拉取失败: %s", err)
 	}
 	if gotUA != "my-ua/1.0" {
 		t.Fatalf("服务器收到的 UA = %q", gotUA)
 	}
-	if len(files) != 1 || len(used) != 0 {
-		t.Fatalf("files=%v used=%v", files, used)
+	if len(sources) != 1 || len(used) != 0 {
+		t.Fatalf("sources=%v used=%v", sources, used)
+	}
+	if !sources[0].FromSubscription {
+		t.Fatal("拉取写出的源应标记为订阅源")
+	}
+	// 展示名去掉查询参数：token 不跟着进图顶来源行。
+	if strings.Contains(sources[0].DisplayName, "token=") {
+		t.Fatalf("展示名不该带查询参数: %q", sources[0].DisplayName)
 	}
 }
 
@@ -67,7 +74,7 @@ func TestFetchNotClashErrorMentionsUAHint(t *testing.T) {
 	}
 }
 
-// 界面默认值照顾双击直用：并行 6，结果图只留有速度。
+// 界面默认值照顾双击直用：并行 6，结果图只留有速度，产物跟随文件名。
 func TestNewPicksInterfaceDefaults(t *testing.T) {
 	model := New(Session{})
 	if model.options.Parallel != "6" {
@@ -75,6 +82,9 @@ func TestNewPicksInterfaceDefaults(t *testing.T) {
 	}
 	if !model.options.ImageSpeedOnly {
 		t.Fatal("结果图只留有速度应默认开")
+	}
+	if !model.options.NameFromConfig {
+		t.Fatal("产物跟随文件名应默认开")
 	}
 }
 

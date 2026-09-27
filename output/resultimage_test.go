@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/faceair/clash-speedtest/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
@@ -88,14 +88,17 @@ func TestRenderResultImagePNG(t *testing.T) {
 func TestImageFileNameConflict(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 7, 22, 12, 30, 1, 0, time.Local)
-	first, err := ImageFileName(dir, now)
+	first, err := ImageFileName(dir, now, "", 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if filepath.Base(first) != "clash-speedtest-plus-20260722-123001.png" {
+		t.Fatalf("默认名 = %s", first)
 	}
 	if err := os.WriteFile(first, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	second, err := ImageFileName(dir, now)
+	second, err := ImageFileName(dir, now, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +107,73 @@ func TestImageFileNameConflict(t *testing.T) {
 	}
 	if filepath.Ext(second) != ".png" {
 		t.Fatalf("expected png, got %s", second)
+	}
+}
+
+// 「产物跟随文件名」开着时，结果图名换成源文件基名，冲突序号照旧。
+func TestImageFileNameFollowsSourceBase(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 9, 27, 15, 30, 0, 0, time.Local)
+	first, err := ImageFileName(dir, now, "机场A", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(first) != "机场A-20260927-153000.png" {
+		t.Fatalf("带基名的结果图 = %s", first)
+	}
+	if err := os.WriteFile(first, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := ImageFileName(dir, now, "机场A", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(second) != "机场A-20260927-153000-1.png" {
+		t.Fatalf("同秒冲突应加序号: %s", second)
+	}
+}
+
+// FollowedConfigExportPath 是「产物跟随文件名」开着时输出配置的最终路径：
+// 文件轮把基名插在用户指定的文件名前（机场A-result.yaml）；
+// 订阅轮没有基名可跟，插时间戳防多个链接轮互相覆盖（result-20260927-153001.yaml）。
+// path 为空原样返回（不导出）。
+func TestFollowedConfigExportPath(t *testing.T) {
+	now := time.Date(2026, 9, 27, 15, 30, 1, 0, time.Local)
+	cases := []struct {
+		path, base, want string
+	}{
+		{"result.yaml", "机场A", "机场A-result.yaml"},
+		{"/exec/result.yaml", "机场A", "/exec/机场A-result.yaml"},
+		{"result.yaml", "", "result-20260927-153001.yaml"},
+		{"/exec/result.yaml", "", "/exec/result-20260927-153001.yaml"},
+		{"/exec/out", "机场A", "/exec/机场A-out"},
+		{"/exec/out", "", "/exec/out-20260927-153001"},
+		{"", "机场A", ""},
+	}
+	for _, c := range cases {
+		if got := FollowedConfigExportPath(c.path, c.base, now, 0); got != c.want {
+			t.Fatalf("FollowedConfigExportPath(%q, %q) = %q, want %q", c.path, c.base, got, c.want)
+		}
+	}
+}
+
+// CleanNameBase 把配置文件名收成产物名前缀：剥扩展、剥路径、剔非法字符、
+// 限长；洗不出来就回空串（调用方退化到默认命名）。
+func TestCleanNameBase(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"机场A.yaml", "机场A"},
+		{"my config.yml", "my config"},
+		{"/opt/dir/机场B.yaml", "机场B"}, // 已是基名也安全
+		{"bad:name*here?.yaml", "badnamehere"},
+		{"  spaced  .yaml", "spaced"},
+		{strings.Repeat("长", 60) + ".yaml", strings.Repeat("长", 40)}, // 超长截断
+		{"...yaml", ""},                                              // 洗不出有效字符
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := CleanNameBase(c.in); got != c.want {
+			t.Fatalf("CleanNameBase(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 
@@ -331,8 +401,8 @@ func TestNodeNameColumnWidthRespects64Chars(t *testing.T) {
 }
 
 func TestJoinStatus(t *testing.T) {
-	got := JoinStatus("已保存 clash-speedtest.png", "缺少中文字体，节点名可能显示为方框")
-	if got != "已保存 clash-speedtest.png；缺少中文字体，节点名可能显示为方框" {
+	got := JoinStatus("已保存 clash-speedtest-plus.png", "缺少中文字体，节点名可能显示为方框")
+	if got != "已保存 clash-speedtest-plus.png；缺少中文字体，节点名可能显示为方框" {
 		t.Fatalf("got %q", got)
 	}
 }

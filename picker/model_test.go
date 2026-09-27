@@ -13,20 +13,28 @@ import (
 func TestSelectionReturnsCheckedConfigsAndAddresses(t *testing.T) {
 	model := New(sessionFixture())
 	model.checked[0] = true
-	model.fetchedFiles = []string{"/opt/sub-1.yaml", "/opt/sub-2.yaml"}
-	got := model.Selection()
-	want := []string{"/opt/a.yaml", "/opt/sub-1.yaml", "/opt/sub-2.yaml"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %#v, want %#v", got, want)
+	model.fetchedSources = []SourceSpec{
+		{Value: "/opt/sub-1.yaml", DisplayName: "https://example.com/1", FromSubscription: true},
+		{Value: "/opt/sub-2.yaml", DisplayName: "https://example.com/2", FromSubscription: true},
+	}
+	got := model.SourceList()
+	wantValues := []string{"/opt/a.yaml", "/opt/sub-1.yaml", "/opt/sub-2.yaml"}
+	if len(got) != len(wantValues) {
+		t.Fatalf("源数量 = %d, want %d", len(got), len(wantValues))
+	}
+	for i, src := range got {
+		if src.Value != wantValues[i] {
+			t.Fatalf("源 %d Value = %q, want %q", i, src.Value, wantValues[i])
+		}
 	}
 }
 
 func TestEnterFetchesSubscriptionsThenStarts(t *testing.T) {
 	var requested []string
 	session := sessionFixture()
-	session.Fetch = func(urls []string) ([]string, []string, error) {
+	session.Fetch = func(urls []string) ([]SourceSpec, []string, error) {
 		requested = append(requested, urls...)
-		return []string{"/opt/sub-1.yaml"}, []string{"https://example.com/a&flag=meta"}, nil
+		return []SourceSpec{{Value: "/opt/sub-1.yaml", DisplayName: "https://example.com/a", FromSubscription: true}}, []string{"https://example.com/a&flag=meta"}, nil
 	}
 	model := New(session)
 	for model.focus != focusAddress {
@@ -48,8 +56,9 @@ func TestEnterFetchesSubscriptionsThenStarts(t *testing.T) {
 	if quitCmd == nil {
 		t.Fatal("回车确认后应返回 tea.Quit 结束选源界面")
 	}
-	if !reflect.DeepEqual(model.Selection(), []string{"/opt/sub-1.yaml"}) {
-		t.Fatalf("Selection = %#v", model.Selection())
+	gotSources := model.SourceList()
+	if len(gotSources) != 1 || gotSources[0].Value != "/opt/sub-1.yaml" {
+		t.Fatalf("SourceList = %#v", gotSources)
 	}
 	if !strings.Contains(model.status, "flag=meta") {
 		t.Fatalf("应提示实际用过的地址: %q", model.status)
@@ -293,7 +302,7 @@ func TestTypedSubscriptionStartsWithoutCheckedConfig(t *testing.T) {
 	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyDown})
 	updated, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("https://example.com/a")})
 	session := sessionFixture()
-	session.Fetch = func(urls []string) ([]string, []string, error) {
+	session.Fetch = func(urls []string) ([]SourceSpec, []string, error) {
 		return nil, nil, fmt.Errorf("%s: 订阅内容不是 Clash/Mihomo 配置", strings.Join(urls, "，"))
 	}
 	withFetch := updated.(Model)
@@ -499,9 +508,53 @@ func TestArrowKeysFromFilesJumpToOptionsFirstRow(t *testing.T) {
 	}
 }
 
+// 帮助行：单源照旧，多源时回车段亮出轮数，热区跟着文案走。
+func TestHelpLineShowsRoundCountForMultipleSources(t *testing.T) {
+	single := New(sessionFixture())
+	if got := single.helpLine(200); strings.Contains(got, "轮") {
+		t.Fatalf("单源帮助行不该提轮数: %q", got)
+	}
+
+	multi := New(sessionFixture())
+	multi.checked[0] = true
+	var updated tea.Model
+	for multi.focus != focusAddress {
+		updated, _ = multi.Update(tea.KeyMsg{Type: tea.KeyDown})
+		multi = updated.(Model)
+	}
+	updated, _ = multi.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("https://a.com/x, https://b.com/y")})
+	multi = updated.(Model)
+	if got := multi.helpLine(200); !strings.Contains(got, "共 3 轮") {
+		t.Fatalf("1 文件 + 2 链接应提示 3 轮: %q", got)
+	}
+	enter, _ := multi.helpZones()
+	// 注入假拉取，点击「开始」段先进入获取，获取完才开始。
+	session := sessionFixture()
+	session.Fetch = func(urls []string) ([]SourceSpec, []string, error) {
+		sources := make([]SourceSpec, 0, len(urls))
+		for _, u := range urls {
+			sources = append(sources, SourceSpec{Value: "/opt/sub-" + u, DisplayName: u, FromSubscription: true})
+		}
+		return sources, nil, nil
+	}
+	multi.session = session
+	updated, cmd := multi.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+		X: enter[0] + 1, Y: multi.computeLayout().helpY,
+	})
+	got := updated.(Model)
+	if !got.fetching || cmd == nil {
+		t.Fatal("点回车热区应进入获取")
+	}
+	done, _ := got.Update(cmd())
+	if !done.(Model).started {
+		t.Fatal("获取完成应开始测速")
+	}
+}
+
 func TestClickHelpZonesRunActions(t *testing.T) {
 	model := New(sessionFixture())
-	enter, quit := helpZones()
+	enter, quit := model.helpZones()
 	lo := model.computeLayout()
 
 	// 没勾选时点「回车」：留下提示，不开始。

@@ -13,7 +13,7 @@ import (
 
 const (
 	defaultAPIBase   = "https://api.github.com"
-	defaultUserAgent = "clash-speedtest"
+	defaultUserAgent = "clash-speedtest-plus"
 )
 
 type Uploader struct {

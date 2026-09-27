@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/faceair/clash-speedtest/speedtester"
 )
 
 func (m *tuiModel) toggleDetail(result *speedtester.Result) {

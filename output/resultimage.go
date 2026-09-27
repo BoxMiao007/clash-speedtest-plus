@@ -10,10 +10,12 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
-	"github.com/faceair/clash-speedtest/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
@@ -48,6 +50,10 @@ type ImageSpec struct {
 	Rows     []ImageRow
 	FontPath string
 	Now      time.Time
+	// NameBase 非空时结果图文件名用它替换默认前缀（产物跟随文件名）。
+	NameBase string
+	// Seq 大于 0 时把产物序号加在文件名最前（3.机场A-…），跨运行接续目录历史。
+	Seq int
 }
 
 type imageFont struct {
@@ -781,7 +787,7 @@ func RemovePartialImages(dir string) error {
 	var first error
 	for _, entry := range entries {
 		name := entry.Name()
-		if !strings.HasPrefix(name, ".clash-speedtest-") || !strings.HasSuffix(name, ".png.part") {
+		if !strings.HasPrefix(name, ".clash-speedtest-plus-") || !strings.HasSuffix(name, ".png.part") {
 			continue
 		}
 		if err := os.Remove(filepath.Join(clean, name)); err != nil && first == nil {
@@ -814,20 +820,128 @@ func safeImageDir(dir string) (string, error) {
 }
 
 // ImageFileName 生成本地时间戳文件名；同一秒冲突则加 -1、-2。
-func ImageFileName(dir string, now time.Time) (string, error) {
-	base := now.Format("20060102-150405")
-	name := fmt.Sprintf("clash-speedtest-%s.png", base)
-	path := filepath.Join(dir, name)
+// nameBase 非空时替换默认的 clash-speedtest-plus 前缀（「产物跟随文件名」），
+// 空串维持默认命名。seq 大于 0 时把产物序号加在文件名最前（如 3.机场A-…）。
+func ImageFileName(dir string, now time.Time, nameBase string, seq int) (string, error) {
+	fileName, stem := imageNameParts(now, nameBase, seq)
+	path := filepath.Join(dir, fileName)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return path, nil
 	}
 	for i := 1; i < 1000; i++ {
-		candidate := filepath.Join(dir, fmt.Sprintf("clash-speedtest-%s-%d.png", base, i))
+		candidate := filepath.Join(dir, fmt.Sprintf("%s-%d.png", stem, i))
 		if _, err := os.Stat(candidate); os.IsNotExist(err) {
 			return candidate, nil
 		}
 	}
 	return "", fmt.Errorf("too many result images in the same second")
+}
+
+// imageNameParts 给出无冲突时的文件名和追加序号前的主干，冲突时在主干后拼 -N。
+func imageNameParts(now time.Time, nameBase string, seq int) (name, stem string) {
+	if nameBase == "" {
+		nameBase = "clash-speedtest-plus"
+	}
+	if seq > 0 {
+		nameBase = sequencePrefix(seq, nameBase)
+	}
+	stem = fmt.Sprintf("%s-%s", nameBase, now.Format("20060102-150405"))
+	return stem + ".png", stem
+}
+
+// sequencePrefix 把产物序号加在名字最前（3.机场A）；序号停用返回原名。
+func sequencePrefix(seq int, name string) string {
+	if seq <= 0 {
+		return name
+	}
+	return fmt.Sprintf("%d.%s", seq, name)
+}
+
+// NextImageSequence 扫目录里已有的带号结果图，给出本次该接的产物序号：
+// 文件名以「数字.」开头的 png 取最大号 + 1；没有带号图（含旧版无号图）从 1 起。
+// 旧版图没有序号，不算进历史。目录读不了就当没有历史、从 1 起——
+// 后面写图时 safeImageDir 仍会把真正的问题报出来，这里不必提前拦。
+func NextImageSequence(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 1
+	}
+	max := 0
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".png" {
+			continue
+		}
+		if n := leadingSequence(entry.Name()); n > max {
+			max = n
+		}
+	}
+	return max + 1
+}
+
+// leadingSequence 解析文件名开头的「数字.」序号；没有则返回 0。
+func leadingSequence(name string) int {
+	dot := strings.Index(name, ".")
+	if dot <= 0 {
+		return 0
+	}
+	n, err := strconv.Atoi(name[:dot])
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+// FollowedConfigExportPath 是「产物跟随文件名」开着时输出配置的最终路径：
+// 文件轮把基名插在用户指定文件名前（机场A-result.yaml）；订阅轮没有基名
+// 可跟，插时间戳防多个链接轮互相覆盖（result-20260927-153001.yaml）。
+// seq 大于 0 时把产物序号加在最前（3.机场A-result.yaml），与结果图同轮同号。
+// path 为空原样返回（不导出的场景）。
+func FollowedConfigExportPath(path, nameBase string, now time.Time, seq int) string {
+	if path == "" {
+		return path
+	}
+	dir := filepath.Dir(path)
+	file := filepath.Base(path)
+	ext := filepath.Ext(file)
+	stem := strings.TrimSuffix(file, ext)
+	switch {
+	case nameBase != "":
+		stem = nameBase + "-" + stem
+	case seq > 0:
+		// 没有可跟的基名时才用时间戳防覆盖；带序号后同轮已经唯一。
+	default:
+		stem = stem + "-" + now.Format("20060102-150405")
+	}
+	if seq > 0 {
+		stem = sequencePrefix(seq, stem)
+	}
+	return filepath.Join(dir, stem+ext)
+}
+
+// CleanNameBase 把源文件名收成产物名前缀：取基名、剥 yaml 扩展、
+// 剔除文件系统非法字符和空白边、超长截断到 40；收不出有效字符时回空串。
+func CleanNameBase(name string) string {
+	name = filepath.Base(name)
+	for _, ext := range []string{".yaml", ".yml"} {
+		name = strings.TrimSuffix(name, ext)
+	}
+	var b strings.Builder
+	for _, r := range name {
+		if unicode.IsControl(r) || strings.ContainsRune(`/\:*?"<>|`, r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	base := strings.TrimSpace(b.String())
+	if base == "." || base == ".." {
+		return ""
+	}
+	runes := []rune(base)
+	if len(runes) > 40 {
+		runes = runes[:40]
+		base = strings.TrimSpace(string(runes))
+	}
+	return base
 }
 
 // WriteResultImage 编码并写入 PNG。返回路径与缺字体警告（可为空）。
@@ -849,11 +963,11 @@ func WriteResultImage(dir string, spec ImageSpec) (string, string, error) {
 	if err != nil {
 		return "", warning, err
 	}
-	path, err := ImageFileName(dir, spec.Now)
+	path, err := ImageFileName(dir, spec.Now, spec.NameBase, spec.Seq)
 	if err != nil {
 		return "", warning, err
 	}
-	tmp, err := os.CreateTemp(dir, ".clash-speedtest-*.png.part")
+	tmp, err := os.CreateTemp(dir, ".clash-speedtest-plus-*.png.part")
 	if err != nil {
 		return "", warning, err
 	}

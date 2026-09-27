@@ -36,6 +36,9 @@ type Options struct {
 	MinDownload    string
 	MinUpload      string
 	ImageSpeedOnly bool
+	// NameFromConfig 是「产物跟随文件名」开关：结果图与输出配置的文件名
+	// 带上所测配置的基名；纯订阅源没有可跟的文件名，保持默认命名。
+	NameFromConfig bool
 	NoImage        bool
 	OutputPath     string
 	Rename         bool
@@ -55,8 +58,8 @@ type Session struct {
 	Configs []ConfigEntry
 	// ExecDir 是程序文件所在目录。选源结果里的临时文件写到这里。
 	ExecDir string
-	// Fetch 把订阅地址变成 Clash/Mihomo yaml。测试里注入假的，不访问网络。
-	Fetch func(urls []string) (files []string, used []string, err error)
+	// Fetch 把订阅地址变成源（临时文件 + 原地址）。测试里注入假的，不访问网络。
+	Fetch func(urls []string) (sources []SourceSpec, used []string, err error)
 }
 
 // Model 是选源界面。checked 只记录合格配置是否打勾。
@@ -82,10 +85,10 @@ type Model struct {
 	width  int
 	height int
 
-	// fetch 结果：订阅内容写出的临时文件，代替地址参与本次测速。
-	fetchedFiles []string
-	usedFlagged  []string
-	session      Session
+	// fetch 结果：订阅内容写出的临时文件（带原地址），代替地址参与本次测速。
+	fetchedSources []SourceSpec
+	usedFlagged    []string
+	session        Session
 }
 
 const (
@@ -103,9 +106,9 @@ const (
 
 // fetchDoneMsg 是订阅地址拉取结束。err 非空时留在选源界面。
 type fetchDoneMsg struct {
-	err   error
-	files []string
-	used  []string
+	err     error
+	sources []SourceSpec
+	used    []string
 }
 
 // New 用一份会话创建选源界面。
@@ -134,6 +137,7 @@ func New(session Session) Model {
 			Concurrent: "4", Parallel: "6", Timeout: "5s", MaxLatency: "1s",
 			MaxPacketLoss: "100", MinDownload: "5", MinUpload: "2", Rename: true,
 			ImageSpeedOnly: true,
+			NameFromConfig: true,
 		},
 	}
 }
@@ -161,19 +165,6 @@ func (m Model) Options() Options { return m.options }
 
 // UsedFlagged 返回实际用了补过 flag=meta 的地址。
 func (m Model) UsedFlagged() []string { return m.usedFlagged }
-
-// SourceLabel 返回画在结果图顶部的来源：勾选的配置文件名加用户填的订阅地址，
-// 不含拉取写出的临时文件名。
-func (m Model) SourceLabel() string {
-	var parts []string
-	for i, config := range m.configs {
-		if config.Selectable && m.checked[i] {
-			parts = append(parts, config.Name)
-		}
-	}
-	parts = append(parts, SplitSubscriptionText(m.address)...)
-	return strings.Join(parts, ",")
-}
 
 func (m Model) optionState() OptionState {
 	return OptionState{Mode: m.options.Mode, OutputPath: m.options.OutputPath}
@@ -212,8 +203,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = msg.err.Error()
 			break
 		}
-		if len(msg.files) > 0 {
-			m.fetchedFiles = msg.files
+		if len(msg.sources) > 0 {
+			m.fetchedSources = msg.sources
 			m.usedFlagged = msg.used
 			if len(msg.used) > 0 {
 				m.status = "已用补过参数的地址 " + strings.Join(msg.used, "，")
@@ -264,7 +255,7 @@ func (m Model) helpHit(x, y int) int {
 	if y != lo.helpY {
 		return helpHitNone
 	}
-	enter, quit := helpZones()
+	enter, quit := m.helpZones()
 	if x >= enter[0] && x < enter[1] {
 		return helpHitEnter
 	}
@@ -389,11 +380,11 @@ func (m Model) fetchCmd() tea.Cmd {
 	session := m2.session
 	urls := SplitSubscriptionText(m.address)
 	return func() tea.Msg {
-		files, used, err := session.Fetch(urls)
+		sources, used, err := session.Fetch(urls)
 		if err != nil {
 			return fetchDoneMsg{err: err}
 		}
-		return fetchDoneMsg{files: files, used: used}
+		return fetchDoneMsg{sources: sources, used: used}
 	}
 }
 
@@ -587,16 +578,17 @@ func (m *Model) move(delta int) {
 	}
 }
 
-// Selection 返回这次要测的源：先是勾选的配置路径，再是拉取成功后写出的临时文件。
-func (m Model) Selection() []string {
-	var sources []string
+// SourceList 返回参与测速的源，每个源各自一轮：
+// 先是勾选的配置文件，再是拉取写出的订阅临时文件（FromSubscription 标记）。
+func (m Model) SourceList() []SourceSpec {
+	list := make([]SourceSpec, 0, len(m.configs)+len(m.fetchedSources))
 	for i, config := range m.configs {
 		if config.Selectable && m.checked[i] {
-			sources = append(sources, config.Path)
+			list = append(list, SourceSpec{Value: config.Path, DisplayName: config.Name})
 		}
 	}
-	sources = append(sources, m.fetchedFiles...)
-	return sources
+	list = append(list, m.fetchedSources...)
+	return list
 }
 
 func (m Model) hasSource() bool {

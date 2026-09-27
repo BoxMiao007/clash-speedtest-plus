@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/faceair/clash-speedtest/speedtester"
 )
 
 // headerClick 在画面表头行的指定列上模拟一次点击。

@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BoxMiao007/clash-speedtest-plus/output"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/faceair/clash-speedtest/output"
-	"github.com/faceair/clash-speedtest/speedtester"
 )
 
 // Messages for TUI updates
@@ -114,10 +114,14 @@ type tuiModel struct {
 	imageSpeedOnly bool
 	imageDir       string
 	imageSource    string
-	savingImage    bool
-	statusText     string
-	statusUntil    time.Time
-	autoImageDone  bool
+	// imageNameBase 非空时结果图文件名用它替换默认前缀（产物跟随文件名）。
+	imageNameBase string
+	// imageSeq 是产物序号，加在结果图文件名最前（3.机场A-…）。
+	imageSeq      int
+	savingImage   bool
+	statusText    string
+	statusUntil   time.Time
+	autoImageDone bool
 	// quittingAfterSave 表示整轮已结束，第一次退出正在等本地产物。
 	quittingAfterSave bool
 	forceQuit         bool
@@ -138,6 +142,10 @@ type tuiModel struct {
 	// escapeToParent 让 Esc 在详情面板之外生效：中断本轮测试返回上一级（选源界面）。
 	escapeToParent    bool
 	returningToParent bool
+	// 多源各测一轮：roundLabel 画在进度行最前面（如「第 2/3 轮 机场B」）；
+	// autoAdvance 表示后面还有轮，本轮测完保存完自动退出进下一轮。
+	roundLabel  string
+	autoAdvance bool
 }
 
 const (
@@ -279,6 +287,17 @@ func (m *tuiModel) SetImageExport(dir string, auto bool) {
 // SetImageSource 记录配置文件名或订阅地址，画在结果图顶部。
 func (m *tuiModel) SetImageSource(source string) {
 	m.imageSource = source
+}
+
+// SetImageNameBase 设置结果图文件名的基名前缀（产物跟随文件名）；
+// 空串保持默认 clash-speedtest-plus 前缀。订阅源轮由调用方传空。
+func (m *tuiModel) SetImageNameBase(base string) {
+	m.imageNameBase = base
+}
+
+// SetImageSeq 设置结果图文件名最前的产物序号；小于等于 0 不加。
+func (m *tuiModel) SetImageSeq(seq int) {
+	m.imageSeq = seq
 }
 
 // SetConfigSaver 在整轮结束时写本地 yaml。gist/仓库上传由调用方自行后台处理。
@@ -547,7 +566,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flushScheduled = true
 			cmds = append(cmds, scheduleFlushCmd())
 		}
-		if cmd := m.startFinalSave(false); cmd != nil {
+		if cmd := m.startFinalSave(m.autoAdvance); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
@@ -561,7 +580,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.setPaused(false)
 		m.progress.SetPercent(1.0)
 		var cmds []tea.Cmd
-		if cmd := m.startFinalSave(false); cmd != nil {
+		if cmd := m.startFinalSave(m.autoAdvance); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		return m, tea.Batch(cmds...)
@@ -751,6 +770,11 @@ func (m *tuiModel) startFinalSave(quit bool) tea.Cmd {
 		return nil
 	}
 	if !m.autoImage && m.configSaver == nil {
+		// 没有产物可写：自动推进的轮直接进下一轮，否则照旧停在界面等退出键。
+		if m.autoAdvance {
+			m.quitting = true
+			return tea.Quit
+		}
 		return nil
 	}
 	m.autoImageDone = true
@@ -820,6 +844,18 @@ func (m *tuiModel) SetEscapeToParent(enabled bool) {
 	m.escapeToParent = enabled
 }
 
+// SetRoundLabel 设置画在进度行最前面的轮次提示（如「第 2/3 轮 机场B」）。
+// 多源分别测速时由调用方逐轮设置；单源不设，进度行维持原样。
+func (m *tuiModel) SetRoundLabel(label string) {
+	m.roundLabel = label
+}
+
+// SetAutoAdvance 标记本轮之后还有下一轮：本轮测完、产物保存完自动退出。
+// 最后一轮不设，测完照旧停在界面等退出键。
+func (m *tuiModel) SetAutoAdvance(hasMore bool) {
+	m.autoAdvance = hasMore
+}
+
 func (m tuiModel) EscapedToParent() bool {
 	return m.returningToParent
 }
@@ -867,12 +903,14 @@ func (m tuiModel) imageSpec(finished bool) output.ImageSpec {
 		summary = output.AppendImageSpeedCounts(summary, len(filtered.Rows), filtered.Invalid, filtered.Testing, untested)
 	}
 	return output.ImageSpec{
-		Mode:    m.mode,
-		Source:  m.imageSource,
-		Summary: summary,
-		Headers: m.baseHeaders,
-		Rows:    filtered.Rows,
-		Now:     time.Now(),
+		Mode:     m.mode,
+		Source:   m.imageSource,
+		Summary:  summary,
+		Headers:  m.baseHeaders,
+		Rows:     filtered.Rows,
+		Now:      time.Now(),
+		NameBase: m.imageNameBase,
+		Seq:      m.imageSeq,
 	}
 }
 

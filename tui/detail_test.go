@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/faceair/clash-speedtest/speedtester"
 )
 
 func TestTUIModelDetailPanelToggle(t *testing.T) {

@@ -16,13 +16,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/BoxMiao007/clash-speedtest-plus/gist"
+	"github.com/BoxMiao007/clash-speedtest-plus/ip"
+	"github.com/BoxMiao007/clash-speedtest-plus/output"
+	"github.com/BoxMiao007/clash-speedtest-plus/picker"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/tui"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/faceair/clash-speedtest/gist"
-	"github.com/faceair/clash-speedtest/ip"
-	"github.com/faceair/clash-speedtest/output"
-	"github.com/faceair/clash-speedtest/picker"
-	"github.com/faceair/clash-speedtest/speedtester"
-	"github.com/faceair/clash-speedtest/tui"
 	mihomolog "github.com/metacubex/mihomo/log"
 	"gopkg.in/yaml.v2"
 )
@@ -34,7 +34,7 @@ var (
 )
 
 var (
-	configPathsConfig = flag.String("c", "", "配置文件路径，也支持 http(s) 地址")
+	configPathsConfig = flag.String("c", "", "配置文件路径，也支持 http(s) 地址；逗号分隔多个源，每个源各自一轮分别测速")
 	filterRegexConfig = flag.String("f", ".+", "按节点名过滤，使用正则")
 	blockKeywords     = flag.String("b", "", "按关键字屏蔽节点，多个关键字用 | 分隔（例如 -b 'rate|x1|1x'）")
 	serverURL         = flag.String("server-url", "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg", "测速服务器地址或直接下载地址")
@@ -46,6 +46,7 @@ var (
 	parallel          = intFlag("p", "parallel", 1, "同时测试的节点数")
 	noImage           = flag.Bool("no-image", false, "关闭自动导出结果表图，仍可按 s 手动保存")
 	imageSpeedOnly    = flag.Bool("image-speed-only", false, "结果图只保留下载或上传速度大于 0 的行；快速模式会忽略")
+	nameFromConfig    = flag.Bool("name-from-config", false, "结果图与输出配置的文件名带上所测配置文件的基名；纯订阅源保持默认命名")
 	outputPath        = stringFlag("o", "output", "", "输出配置文件路径")
 	gistToken         = flag.String("gist-token", "", "用于更新 Gist 的 GitHub token")
 	gistAddress       = flag.String("gist-address", "", "要更新的 Gist 地址或 ID（文件名使用输出文件名）")
@@ -183,6 +184,7 @@ func applyPickerOptions(o picker.Options) {
 		*minUploadSpeed = v
 	}
 	*imageSpeedOnly = o.ImageSpeedOnly
+	*nameFromConfig = o.NameFromConfig
 	*noImage = o.NoImage
 	if o.OutputPath != "" {
 		*outputPath = o.OutputPath
@@ -203,7 +205,7 @@ func applyPickerOptions(o picker.Options) {
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "用法：clash-speedtest [选项]\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "用法：clash-speedtest-plus [选项]\n")
 		printFlagDefaults(flag.CommandLine)
 	}
 	flag.Parse()
@@ -213,7 +215,7 @@ func main() {
 
 	// Handle version flag
 	if *versionFlag {
-		fmt.Printf("clash-speedtest version %s (commit %s)\n", version, commit)
+		fmt.Printf("clash-speedtest-plus version %s (commit %s)\n", version, commit)
 		os.Exit(0)
 	}
 
@@ -230,37 +232,114 @@ func main() {
 			if !started {
 				return
 			}
-			*configPathsConfig = strings.Join(finished.Selection(), ",")
-			imageSource := finished.SourceLabel()
 			applyPickerOptions(finished.Options())
 			for _, used := range finished.UsedFlagged() {
 				fmt.Fprintf(os.Stderr, "已用补过参数的地址: %s\n", used)
 			}
-			if !runSpeedTest(execDir, imageSource, true) {
-				return
+			// 多源一一分开：每个源各自一轮、各出各的产物，互不混合。
+			if runSourceQueue(finished.SourceList(), execDir, true) {
+				// 按过 Esc：本轮中断、剩余轮作废，回选源界面重排。
+				model = finished
+				continue
 			}
-			// 测试界面按 Esc 返回：保留勾选、地址和选项，改完再测一轮。
-			model = finished
+			return
 		}
 	case len(args) == 0:
 		// 没有终端，进不了选源界面。
 		flag.Usage()
 		os.Exit(1)
+	default:
+		runSourceQueue(picker.SplitConfigArg(*configPathsConfig), execDir, false)
 	}
-
-	runSpeedTest(execDir, "", false)
 }
 
-// runSpeedTest 按当前参数跑完整测速流程（交互表格或 TSV）。
-// escapeToParent 为真时测试界面允许用 Esc 返回上一级（选源界面）；
-// 返回 true 表示这次是按 Esc 返回，调用方应回到选源界面。
-func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
+// runSourceQueue 逐源跑完整测速：每个源一轮，测完自动进下一轮；
+// 选源路径按 Esc 中断本轮并作废剩余轮（返回 true），命令行路径返回恒为 false。
+func runSourceQueue(sources []picker.SourceSpec, execDir string, escapeToParent bool) bool {
+	if len(sources) == 0 {
+		log.Fatalln("请指定配置文件")
+	}
+	// 输出路径只锚一次；每轮从原始路径算自己的产物名，免得基名层层叠加。
+	// runSpeedTest 会把全局改成各轮的最终名，所以锚定值必须存局部变量。
+	*outputPath = picker.ResolveOutputPath(execDir, *outputPath)
+	originalOutputPath := *outputPath
+	// 产物序号接着目录里已有的带号结果图往下编，跨运行延续；
+	// 单轮也编——每次测试都是目录序列的一环。
+	startSeq := output.NextImageSequence(execDir)
+	for i, src := range sources {
+		// 单源不画轮次（跟「多源才亮轮数」的口径一致），多源标「第 X/N 轮 源名」。
+		label := ""
+		if len(sources) > 1 {
+			label = fmt.Sprintf("第 %d/%d 轮 %s", i+1, len(sources), src.DisplayName)
+		}
+		// 序号按队列位置排：跳过的轮也占号，图上的号和界面「第 X/N 轮」对得齐。
+		round := speedRound{
+			source:     src,
+			label:      label,
+			seq:        startSeq + i,
+			hasMore:    i < len(sources)-1,
+			outputPath: originalOutputPath,
+		}
+		switch runSpeedTest(execDir, round, escapeToParent) {
+		case roundEscaped:
+			// 全局在轮内被改写成各轮最终名，离开队列前恢复成用户原始路径，
+			// 免得选源界面清空输出路径时残留名被当原始路径再叠一层。
+			*outputPath = originalOutputPath
+			return true
+		case roundSkipped:
+			continue
+		}
+	}
+	*outputPath = originalOutputPath
+	return false
+}
+
+// speedRound 是队列里的一轮：测哪个源、界面怎么标、产物名带什么序号、
+// 输出写到哪、之后还有没有下一轮。所有轮次信息收在一起，免得参数表越滚越长。
+type speedRound struct {
+	source     picker.SourceSpec
+	label      string // 多轮时「第 X/N 轮 源名」；单轮空
+	seq        int    // 产物序号，加在图与输出配置文件名最前
+	hasMore    bool   // 之后还有轮：本轮测完保存完自动退出
+	outputPath string // 用户原始输出路径（锚定后），每轮从它算最终名
+}
+
+// roundOutcome 是一轮测速的结局：正常结束、Esc 中断（选源路径）、源加载不出节点跳过。
+type roundOutcome int
+
+const (
+	roundDone roundOutcome = iota
+	roundEscaped
+	roundSkipped
+)
+
+// runSpeedTest 按当前参数跑一个源的完整测速流程（交互表格或 TSV）。
+// 每轮只测 round.source 这一个源。escapeToParent 为真时测试界面允许用
+// Esc 中断本轮返回选源界面。
+func runSpeedTest(execDir string, round speedRound, escapeToParent bool) roundOutcome {
+	src := round.source
+	*configPathsConfig = src.Value
 	if *configPathsConfig == "" {
 		log.Fatalln("请指定配置文件")
 	}
 
-	// 相对路径的输出锚在程序目录，和选源、结果图一致。
-	*outputPath = picker.ResolveOutputPath(execDir, *outputPath)
+	// 「产物跟随文件名」只跟本地配置文件；订阅源没有可跟的名字，保持默认。
+	nameBase := ""
+	if *nameFromConfig && !src.FromSubscription {
+		nameBase = output.CleanNameBase(src.DisplayName)
+	}
+
+	// 每轮从用户原始输出路径算起：文件轮加基名前缀，订阅轮靠序号区分
+	// （序号停用才退回时间戳）；序号与结果图同轮同号、独立于开关——开关
+	// 关着也照加，只是不带基名。保存与上传都读这个最终路径。
+	*outputPath = round.outputPath
+	if *outputPath != "" {
+		base := nameBase
+		if !*nameFromConfig {
+			base = ""
+		}
+		*outputPath = output.FollowedConfigExportPath(*outputPath, base, time.Now(), round.seq)
+	}
 
 	var err error
 	speedTester, effectiveMode, resultFilter, stopper, err := buildTester()
@@ -272,11 +351,24 @@ func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
 	if err != nil {
 		log.Fatalf("加载节点失败: %s", err)
 	}
+	if len(allProxies) == 0 {
+		// 多源队列里一个源空了不该废掉整个队列：说明原因后跳过继续。
+		who := round.label
+		if who == "" {
+			who = src.DisplayName
+		}
+		fmt.Fprintf(os.Stderr, "%s：解析出 0 个节点，跳过这一轮\n", who)
+		return roundSkipped
+	}
 
 	outputMode := output.DetermineOutputMode(output.IsTerminalFile)
 
 	var tsvWriter *output.TSVWriter
 	if outputMode == output.OutputModeTSV {
+		// 非交互模式没有进度行，多轮时轮次提示走 stderr，stdout 保留给 TSV/管道。
+		if round.label != "" {
+			fmt.Fprintf(os.Stderr, "%s\n", round.label)
+		}
 		var err error
 		tsvWriter, err = output.NewTSVWriter(os.Stdout, effectiveMode)
 		if err != nil {
@@ -340,7 +432,11 @@ func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
 		model.SetImageExport(execDir, !*noImage)
 		model.SetImageSpeedOnly(*imageSpeedOnly)
 		model.NoteFastImageSpeedIgnored()
-		model.SetImageSource(imageSource)
+		model.SetImageSource(src.DisplayName)
+		model.SetRoundLabel(round.label)
+		model.SetAutoAdvance(round.hasMore)
+		model.SetImageNameBase(nameBase)
+		model.SetImageSeq(round.seq)
 		if collectResults {
 			model.SetConfigSaver(func(done []*speedtester.Result) (string, error) {
 				sorted := output.SortResults(append([]*speedtester.Result(nil), done...), effectiveMode)
@@ -373,7 +469,7 @@ func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
 		finished, _ := finalModel.(tui.Model)
 		if finished.EscapedToParent() {
 			// 按下 Esc 返回上一级：本轮不写产物，选源界面原样恢复。
-			return true
+			return roundEscaped
 		}
 		status, failed := finished.ExitStatus()
 		if status != "" {
@@ -382,7 +478,7 @@ func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
 		if failed {
 			os.Exit(1)
 		}
-		return false
+		return roundDone
 	}
 
 	// TSV mode: collect results synchronously
@@ -412,23 +508,23 @@ func runSpeedTest(execDir, imageSource string, escapeToParent bool) bool {
 		fmt.Fprintf(os.Stderr, "%s\n", tui.FastImageSpeedIgnored())
 	}
 	if !*noImage {
-		exportNonInteractiveImage(execDir, imageSource, results, effectiveMode, len(allProxies), imageSpeedFilterEnabled(effectiveMode))
+		exportNonInteractiveImage(execDir, src.DisplayName, nameBase, round.seq, results, effectiveMode, len(allProxies), imageSpeedFilterEnabled(effectiveMode))
 	}
 	waitForUpload()
-	return false
+	return roundDone
 }
 
 func imageSpeedFilterEnabled(mode speedtester.SpeedMode) bool {
 	return *imageSpeedOnly && !mode.IsFast()
 }
 
-func exportNonInteractiveImage(execDir, imageSource string, results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
+func exportNonInteractiveImage(execDir, imageSource, nameBase string, seq int, results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		writeNonInteractiveImage(ctx, execDir, imageSource, results, mode, total, speedOnly)
+		writeNonInteractiveImage(ctx, execDir, imageSource, nameBase, seq, results, mode, total, speedOnly)
 	}()
 	select {
 	case <-done:
@@ -440,7 +536,7 @@ func exportNonInteractiveImage(execDir, imageSource string, results []*speedtest
 	}
 }
 
-func writeNonInteractiveImage(ctx context.Context, execDir, imageSource string, results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
+func writeNonInteractiveImage(ctx context.Context, execDir, imageSource, nameBase string, seq int, results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -457,12 +553,14 @@ func writeNonInteractiveImage(ctx context.Context, execDir, imageSource string, 
 		summary = output.AppendImageSpeedCounts(summary, len(filtered.Rows), filtered.Invalid, filtered.Testing, untested)
 	}
 	spec := output.ImageSpec{
-		Mode:    mode,
-		Source:  imageSource,
-		Summary: summary,
-		Headers: output.GetHeaders(mode),
-		Rows:    filtered.Rows,
-		Now:     time.Now(),
+		Mode:     mode,
+		Source:   imageSource,
+		Summary:  summary,
+		Headers:  output.GetHeaders(mode),
+		Rows:     filtered.Rows,
+		Now:      time.Now(),
+		NameBase: nameBase,
+		Seq:      seq,
 	}
 	path, warning, err := output.WriteResultImage(execDir, spec)
 	if err != nil {

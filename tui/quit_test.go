@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/faceair/clash-speedtest/speedtester"
 )
 
 // inRepoTempDir 在工作目录内建临时目录，避免 safeImageDir 拒绝逃逸路径。
@@ -35,7 +35,7 @@ func TestQuitAfterFinalAutoSaveDoesNotResave(t *testing.T) {
 	saveCount := 0
 	model.SetConfigSaver(func([]*speedtester.Result) (string, error) {
 		saveCount++
-		return "clash-speedtest.yaml", nil
+		return "clash-speedtest-plus.yaml", nil
 	})
 	model.results = append(model.results, &speedtester.Result{
 		ProxyName: "香港 01",
@@ -87,7 +87,7 @@ func TestQuitBeforeAutoSaveStillSaves(t *testing.T) {
 	saveCount := 0
 	model.SetConfigSaver(func([]*speedtester.Result) (string, error) {
 		saveCount++
-		return "clash-speedtest.yaml", nil
+		return "clash-speedtest-plus.yaml", nil
 	})
 	model.testing = false
 	model.autoImageDone = false

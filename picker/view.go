@@ -239,7 +239,7 @@ func (m Model) addressLine(lo layout) string {
 
 func (m Model) headerLine(width int) string {
 	left := joinParts(0,
-		part{"clash-speedtest", titleStyle},
+		part{"clash-speedtest-plus", titleStyle},
 		part{" · 选源界面", titleDimStyle},
 	)
 	if len(m.configs) == 0 || width <= 0 {
@@ -299,17 +299,40 @@ type helpSpan struct {
 	hit   int // helpHitNone / helpHitEnter / helpHitQuit
 }
 
-var helpSpans = []helpSpan{
-	{key: "空格", label: " 勾选/开关"},
-	{key: "←→", label: " 切区/调参数"},
-	{key: "↑↓/Tab", label: " 移动"},
-	{key: "Enter", label: " 开始测速", hit: helpHitEnter},
-	{key: "Ctrl+C", label: " 退出", hit: helpHitQuit},
+func (m Model) helpSpans() []helpSpan {
+	spans := []helpSpan{
+		{key: "空格", label: " 勾选/开关"},
+		{key: "←→", label: " 切区/调参数"},
+		{key: "↑↓/Tab", label: " 移动"},
+		{key: "Enter", label: " 开始测速", hit: helpHitEnter},
+		{key: "Ctrl+C", label: " 退出", hit: helpHitQuit},
+	}
+	// 多源会连测多轮，回车前就把轮数亮出来，免得以为漏了源。
+	if n := m.expectedRounds(); n > 1 {
+		for i, span := range spans {
+			if span.hit == helpHitEnter {
+				spans[i].label = fmt.Sprintf(" 开始测速(共 %d 轮)", n)
+			}
+		}
+	}
+	return spans
+}
+
+// expectedRounds 估算回车后要连测的轮数：勾选的配置数加地址框里拆出的订阅数。
+func (m Model) expectedRounds() int {
+	n := len(SplitSubscriptionText(m.address))
+	for i, config := range m.configs {
+		if config.Selectable && m.checked[i] {
+			n++
+		}
+	}
+	return n
 }
 
 func (m Model) helpLine(width int) string {
-	parts := make([]part, 0, len(helpSpans)*3)
-	for i, span := range helpSpans {
+	spans := m.helpSpans()
+	parts := make([]part, 0, len(spans)*3)
+	for i, span := range spans {
 		if i > 0 {
 			parts = append(parts, part{"   ", labelStyle})
 		}
@@ -324,9 +347,9 @@ func (m Model) helpLine(width int) string {
 
 // helpZones 算出可点段在帮助行内的 X 范围（内容坐标）。
 // 帮助行怎么画就从这里怎么量，两处不会漂移。
-func helpZones() (enter, quit [2]int) {
+func (m Model) helpZones() (enter, quit [2]int) {
 	x := 0
-	for i, span := range helpSpans {
+	for i, span := range m.helpSpans() {
 		if i > 0 {
 			x += 3
 		}
