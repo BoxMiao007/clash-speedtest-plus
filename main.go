@@ -263,7 +263,11 @@ func runSourceQueue(sources []picker.SourceSpec, execDir string, escapeToParent 
 	*outputPath = picker.ResolveOutputPath(execDir, *outputPath)
 	originalOutputPath := *outputPath
 	for i, src := range sources {
-		label := fmt.Sprintf("第 %d/%d 轮 %s", i+1, len(sources), src.DisplayName)
+		// 单源不画轮次（跟「多源才亮轮数」的口径一致），多源标「第 X/N 轮 源名」。
+		label := ""
+		if len(sources) > 1 {
+			label = fmt.Sprintf("第 %d/%d 轮 %s", i+1, len(sources), src.DisplayName)
+		}
 		switch runSpeedTest(execDir, src, escapeToParent, label, i < len(sources)-1, originalOutputPath) {
 		case roundEscaped:
 			return true
@@ -318,7 +322,11 @@ func runSpeedTest(execDir string, src picker.SourceSpec, escapeToParent bool, ro
 	}
 	if len(allProxies) == 0 {
 		// 多源队列里一个源空了不该废掉整个队列：说明原因后跳过继续。
-		fmt.Fprintf(os.Stderr, "%s：%s 解析出 0 个节点，跳过这一轮\n", roundLabel, src.DisplayName)
+		who := roundLabel
+		if who == "" {
+			who = src.DisplayName
+		}
+		fmt.Fprintf(os.Stderr, "%s：解析出 0 个节点，跳过这一轮\n", who)
 		return roundSkipped
 	}
 
@@ -326,8 +334,10 @@ func runSpeedTest(execDir string, src picker.SourceSpec, escapeToParent bool, ro
 
 	var tsvWriter *output.TSVWriter
 	if outputMode == output.OutputModeTSV {
-		// 非交互模式没有进度行，轮次提示走 stderr，stdout 保留给 TSV/管道。
-		fmt.Fprintf(os.Stderr, "%s\n", roundLabel)
+		// 非交互模式没有进度行，多轮时轮次提示走 stderr，stdout 保留给 TSV/管道。
+		if roundLabel != "" {
+			fmt.Fprintf(os.Stderr, "%s\n", roundLabel)
+		}
 		var err error
 		tsvWriter, err = output.NewTSVWriter(os.Stdout, effectiveMode)
 		if err != nil {

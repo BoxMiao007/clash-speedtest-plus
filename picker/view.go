@@ -309,7 +309,11 @@ func (m Model) helpSpans() []helpSpan {
 	}
 	// 多源会连测多轮，回车前就把轮数亮出来，免得以为漏了源。
 	if n := m.expectedRounds(); n > 1 {
-		spans[3].label = fmt.Sprintf(" 开始测速(共 %d 轮)", n)
+		for i, span := range spans {
+			if span.hit == helpHitEnter {
+				spans[i].label = fmt.Sprintf(" 开始测速(共 %d 轮)", n)
+			}
+		}
 	}
 	return spans
 }

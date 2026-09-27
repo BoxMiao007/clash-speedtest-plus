@@ -21,7 +21,7 @@ func TestFetchSendsUserAgent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sources, used, err := fetchSubscriptions(t.TempDir(), "my-ua/1.0", []string{server.URL})
+	sources, used, err := fetchSubscriptions(t.TempDir(), "my-ua/1.0", []string{server.URL + "/sub?token=secret"})
 	if err != nil {
 		t.Fatalf("拉取失败: %s", err)
 	}
@@ -33,6 +33,10 @@ func TestFetchSendsUserAgent(t *testing.T) {
 	}
 	if !sources[0].FromSubscription {
 		t.Fatal("拉取写出的源应标记为订阅源")
+	}
+	// 展示名去掉查询参数：token 不跟着进图顶来源行。
+	if strings.Contains(sources[0].DisplayName, "token=") {
+		t.Fatalf("展示名不该带查询参数: %q", sources[0].DisplayName)
 	}
 }
 

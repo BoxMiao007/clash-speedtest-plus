@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/faceair/clash-speedtest/output"
 	"github.com/faceair/clash-speedtest/speedtester"
 )
 
@@ -35,8 +36,9 @@ func fetchSubscriptions(execDir, ua string, urls []string) ([]SourceSpec, []stri
 			return nil, nil, fmt.Errorf("%s：%s", rawURL, err)
 		}
 		sources = append(sources, SourceSpec{
-			Value:            file,
-			DisplayName:      rawURL,
+			Value: file,
+			// 展示名用原地址去查询参数：token 这类凭据不进图顶和提示。
+			DisplayName:      output.SourceLabel(rawURL),
 			FromSubscription: true,
 		})
 		if usedURL != rawURL {

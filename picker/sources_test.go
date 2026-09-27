@@ -5,6 +5,32 @@ import (
 	"testing"
 )
 
+// 地址切分的老行为：URL 里的逗号必须留下（查询串常带逗号），
+// 换行拆段、空段丢弃。多源各自一轮的拆分以此为前提。
+func TestSplitSubscriptionTextKeepsCommaInsideURL(t *testing.T) {
+	got := SplitSubscriptionText("https://example.com/sub?token=secret&flag=meta,ss, https://example.com/b")
+
+	want := []string{
+		"https://example.com/sub?token=secret&flag=meta,ss",
+		"https://example.com/b",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestSplitSubscriptionTextSplitsLinesAndDropsBlanks(t *testing.T) {
+	got := SplitSubscriptionText(" https://example.com/a \n\nhttps://example.com/b\r\n")
+
+	want := []string{
+		"https://example.com/a",
+		"https://example.com/b",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 // 命令行 -c 传多个源时，按逗号拆开：每个源各自一轮，http 前缀标记为订阅源。
 func TestSplitConfigArg(t *testing.T) {
 	got := SplitConfigArg(" /opt/a.yaml , https://example.com/sub?token=x ,,b.yml,http://s2.com/c ")
