@@ -201,6 +201,46 @@ func TestSpaceAndClickToggleOnlySelectableConfigs(t *testing.T) {
 	}
 }
 
+var ansiPattern = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// stripANSI 去掉颜色码，方便断言纯文本的对齐。
+func stripANSI(s string) string { return ansiPattern.ReplaceAllString(s, "") }
+
+func TestViewNumbersRowsWithRightAlignedIndex(t *testing.T) {
+	configs := make([]ConfigEntry, 0, 12)
+	for i := 1; i <= 11; i++ {
+		name := fmt.Sprintf("f%02d.yaml", i)
+		configs = append(configs, ConfigEntry{Name: name, Path: "/opt/" + name, Selectable: true})
+	}
+	configs = append(configs, ConfigEntry{Name: "bad.yaml", Path: "/opt/bad.yaml", Reason: "不是合法的 yaml"})
+	model := New(Session{Configs: configs})
+	model.checked[0] = true
+
+	lines := strings.Split(stripANSI(model.View()), "\n")
+	row := func(name string) string {
+		for _, line := range lines {
+			if strings.Contains(line, name) {
+				return line
+			}
+		}
+		t.Fatalf("渲染里找不到 %s:\n%s", name, strings.Join(lines, "\n"))
+		return ""
+	}
+	first, last, grey := row("f01.yaml"), row("f11.yaml"), row("bad.yaml")
+	if !strings.Contains(first, "✓  1. f01.yaml") {
+		t.Fatalf("勾选行序号补齐不对: %q", first)
+	}
+	if !strings.Contains(last, "○ 11. f11.yaml") {
+		t.Fatalf("未勾选行序号不对: %q", last)
+	}
+	if !strings.Contains(grey, "× 12. bad.yaml") {
+		t.Fatalf("灰行也应带序号: %q", grey)
+	}
+	if strings.Index(first, "f01.yaml") != strings.Index(last, "f11.yaml") {
+		t.Fatalf("名称列起点没对齐:\n%q\n%q", first, last)
+	}
+}
+
 func TestFastModeDisablesDownloadSizeOnScreen(t *testing.T) {
 	model := New(sessionFixture())
 	if model.options.Mode != "download" {
@@ -815,13 +855,6 @@ func optionIndexFor(option Option) int {
 	}
 	panic("未知的选项")
 }
-
-// stripANSI 剥掉颜色转义序列，只留可见文本。
-func stripANSI(s string) string {
-	return ansiPattern.ReplaceAllString(s, "")
-}
-
-var ansiPattern = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func sessionFixture() Session {
 	return Session{
