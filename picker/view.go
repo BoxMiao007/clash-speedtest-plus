@@ -45,8 +45,8 @@ func (m Model) computeLayout() layout {
 	if len(m.configs) == 0 {
 		longest = lipgloss.Width("（程序目录里没有可勾选的 .yaml）")
 	}
-	// 文件名之外再给灰行原因留出宽度，但最多占一半屏宽。
-	filesW := max(longest+20, 24)
+	// 文件名之外再给序号列和灰行原因留出宽度，但最多占一半屏宽。
+	filesW := max(longest+m.indexWidth()+20, 24)
 	if width > 0 {
 		filesW = min(filesW, width/2)
 	}
@@ -151,13 +151,33 @@ func (m Model) fileLine(lo layout, row int) string {
 			text += "  " + config.Reason
 		}
 	}
+	// 序号纯展示：跟着名称的样式走，灰行连序号一起灰。
+	line := mark + " " + m.indexPrefix(index) + text
 	if m.focus == focusConfigs && m.cursor == index {
-		return selectedLine(mark+" "+text, width)
+		return selectedLine(line, width)
 	}
 	return joinParts(width,
 		part{mark, markStyle},
-		part{" " + text, nameStyle},
+		part{" " + m.indexPrefix(index) + text, nameStyle},
 	)
+}
+
+// indexPrefix 给出条目的序号前缀：位数按列表最大数右对齐补齐，
+// 所有行名称起点一致。
+func (m Model) indexPrefix(index int) string {
+	w := m.indexWidth()
+	if w <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%*d. ", w-2, index+1)
+}
+
+// indexWidth 是序号列（含「.」和尾随空格）的宽度；没有条目时为 0。
+func (m Model) indexWidth() int {
+	if len(m.configs) == 0 {
+		return 0
+	}
+	return len(fmt.Sprintf("%d", len(m.configs))) + 2
 }
 
 // optionLine 画选项栏的一行。row 0 是节标题，之后每个选项一行。
