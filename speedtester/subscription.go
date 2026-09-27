@@ -56,13 +56,20 @@ func acceptClash(text string) (string, bool) {
 }
 
 // HasClashProxies 判断一段内容是不是含节点的 Clash/Mihomo yaml。
-// proxies 或 proxy-providers 至少有一项才算。选源列表和订阅规范化共用。
+// proxies 或 proxy-providers 至少有一项才算。订阅规范化用。
 func HasClashProxies(body []byte) bool {
+	count, providers := CountClashProxies(body)
+	return count > 0 || providers
+}
+
+// CountClashProxies 数出本地 proxies 的个数，并报告是否还有 proxy-providers
+// 提供的远程节点（远程数量本地不可知）。选源列表给每份配置标注节点数用。
+func CountClashProxies(body []byte) (count int, providers bool) {
 	var doc clashDocument
 	if err := yaml.Unmarshal(body, &doc); err != nil {
-		return false
+		return 0, false
 	}
-	return len(doc.Proxies) > 0 || hasProviders(doc.Providers)
+	return len(doc.Proxies), hasProviders(doc.Providers)
 }
 
 func candidates(text string) []string {

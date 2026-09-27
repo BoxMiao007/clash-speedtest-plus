@@ -16,6 +16,10 @@ type ConfigEntry struct {
 	Path       string
 	Selectable bool
 	Reason     string
+	// Nodes 是本地 proxies 的节点数；More 表示还有 proxy-providers
+	// 的远程节点（数量本地不可知）。仅 Selectable 为真时有意义。
+	Nodes int
+	More  bool
 }
 
 // ListConfigs 只看目录一层的 .yaml，按文件名不区分大小写排序。
@@ -48,8 +52,9 @@ func classifyConfig(name, path string) ConfigEntry {
 	if err := yaml.Unmarshal(body, &probe); err != nil {
 		return ConfigEntry{Name: name, Path: path, Reason: "不是合法的 yaml"}
 	}
-	if !speedtester.HasClashProxies(body) {
+	count, providers := speedtester.CountClashProxies(body)
+	if count == 0 && !providers {
 		return ConfigEntry{Name: name, Path: path, Reason: "没有节点"}
 	}
-	return ConfigEntry{Name: name, Path: path, Selectable: true}
+	return ConfigEntry{Name: name, Path: path, Selectable: true, Nodes: count, More: providers}
 }
