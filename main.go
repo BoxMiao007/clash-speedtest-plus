@@ -34,7 +34,7 @@ var (
 )
 
 var (
-	configPathsConfig = flag.String("c", "", "配置文件路径，也支持 http(s) 地址")
+	configPathsConfig = flag.String("c", "", "配置文件路径，也支持 http(s) 地址；逗号分隔多个源，每个源各自一轮分别测速")
 	filterRegexConfig = flag.String("f", ".+", "按节点名过滤，使用正则")
 	blockKeywords     = flag.String("b", "", "按关键字屏蔽节点，多个关键字用 | 分隔（例如 -b 'rate|x1|1x'）")
 	serverURL         = flag.String("server-url", "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg", "测速服务器地址或直接下载地址")
@@ -326,6 +326,8 @@ func runSpeedTest(execDir string, src picker.SourceSpec, escapeToParent bool, ro
 
 	var tsvWriter *output.TSVWriter
 	if outputMode == output.OutputModeTSV {
+		// 非交互模式没有进度行，轮次提示走 stderr，stdout 保留给 TSV/管道。
+		fmt.Fprintf(os.Stderr, "%s\n", roundLabel)
 		var err error
 		tsvWriter, err = output.NewTSVWriter(os.Stdout, effectiveMode)
 		if err != nil {
