@@ -46,7 +46,6 @@ var (
 	parallel          = intFlag("p", "parallel", 1, "同时测试的节点数")
 	noImage           = flag.Bool("no-image", false, "关闭自动导出结果表图，仍可按 s 手动保存")
 	imageSpeedOnly    = flag.Bool("image-speed-only", false, "结果图只保留下载或上传速度大于 0 的行；快速模式会忽略")
-	nameFromConfig    = flag.Bool("name-from-config", false, "结果图与输出配置的文件名带上所测配置文件的基名；纯订阅源保持默认命名")
 	outputPath        = stringFlag("o", "output", "", "输出配置文件路径")
 	gistToken         = flag.String("gist-token", "", "用于更新 Gist 的 GitHub token")
 	gistAddress       = flag.String("gist-address", "", "要更新的 Gist 地址或 ID（文件名使用输出文件名）")
@@ -184,7 +183,6 @@ func applyPickerOptions(o picker.Options) {
 		*minUploadSpeed = v
 	}
 	*imageSpeedOnly = o.ImageSpeedOnly
-	*nameFromConfig = o.NameFromConfig
 	*noImage = o.NoImage
 	if o.OutputPath != "" {
 		*outputPath = o.OutputPath
@@ -323,22 +321,17 @@ func runSpeedTest(execDir string, round speedRound, escapeToParent bool) roundOu
 		log.Fatalln("请指定配置文件")
 	}
 
-	// 「产物跟随文件名」只跟本地配置文件；订阅源没有可跟的名字，保持默认。
+	// 「产物跟随文件名」恒定开启，只跟本地配置文件；订阅源没有可跟的名字，保持默认。
 	nameBase := ""
-	if *nameFromConfig && !src.FromSubscription {
+	if !src.FromSubscription {
 		nameBase = output.CleanNameBase(src.DisplayName)
 	}
 
 	// 每轮从用户原始输出路径算起：文件轮加基名前缀，订阅轮靠序号区分
-	// （序号停用才退回时间戳）；序号与结果图同轮同号、独立于开关——开关
-	// 关着也照加，只是不带基名。保存与上传都读这个最终路径。
+	// （序号停用才退回时间戳）；序号与结果图同轮同号。保存与上传都读这个最终路径。
 	*outputPath = round.outputPath
 	if *outputPath != "" {
-		base := nameBase
-		if !*nameFromConfig {
-			base = ""
-		}
-		*outputPath = output.FollowedConfigExportPath(*outputPath, base, time.Now(), round.seq)
+		*outputPath = output.FollowedConfigExportPath(*outputPath, nameBase, time.Now(), round.seq)
 	}
 
 	var err error
