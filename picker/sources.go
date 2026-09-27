@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"github.com/faceair/clash-speedtest/output"
 )
 
 // SourceSpec 是参与测速的一个源。多源时每个源各自一轮。
@@ -17,7 +19,8 @@ type SourceSpec struct {
 }
 
 // SplitConfigArg 把命令行 -c 的多源参数拆成源列表：逗号分隔，
-// 空段剔除；http 前缀是订阅源，其余是本地文件。
+// 空段剔除；http 前缀是订阅源，其余是本地文件。订阅源的展示名
+// 去查询参数——token 这类凭据不进图顶来源行和轮次提示。
 func SplitConfigArg(arg string) []SourceSpec {
 	var sources []SourceSpec
 	for _, part := range strings.Split(arg, ",") {
@@ -26,7 +29,7 @@ func SplitConfigArg(arg string) []SourceSpec {
 			continue
 		}
 		if strings.HasPrefix(part, "http") {
-			sources = append(sources, SourceSpec{Value: part, DisplayName: part, FromSubscription: true})
+			sources = append(sources, SourceSpec{Value: part, DisplayName: output.SourceLabel(part), FromSubscription: true})
 		} else {
 			sources = append(sources, SourceSpec{Value: part, DisplayName: filepath.Base(part)})
 		}

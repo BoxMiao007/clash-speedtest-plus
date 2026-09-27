@@ -213,6 +213,8 @@ func (o *Options) value(option Option) string {
 		return o.MinUpload
 	case OptionImageSpeedOnly:
 		return boolText(o.ImageSpeedOnly)
+	case OptionNameFromConfig:
+		return boolText(o.NameFromConfig)
 	case OptionNoImage:
 		return boolText(o.NoImage)
 	case OptionOutputPath:

@@ -88,6 +88,30 @@ func TestAutoSaveImageNameFollowsBase(t *testing.T) {
 	}
 }
 
+// 还没有下一轮时，即便关了自动图、没填输出路径（无产物可写），
+// 本轮测完也要直接退出进下一轮，而不是停在界面等按键。
+func TestAutoAdvanceQuitsWithoutArtifacts(t *testing.T) {
+	resultChannel := make(chan *speedtester.Result, 10)
+	model := NewTUIModel(speedtester.SpeedModeDownload, 1, resultChannel)
+	model.SetImageExport(t.TempDir(), false) // 关自动结果图，也不设 configSaver
+	model.SetAutoAdvance(true)
+	model.results = append(model.results, &speedtester.Result{
+		ProxyName: "香港 01",
+		ProxyType: "SS",
+		Latency:   100 * time.Millisecond,
+	})
+	model.updateTableRows()
+
+	updated, quitCmd := model.Update(doneMsg{})
+	m := updated.(tuiModel)
+	if !m.quitting {
+		t.Fatal("无产物的自动推进轮测完应直接退出")
+	}
+	if _, ok := quitCmd().(tea.QuitMsg); !ok {
+		t.Fatalf("应返回退出命令: %T", quitCmd())
+	}
+}
+
 // 最后一轮（autoAdvance=false）测完保存后不自动退出，停界面等退出键。
 func TestLastRoundStaysAfterFinalSave(t *testing.T) {
 	dir := inRepoTempDir(t)

@@ -763,6 +763,11 @@ func (m *tuiModel) startFinalSave(quit bool) tea.Cmd {
 		return nil
 	}
 	if !m.autoImage && m.configSaver == nil {
+		// 没有产物可写：自动推进的轮直接进下一轮，否则照旧停在界面等退出键。
+		if m.autoAdvance {
+			m.quitting = true
+			return tea.Quit
+		}
 		return nil
 	}
 	m.autoImageDone = true

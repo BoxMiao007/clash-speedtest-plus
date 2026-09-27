@@ -2,6 +2,28 @@ package picker
 
 import "testing"
 
+// 每个选项行都要能报出自己的值：新增开关漏了 value 分支的话，
+// 界面上那行永远是空白（默认开着却看不到「开」）。
+func TestEveryOptionHasValue(t *testing.T) {
+	options := Options{
+		Filter: "f", Block: "b", Mode: "full", DownloadSize: "50", UploadSize: "20",
+		Concurrent: "4", Parallel: "6", Timeout: "5s", EarlyStop: "9", MaxLatency: "1s",
+		MaxPacketLoss: "100", MinDownload: "5", MinUpload: "2",
+		ImageSpeedOnly: true, NameFromConfig: true, NoImage: true,
+		OutputPath: "o.yaml", Rename: true, RenameTemplate: "t",
+		GistToken: "g", GistAddress: "ga", RepoToken: "r", RepoAddress: "ra",
+		RepoFilePath: "p", RepoBranch: "br", ServerURL: "s", UserAgent: "ua",
+	}
+	for _, row := range optionOrder {
+		if got := options.value(row.option); got == "" {
+			t.Fatalf("选项 %d 的值为空", row.option)
+		}
+	}
+	if options.value(OptionNameFromConfig) != "开" {
+		t.Fatalf("NameFromConfig 值 = %q, want 开", options.value(OptionNameFromConfig))
+	}
+}
+
 func TestOptionEnabledFollowsModeAndOutput(t *testing.T) {
 	fast := OptionState{Mode: "fast"}
 	if fast.Enabled(OptionDownloadSize) || fast.Enabled(OptionMinDownload) || fast.Enabled(OptionImageSpeedOnly) {

@@ -32,11 +32,12 @@ func TestSplitSubscriptionTextSplitsLinesAndDropsBlanks(t *testing.T) {
 }
 
 // 命令行 -c 传多个源时，按逗号拆开：每个源各自一轮，http 前缀标记为订阅源。
+// 订阅源的展示名去查询参数，token 不跟着进图顶来源行。
 func TestSplitConfigArg(t *testing.T) {
 	got := SplitConfigArg(" /opt/a.yaml , https://example.com/sub?token=x ,,b.yml,http://s2.com/c ")
 	want := []SourceSpec{
 		{Value: "/opt/a.yaml", DisplayName: "a.yaml"},
-		{Value: "https://example.com/sub?token=x", DisplayName: "https://example.com/sub?token=x", FromSubscription: true},
+		{Value: "https://example.com/sub?token=x", DisplayName: "https://example.com/sub", FromSubscription: true},
 		{Value: "b.yml", DisplayName: "b.yml"},
 		{Value: "http://s2.com/c", DisplayName: "http://s2.com/c", FromSubscription: true},
 	}
