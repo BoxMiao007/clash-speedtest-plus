@@ -26,6 +26,7 @@ const (
 	OptionMinDownload
 	OptionMinUpload
 	OptionImageSpeedOnly
+	OptionNameFromConfig
 	OptionNoImage
 	OptionOutputPath
 	OptionRename
@@ -71,6 +72,7 @@ var optionOrder = []optionRow{
 	{OptionMinDownload, "最低下载速度", kindText},
 	{OptionMinUpload, "最低上传速度", kindText},
 	{OptionImageSpeedOnly, "结果图只留有速度", kindBool},
+	{OptionNameFromConfig, "产物跟随文件名", kindBool},
 	{OptionNoImage, "关闭自动结果图", kindBool},
 	{OptionOutputPath, "输出路径", kindText},
 	{OptionRename, "重命名", kindBool},
@@ -293,6 +295,8 @@ func (o *Options) toggle(option Option) {
 	switch option {
 	case OptionImageSpeedOnly:
 		o.ImageSpeedOnly = !o.ImageSpeedOnly
+	case OptionNameFromConfig:
+		o.NameFromConfig = !o.NameFromConfig
 	case OptionNoImage:
 		o.NoImage = !o.NoImage
 	case OptionRename:

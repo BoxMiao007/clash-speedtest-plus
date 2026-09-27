@@ -36,6 +36,9 @@ type Options struct {
 	MinDownload    string
 	MinUpload      string
 	ImageSpeedOnly bool
+	// NameFromConfig 是「产物跟随文件名」开关：结果图与输出配置的文件名
+	// 带上所测配置的基名；纯订阅源没有可跟的文件名，保持默认命名。
+	NameFromConfig bool
 	NoImage        bool
 	OutputPath     string
 	Rename         bool
@@ -134,6 +137,7 @@ func New(session Session) Model {
 			Concurrent: "4", Parallel: "6", Timeout: "5s", MaxLatency: "1s",
 			MaxPacketLoss: "100", MinDownload: "5", MinUpload: "2", Rename: true,
 			ImageSpeedOnly: true,
+			NameFromConfig: true,
 		},
 	}
 }

@@ -114,10 +114,12 @@ type tuiModel struct {
 	imageSpeedOnly bool
 	imageDir       string
 	imageSource    string
-	savingImage    bool
-	statusText     string
-	statusUntil    time.Time
-	autoImageDone  bool
+	// imageNameBase 非空时结果图文件名用它替换默认前缀（产物跟随文件名）。
+	imageNameBase string
+	savingImage   bool
+	statusText    string
+	statusUntil   time.Time
+	autoImageDone bool
 	// quittingAfterSave 表示整轮已结束，第一次退出正在等本地产物。
 	quittingAfterSave bool
 	forceQuit         bool
@@ -283,6 +285,12 @@ func (m *tuiModel) SetImageExport(dir string, auto bool) {
 // SetImageSource 记录配置文件名或订阅地址，画在结果图顶部。
 func (m *tuiModel) SetImageSource(source string) {
 	m.imageSource = source
+}
+
+// SetImageNameBase 设置结果图文件名的基名前缀（产物跟随文件名）；
+// 空串保持默认 clash-speedtest 前缀。订阅源轮由调用方传空。
+func (m *tuiModel) SetImageNameBase(base string) {
+	m.imageNameBase = base
 }
 
 // SetConfigSaver 在整轮结束时写本地 yaml。gist/仓库上传由调用方自行后台处理。
@@ -883,12 +891,13 @@ func (m tuiModel) imageSpec(finished bool) output.ImageSpec {
 		summary = output.AppendImageSpeedCounts(summary, len(filtered.Rows), filtered.Invalid, filtered.Testing, untested)
 	}
 	return output.ImageSpec{
-		Mode:    m.mode,
-		Source:  m.imageSource,
-		Summary: summary,
-		Headers: m.baseHeaders,
-		Rows:    filtered.Rows,
-		Now:     time.Now(),
+		Mode:     m.mode,
+		Source:   m.imageSource,
+		Summary:  summary,
+		Headers:  m.baseHeaders,
+		Rows:     filtered.Rows,
+		Now:      time.Now(),
+		NameBase: m.imageNameBase,
 	}
 }
 

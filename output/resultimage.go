@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/faceair/clash-speedtest/speedtester"
 	"golang.org/x/image/font"
@@ -48,6 +49,8 @@ type ImageSpec struct {
 	Rows     []ImageRow
 	FontPath string
 	Now      time.Time
+	// NameBase 非空时结果图文件名用它替换默认前缀（产物跟随文件名）。
+	NameBase string
 }
 
 type imageFont struct {
@@ -814,20 +817,50 @@ func safeImageDir(dir string) (string, error) {
 }
 
 // ImageFileName 生成本地时间戳文件名；同一秒冲突则加 -1、-2。
-func ImageFileName(dir string, now time.Time) (string, error) {
+// nameBase 非空时替换默认的 clash-speedtest 前缀（「产物跟随文件名」），
+// 空串维持默认命名。
+func ImageFileName(dir string, now time.Time, nameBase string) (string, error) {
+	if nameBase == "" {
+		nameBase = "clash-speedtest"
+	}
 	base := now.Format("20060102-150405")
-	name := fmt.Sprintf("clash-speedtest-%s.png", base)
-	path := filepath.Join(dir, name)
+	path := filepath.Join(dir, fmt.Sprintf("%s-%s.png", nameBase, base))
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return path, nil
 	}
 	for i := 1; i < 1000; i++ {
-		candidate := filepath.Join(dir, fmt.Sprintf("clash-speedtest-%s-%d.png", base, i))
+		candidate := filepath.Join(dir, fmt.Sprintf("%s-%s-%d.png", nameBase, base, i))
 		if _, err := os.Stat(candidate); os.IsNotExist(err) {
 			return candidate, nil
 		}
 	}
 	return "", fmt.Errorf("too many result images in the same second")
+}
+
+// CleanNameBase 把源文件名收成产物名前缀：取基名、剥 yaml 扩展、
+// 剔除文件系统非法字符和空白边、超长截断到 40；收不出有效字符时回空串。
+func CleanNameBase(name string) string {
+	name = filepath.Base(name)
+	for _, ext := range []string{".yaml", ".yml"} {
+		name = strings.TrimSuffix(name, ext)
+	}
+	var b strings.Builder
+	for _, r := range name {
+		if unicode.IsControl(r) || strings.ContainsRune(`/\:*?"<>|`, r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	base := strings.TrimSpace(b.String())
+	if base == "." || base == ".." {
+		return ""
+	}
+	runes := []rune(base)
+	if len(runes) > 40 {
+		runes = runes[:40]
+		base = strings.TrimSpace(string(runes))
+	}
+	return base
 }
 
 // WriteResultImage 编码并写入 PNG。返回路径与缺字体警告（可为空）。
@@ -849,7 +882,7 @@ func WriteResultImage(dir string, spec ImageSpec) (string, string, error) {
 	if err != nil {
 		return "", warning, err
 	}
-	path, err := ImageFileName(dir, spec.Now)
+	path, err := ImageFileName(dir, spec.Now, spec.NameBase)
 	if err != nil {
 		return "", warning, err
 	}

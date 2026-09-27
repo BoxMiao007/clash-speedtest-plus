@@ -552,7 +552,8 @@ func TestHelpLineShowsRoundCountForMultipleSources(t *testing.T) {
 	}
 }
 
-func TestClickHelpZonesRunActions(t *testing.T) {	model := New(sessionFixture())
+func TestClickHelpZonesRunActions(t *testing.T) {
+	model := New(sessionFixture())
 	enter, quit := model.helpZones()
 	lo := model.computeLayout()
 

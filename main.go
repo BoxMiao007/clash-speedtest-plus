@@ -46,6 +46,7 @@ var (
 	parallel          = intFlag("p", "parallel", 1, "同时测试的节点数")
 	noImage           = flag.Bool("no-image", false, "关闭自动导出结果表图，仍可按 s 手动保存")
 	imageSpeedOnly    = flag.Bool("image-speed-only", false, "结果图只保留下载或上传速度大于 0 的行；快速模式会忽略")
+	nameFromConfig    = flag.Bool("name-from-config", false, "结果图与输出配置的文件名带上所测配置文件的基名；纯订阅源保持默认命名")
 	outputPath        = stringFlag("o", "output", "", "输出配置文件路径")
 	gistToken         = flag.String("gist-token", "", "用于更新 Gist 的 GitHub token")
 	gistAddress       = flag.String("gist-address", "", "要更新的 Gist 地址或 ID（文件名使用输出文件名）")
@@ -183,6 +184,7 @@ func applyPickerOptions(o picker.Options) {
 		*minUploadSpeed = v
 	}
 	*imageSpeedOnly = o.ImageSpeedOnly
+	*nameFromConfig = o.NameFromConfig
 	*noImage = o.NoImage
 	if o.OutputPath != "" {
 		*outputPath = o.OutputPath
@@ -288,6 +290,12 @@ func runSpeedTest(execDir string, src picker.SourceSpec, escapeToParent bool, ro
 		log.Fatalln("请指定配置文件")
 	}
 
+	// 「产物跟随文件名」只跟本地配置文件；订阅源没有可跟的名字，保持默认。
+	nameBase := ""
+	if *nameFromConfig && !src.FromSubscription {
+		nameBase = output.CleanNameBase(src.DisplayName)
+	}
+
 	// 相对路径的输出锚在程序目录，和选源、结果图一致。
 	*outputPath = picker.ResolveOutputPath(execDir, *outputPath)
 
@@ -377,6 +385,7 @@ func runSpeedTest(execDir string, src picker.SourceSpec, escapeToParent bool, ro
 		model.SetImageSource(src.DisplayName)
 		model.SetRoundLabel(roundLabel)
 		model.SetAutoAdvance(hasMore)
+		model.SetImageNameBase(nameBase)
 		if collectResults {
 			model.SetConfigSaver(func(done []*speedtester.Result) (string, error) {
 				sorted := output.SortResults(append([]*speedtester.Result(nil), done...), effectiveMode)
@@ -448,7 +457,7 @@ func runSpeedTest(execDir string, src picker.SourceSpec, escapeToParent bool, ro
 		fmt.Fprintf(os.Stderr, "%s\n", tui.FastImageSpeedIgnored())
 	}
 	if !*noImage {
-		exportNonInteractiveImage(execDir, src.DisplayName, results, effectiveMode, len(allProxies), imageSpeedFilterEnabled(effectiveMode))
+		exportNonInteractiveImage(execDir, src.DisplayName, nameBase, results, effectiveMode, len(allProxies), imageSpeedFilterEnabled(effectiveMode))
 	}
 	waitForUpload()
 	return roundDone
@@ -458,13 +467,13 @@ func imageSpeedFilterEnabled(mode speedtester.SpeedMode) bool {
 	return *imageSpeedOnly && !mode.IsFast()
 }
 
-func exportNonInteractiveImage(execDir, imageSource string, results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
+func exportNonInteractiveImage(execDir, imageSource, nameBase string, results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		writeNonInteractiveImage(ctx, execDir, imageSource, results, mode, total, speedOnly)
+		writeNonInteractiveImage(ctx, execDir, imageSource, nameBase, results, mode, total, speedOnly)
 	}()
 	select {
 	case <-done:
@@ -476,7 +485,7 @@ func exportNonInteractiveImage(execDir, imageSource string, results []*speedtest
 	}
 }
 
-func writeNonInteractiveImage(ctx context.Context, execDir, imageSource string, results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
+func writeNonInteractiveImage(ctx context.Context, execDir, imageSource, nameBase string, results []*speedtester.Result, mode speedtester.SpeedMode, total int, speedOnly bool) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -493,12 +502,13 @@ func writeNonInteractiveImage(ctx context.Context, execDir, imageSource string, 
 		summary = output.AppendImageSpeedCounts(summary, len(filtered.Rows), filtered.Invalid, filtered.Testing, untested)
 	}
 	spec := output.ImageSpec{
-		Mode:    mode,
-		Source:  imageSource,
-		Summary: summary,
-		Headers: output.GetHeaders(mode),
-		Rows:    filtered.Rows,
-		Now:     time.Now(),
+		Mode:     mode,
+		Source:   imageSource,
+		Summary:  summary,
+		Headers:  output.GetHeaders(mode),
+		Rows:     filtered.Rows,
+		Now:      time.Now(),
+		NameBase: nameBase,
 	}
 	path, warning, err := output.WriteResultImage(execDir, spec)
 	if err != nil {

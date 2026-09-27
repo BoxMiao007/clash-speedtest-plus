@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,6 +58,33 @@ func TestAutoAdvanceQuitsAfterFinalSave(t *testing.T) {
 	}
 	if _, ok := quitCmd().(tea.QuitMsg); !ok {
 		t.Fatalf("保存完成后应自动退出: %T", quitCmd())
+	}
+}
+
+// 「产物跟随文件名」开着时，测完自动保存的图名带基名前缀；
+// 订阅轮不设基名，图名保持默认。
+func TestAutoSaveImageNameFollowsBase(t *testing.T) {
+	dir := inRepoTempDir(t)
+	resultChannel := make(chan *speedtester.Result, 10)
+	model := NewTUIModel(speedtester.SpeedModeDownload, 1, resultChannel)
+	model.SetImageExport(dir, true)
+	model.SetImageNameBase("机场A")
+	model.results = append(model.results, &speedtester.Result{
+		ProxyName: "香港 01",
+		ProxyType: "SS",
+		Latency:   100 * time.Millisecond,
+	})
+	model.updateTableRows()
+
+	updated, cmd := model.Update(doneMsg{})
+	_ = updated.(tuiModel)
+	msg := cmd()
+	saved, ok := msg.(imageSavedMsg)
+	if !ok {
+		t.Fatalf("应完成自动保存: %#v", msg)
+	}
+	if !strings.Contains(saved.text, "已保存 "+filepath.Join(dir, "机场A-")) {
+		t.Fatalf("图名应带基名前缀: %q", saved.text)
 	}
 }
 

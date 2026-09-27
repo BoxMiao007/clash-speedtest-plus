@@ -70,7 +70,7 @@ func TestFetchNotClashErrorMentionsUAHint(t *testing.T) {
 	}
 }
 
-// 界面默认值照顾双击直用：并行 6，结果图只留有速度。
+// 界面默认值照顾双击直用：并行 6，结果图只留有速度，产物跟随文件名。
 func TestNewPicksInterfaceDefaults(t *testing.T) {
 	model := New(Session{})
 	if model.options.Parallel != "6" {
@@ -78,6 +78,9 @@ func TestNewPicksInterfaceDefaults(t *testing.T) {
 	}
 	if !model.options.ImageSpeedOnly {
 		t.Fatal("结果图只留有速度应默认开")
+	}
+	if !model.options.NameFromConfig {
+		t.Fatal("产物跟随文件名应默认开")
 	}
 }
 
