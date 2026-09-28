@@ -426,7 +426,7 @@ func (m *Model) clickConfig(lo layout, y int) {
 }
 
 // clickOption 点击选项行：聚焦该行。只有精准点中「<」「>」符号才增减，
-// 点值本身、标签或空白都只选中；开关行点哪儿都切换；灰行无操作。
+// 开关只在值文字处切换，热区左右各一格；其余位置只选中，灰行无操作。
 func (m *Model) clickOption(lo layout, y, x int) {
 	index := y - lo.paneY - 1 + m.optionScroll // 第 0 行是节标题
 	if index < 0 || index >= len(optionOrder) {
@@ -439,7 +439,15 @@ func (m *Model) clickOption(lo layout, y, x int) {
 	m.focus = focusOptions
 	m.optionIndex = index
 	if row.kind == kindBool {
-		m.adjustOption(1)
+		start := lo.optionsX + 2 + optionLabelWidth() + 2
+		end := start + lipgloss.Width(m.optionValue(row, true))
+		// 值被窄终端截掉时不能留下不可见的热区，容差也不能越过栏边界。
+		if lo.optionsW > 0 && (end > lo.optionsX+lo.optionsW || x >= lo.optionsX+lo.optionsW) {
+			return
+		}
+		if x >= start-1 && x <= end {
+			m.adjustOption(1)
+		}
 		return
 	}
 	left, right, ok := m.arrowSymbolX(lo, index)

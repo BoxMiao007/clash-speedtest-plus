@@ -921,7 +921,7 @@ func TestClickOptionSymbolAdjustsValueOnly(t *testing.T) {
 		t.Fatalf("点模式行 < 应切到快速: %q", got.options.Mode)
 	}
 
-	// 开关行点哪儿都切换（无符号）。
+	// 开关行点标签只选中，不翻转。
 	model = New(sessionFixture())
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
 	model = updated.(Model)
@@ -929,8 +929,130 @@ func TestClickOptionSymbolAdjustsValueOnly(t *testing.T) {
 	if got, _ := model.Update(tea.MouseMsg{
 		Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
 		X: lo.optionsX + 4, Y: lo.paneY + 1 + boolIndex,
-	}); !got.(Model).options.NoImage {
-		t.Fatal("开关行点击应切换")
+	}); got.(Model).options.NoImage {
+		t.Fatal("点开关标签不应翻转")
+	}
+}
+
+// 从实际画面量取值的位置，避免测试和命中实现共享坐标公式。
+func renderedOptionPosition(t *testing.T, model Model, label string) (int, int) {
+	t.Helper()
+	for y, line := range strings.Split(stripANSI(model.View()), "\n") {
+		if start := strings.Index(line, label); start >= 0 {
+			end := start + len(label)
+			value := strings.TrimLeft(line[end:], " ")
+			if value == "" {
+				t.Fatalf("选项 %s 的值未显示: %q", label, line)
+			}
+			return lipgloss.Width(line[:len(line)-len(value)]), y
+		}
+	}
+	t.Fatalf("未找到选项 %s", label)
+	return 0, 0
+}
+
+func TestClickBooleanOnlyAtRenderedValue(t *testing.T) {
+	for _, option := range []Option{OptionImageSpeedOnly, OptionNoImage, OptionRename} {
+		label := optionOrder[optionIndexFor(option)].label
+		for _, width := range []int{80, 120} {
+			for _, on := range []bool{false, true} {
+				for _, offset := range []int{-3, -2, -1, 0, 1, 2, 3, 5} {
+					t.Run(fmt.Sprintf("%s/宽%d/开%t/偏移%d", label, width, on, offset), func(t *testing.T) {
+						model := New(sessionFixture())
+						model.options.OutputPath = "out.yaml"
+						model.options.ImageSpeedOnly, model.options.NoImage, model.options.Rename = on, on, on
+						updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+						model = updated.(Model)
+						x, y := renderedOptionPosition(t, model, label)
+						want := model.Options()
+						// 「开/关」占两格；连同左右容差，命中偏移为 -1、0、1、2。
+						if offset >= -1 && offset <= 2 {
+							switch option {
+							case OptionImageSpeedOnly:
+								want.ImageSpeedOnly = !on
+							case OptionNoImage:
+								want.NoImage = !on
+							case OptionRename:
+								want.Rename = !on
+							}
+						}
+						updated, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: x + offset, Y: y})
+						got := updated.(Model)
+						if got.Options() != want {
+							t.Fatalf("点击开关的结果不符: 实际 %+v，期望 %+v", got.Options(), want)
+						}
+						if got.focus != focusOptions || got.optionIndex != optionIndexFor(option) {
+							t.Fatal("点击应选中该开关行")
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestBooleanKeyboardAndDisabledClicks(t *testing.T) {
+	for _, option := range []Option{OptionImageSpeedOnly, OptionNoImage, OptionRename} {
+		label := optionOrder[optionIndexFor(option)].label
+		t.Run(label, func(t *testing.T) {
+			model := New(sessionFixture())
+			model.options.OutputPath = "out.yaml"
+			updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+			model = updated.(Model)
+			x, y := renderedOptionPosition(t, model, label)
+			updated, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: x - 4, Y: y})
+			model = updated.(Model)
+			for _, key := range []tea.KeyMsg{{Type: tea.KeySpace}, {Type: tea.KeyRunes, Runes: []rune(" ")}, {Type: tea.KeyLeft}, {Type: tea.KeyRight}} {
+				before := model.Options()
+				updated, _ = model.Update(key)
+				model = updated.(Model)
+				if model.Options() == before {
+					t.Fatalf("按键 %s 应翻转开关", key.String())
+				}
+			}
+			if option == OptionNoImage {
+				return // 此开关没有不可用状态。
+			}
+			model.options.Mode = "fast"
+			model.options.OutputPath = ""
+			before := model.Options()
+			x, y = renderedOptionPosition(t, model, label)
+			updated, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: x, Y: y})
+			if updated.(Model).Options() != before {
+				t.Fatal("不可用的开关不应响应点击")
+			}
+		})
+	}
+}
+
+func TestBooleanClickAfterScrollingAndClipping(t *testing.T) {
+	model := New(sessionFixture())
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 12})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	model = updated.(Model)
+	for range optionIndexFor(OptionNoImage) {
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(Model)
+	}
+	x, y := renderedOptionPosition(t, model, "关闭自动结果图")
+	updated, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: x, Y: y})
+	model = updated.(Model)
+	if !model.Options().NoImage {
+		t.Fatal("滚动后点击可见开关应翻转")
+	}
+	updated, _ = model.Update(tea.WindowSizeMsg{Width: 42, Height: 12})
+	model = updated.(Model)
+	line := strings.Split(stripANSI(model.View()), "\n")[y]
+	if strings.Contains(line, "开") {
+		t.Fatalf("此窄屏用例应截掉开关值: %q", line)
+	}
+	before := model.Options()
+	for x := strings.Index(line, "│") + 1; x < 55; x++ {
+		updated, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: x, Y: y})
+		if updated.(Model).Options() != before {
+			t.Fatalf("被截掉的开关不应留有点击热区: x=%d", x)
+		}
 	}
 }
 
