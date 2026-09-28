@@ -176,8 +176,11 @@ func TestViewShowsNodeCountRightAligned(t *testing.T) {
 // filePaneLines 取出渲染结果中文件栏的可见行（剥颜色、截去选项栏）。
 func filePaneLines(t *testing.T, m Model) []string {
 	t.Helper()
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
-	m = updated.(Model)
+	// 保留调用方给定的窗口，让宽屏上限与窄屏压缩可分别验证。
+	if m.width == 0 {
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+		m = updated.(Model)
+	}
 	lo := m.computeLayout()
 	raw := strings.Split(stripANSI(m.View()), "\n")
 	lines := make([]string, 0, lo.paneH)
@@ -189,25 +192,67 @@ func filePaneLines(t *testing.T, m Model) []string {
 
 func TestViewWrapsLongNameAtNameColumn(t *testing.T) {
 	model := New(Session{Configs: []ConfigEntry{
-		{Name: strings.Repeat("a", 40) + ".yaml", Path: "/x", Selectable: true, Nodes: 3},
+		{Name: strings.Repeat("a", 48) + ".yaml", Path: "/x", Selectable: true, Nodes: 3},
 		{Name: "b.yaml", Path: "/y", Selectable: true, Nodes: 1},
 	}})
+	// 窗口要宽过「勾选符 + 序号 + 40 格名称 + 节点数」，否则窄终端会把名称列压到上限以下。
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	model = updated.(Model)
 	lines := filePaneLines(t, model)
 	// lines[0] 是节标题「▎ 文件」，之后是条目行。
 	if len(lines) < 4 || strings.Contains(lines[1], "…") {
 		t.Fatalf("长名称应折成两行且不截断: %q", lines)
 	}
-	// 名称列 32 显示格：首段 32 个 a，续行接剩下的 8 个 a 与 .yaml。
-	if !strings.Contains(lines[1], strings.Repeat("a", 32)) {
-		t.Fatalf("首段应填满 32 格: %q", lines[1])
+	// 名称列 40 显示格：首段 40 个 a，续行接剩下的 8 个 a 与 .yaml。
+	if !strings.Contains(lines[1], strings.Repeat("a", 40)) {
+		t.Fatalf("首段应填满 40 格: %q", lines[1])
 	}
-	indent := strings.Repeat(" ", 2+model.indexWidth())
-	if got := lines[2]; !strings.HasPrefix(got, indent+strings.Repeat("a", 8)) {
-		t.Fatalf("续行应对齐名称起点: %q", got)
+	// 续行与首行的名称起点同列。超宽终端的居中留白两行一样，不用单独扣。
+	nameByte := strings.Index(lines[1], strings.Repeat("a", 40))
+	// strings.Index 返回字节位置；勾选符是多字节字符，须按显示宽度比较缩进。
+	nameColumn := lipgloss.Width(lines[1][:nameByte])
+	want := strings.Repeat(" ", nameColumn) + strings.Repeat("a", 8) + ".yaml"
+	got := strings.TrimRight(lines[2], " ")
+	if got != want {
+		t.Fatalf("续行应对齐名称起点 %d:\n实际 %q\n期望 %q", nameColumn, got, want)
 	}
 	// 节点数只在首行末尾。
 	if !strings.HasSuffix(strings.TrimRight(lines[1], " "), "3") {
 		t.Fatalf("节点数应在首行末尾: %q", lines[1])
+	}
+}
+
+func TestNameColumnDisplayWidthBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, first, rest string
+	}{
+		{strings.Repeat("a", 34) + ".yaml", strings.Repeat("a", 34) + ".yaml", ""},
+		{strings.Repeat("a", 35) + ".yaml", strings.Repeat("a", 35) + ".yaml", ""},
+		{strings.Repeat("a", 36) + ".yaml", strings.Repeat("a", 36) + ".yam", "l"},
+		{strings.Repeat("中", 17) + "a.yaml", strings.Repeat("中", 17) + "a.yaml", ""},
+		{strings.Repeat("中", 20) + ".yaml", strings.Repeat("中", 20), ".yaml"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := New(Session{Configs: []ConfigEntry{
+				{Name: tc.name, Path: "/first", Selectable: true, Nodes: 37},
+				{Name: "next.yaml", Path: "/next", Selectable: true, Nodes: 1},
+			}})
+			updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+			lines := filePaneLines(t, updated.(Model))
+			if !strings.HasPrefix(lines[1], "○ 1. "+tc.first+"  37") {
+				t.Fatalf("首行内容或节点数位置错误: %q", lines[1])
+			}
+			next := 2
+			if tc.rest != "" {
+				if got := strings.TrimRight(lines[2], " "); got != "     "+tc.rest {
+					t.Fatalf("续行不符: %q", got)
+				}
+				next++
+			}
+			if !strings.Contains(lines[next], "2. next.yaml") {
+				t.Fatalf("下一个条目的起始行不符: %q", lines[next])
+			}
+		})
 	}
 }
 

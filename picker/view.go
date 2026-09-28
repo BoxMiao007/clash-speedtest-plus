@@ -17,9 +17,9 @@ const (
 	// 终端超过这个宽度时内容不再拉宽，整块居中，长行不再稀疏。
 	maxContentWidth = 100
 
-	// 名称列固定宽度上限：到 32 个显示格（中文按 2 格）自动折行。
-	// 序号列与节点数列不占这 32 格。
-	nameColumnMaxWidth = 32
+	// 名称列固定宽度上限：到 40 个显示格（中文按 2 格）自动折行。
+	// 序号列与节点数列不占这 40 格。
+	nameColumnMaxWidth = 40
 )
 
 // layout 是一次渲染的分区位置。View 按它画，鼠标和滚轮按它定位，
@@ -50,7 +50,7 @@ func (m Model) computeLayout() layout {
 	if len(m.configs) == 0 {
 		longest = lipgloss.Width("（程序目录里没有可勾选的 .yaml）")
 	}
-	// 名称列最多 32 显示格，超出的部分靠折行而不是撑栏；名称之外依次是
+	// 名称列最多 40 显示格，超出的部分靠折行而不是撑栏；名称之外依次是
 	// 勾选符、序号列、节点数列，整栏宽度最多占一半屏宽。
 	nameW := min(longest, nameColumnMaxWidth)
 	filesW := 2 + m.indexWidth() + nameW
