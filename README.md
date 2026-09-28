@@ -1,6 +1,6 @@
 # Clash Speedtest Plus
 
-本仓库是 [faceair/clash-speedtest](https://github.com/faceair/clash-speedtest) 的下游，协议仍为 [GPL-3.0](LICENSE)。
+本仓库是 [faceair/clash-speedtest](https://github.com/faceair/clash-speedtest) 的下游，协议仍为 [GPL-3.0](LICENSE)。本项目使用 Vibe Coding 开发。
 
 基于 Clash/Mihomo 核心测代理节点：延迟、抖动、丢包、下载和上传。不依赖另外的 Clash/Mihomo 进程。不带参数打开选源界面，带参数走命令行。测完可以自动导出结果表图，把过筛节点写成 Clash 配置，再上传到 Gist 或 GitHub 仓库。
 
