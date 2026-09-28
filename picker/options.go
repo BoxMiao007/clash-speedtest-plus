@@ -85,6 +85,31 @@ var optionOrder = []optionRow{
 	{OptionUA, "拉取订阅 UA", kindText},
 }
 
+// 界面默认值照顾双击直用：并行 6 加速整轮测速，结果图只留有速度的行。
+// 初次打开与切模式共用这一份默认值，命令行默认值不受影响。
+func defaultOptions() Options {
+	return Options{
+		Filter: ".+", Mode: "download", DownloadSize: "50", UploadSize: "20",
+		Concurrent: "4", Parallel: "6", Timeout: "5s", MaxLatency: "1s",
+		MaxPacketLoss: "100", MinDownload: "5", MinUpload: "2", Rename: true,
+		ImageSpeedOnly: true,
+	}
+}
+
+func (o *Options) changeMode(delta int) {
+	o.Mode = cycleMode(o.Mode, delta)
+	defaults := defaultOptions()
+	// 不按可用状态筛选：灰行也重置，切回其他模式时不恢复旧的调整。
+	for _, row := range optionOrder {
+		if optionAdjustable(row.option) {
+			o.setText(row.option, defaults.value(row.option))
+		}
+	}
+	o.ImageSpeedOnly = defaults.ImageSpeedOnly
+	o.NoImage = defaults.NoImage
+	o.Rename = defaults.Rename
+}
+
 // OptionState 决定哪些项可用。Mode 为 fast、download 或 full。
 type OptionState struct {
 	Mode       string

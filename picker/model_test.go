@@ -1056,6 +1056,91 @@ func TestBooleanClickAfterScrollingAndClipping(t *testing.T) {
 	}
 }
 
+func TestModeChangeResetsAdjustableOptions(t *testing.T) {
+	for _, mode := range []struct{ current, left, right string }{
+		{"download", "fast", "full"},
+		{"full", "download", "fast"},
+		{"fast", "full", "download"},
+	} {
+		for _, input := range []string{"左键", "右键", "空格键", "空格字符", "点击左箭头", "点击右箭头"} {
+			for _, output := range []string{"", "out.yaml"} {
+				t.Run(mode.current+"/"+input+"/输出"+output, func(t *testing.T) {
+					model := New(sessionFixture())
+					updated, _ := model.Update(tea.KeyMsg{Type: tea.KeySpace})
+					model = updated.(Model)
+					model.address = "https://example.com/subscription"
+					model.options = Options{
+						Mode: mode.current, Filter: "香港", Block: "到期",
+						DownloadSize: "80", UploadSize: "35", Concurrent: "8", Parallel: "9",
+						Timeout: "10s", EarlyStop: "30", MaxLatency: "500ms", MaxPacketLoss: "20",
+						MinDownload: "10", MinUpload: "6", ImageSpeedOnly: false, NoImage: true, Rename: false,
+						OutputPath: output, RenameTemplate: "自定义名称",
+						GistToken: "测试占位非凭据", GistAddress: "https://example.com/gist",
+						RepoToken: "测试占位非凭据", RepoAddress: "https://example.com/repo",
+						RepoFilePath: "configs/result.yaml", RepoBranch: "测试分支",
+						ServerURL: "https://example.com/speed", UserAgent: "测试UA",
+					}
+					updated, _ = model.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+					model = updated.(Model)
+					x, y := renderedOptionPosition(t, model, "测速模式")
+					before := model.Options()
+					updated, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: x - 4, Y: y})
+					model = updated.(Model)
+					if model.Options() != before {
+						t.Fatal("只选中模式行不应重置选项")
+					}
+					wantMode := mode.right
+					var msg tea.Msg
+					switch input {
+					case "左键":
+						wantMode = mode.left
+						msg = tea.KeyMsg{Type: tea.KeyLeft}
+					case "右键":
+						msg = tea.KeyMsg{Type: tea.KeyRight}
+					case "空格键":
+						msg = tea.KeyMsg{Type: tea.KeySpace}
+					case "空格字符":
+						msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")}
+					case "点击左箭头":
+						wantMode = mode.left
+						msg = tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: x, Y: y}
+					case "点击右箭头":
+						line := strings.Split(stripANSI(model.View()), "\n")[y]
+						end := strings.LastIndex(line, ">")
+						if end < 0 {
+							t.Fatal("模式行未显示右箭头")
+						}
+						msg = tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: lipgloss.Width(line[:end]), Y: y}
+					}
+					want := Options{
+						Mode: wantMode, Filter: "香港", Block: "到期",
+						DownloadSize: "50", UploadSize: "20", Concurrent: "4", Parallel: "6",
+						Timeout: "5s", EarlyStop: "", MaxLatency: "1s", MaxPacketLoss: "100",
+						MinDownload: "5", MinUpload: "2", ImageSpeedOnly: true, NoImage: false, Rename: true,
+						OutputPath: output, RenameTemplate: "自定义名称",
+						GistToken: "测试占位非凭据", GistAddress: "https://example.com/gist",
+						RepoToken: "测试占位非凭据", RepoAddress: "https://example.com/repo",
+						RepoFilePath: "configs/result.yaml", RepoBranch: "测试分支",
+						ServerURL: "https://example.com/speed", UserAgent: "测试UA",
+					}
+					sources := model.SourceList()
+					updated, _ = model.Update(msg)
+					got := updated.(Model)
+					if got.Options() != want {
+						t.Fatalf("切模式后选项不符:\n实际 %+v\n期望 %+v", got.Options(), want)
+					}
+					if !reflect.DeepEqual(got.SourceList(), sources) || got.address != model.address {
+						t.Fatal("切模式不应改变勾选配置或订阅地址")
+					}
+					if got.focus != model.focus || got.optionIndex != model.optionIndex {
+						t.Fatal("切模式不应移动焦点")
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestFetchingLocksMouseClicks(t *testing.T) {
 	model := New(sessionFixture())
 	model.fetching = true

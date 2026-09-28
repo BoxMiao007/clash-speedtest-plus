@@ -127,14 +127,7 @@ func New(session Session) Model {
 		checked: checked,
 		focus:   focus,
 		session: session,
-		// 界面默认值照顾双击直用的场景：并行 6 加速整轮测速，
-		// 结果图只留有速度的行，减少空行。命令行参数默认值不受影响。
-		options: Options{
-			Filter: ".+", Mode: "download", DownloadSize: "50", UploadSize: "20",
-			Concurrent: "4", Parallel: "6", Timeout: "5s", MaxLatency: "1s",
-			MaxPacketLoss: "100", MinDownload: "5", MinUpload: "2", Rename: true,
-			ImageSpeedOnly: true,
-		},
+		options: defaultOptions(),
 	}
 }
 
@@ -361,7 +354,7 @@ func (m *Model) adjustOption(delta int) {
 	}
 	switch row.kind {
 	case kindMode:
-		m.options.Mode = cycleMode(m.options.Mode, delta)
+		m.options.changeMode(delta)
 	case kindBool:
 		m.options.toggle(row.option)
 	case kindText:
@@ -525,7 +518,7 @@ func (m *Model) pressOption() {
 	case kindBool:
 		m.options.toggle(row.option)
 	case kindMode:
-		m.options.Mode = cycleMode(m.options.Mode, 1)
+		m.options.changeMode(1)
 	}
 }
 
