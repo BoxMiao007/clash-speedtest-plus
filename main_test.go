@@ -235,7 +235,7 @@ func TestCompletedOutputPathFeedsExportName(t *testing.T) {
 }
 
 // 每轮最终产物路径由输出模式决定：自定义模式与 v2.3.0 完全一致（回归钉住），
-// 「默认当前路径」自动命名——本地源「基名-导出.yaml」，订阅轮「导出-时间戳」。
+// 「当前目录下」自动命名——本地源「基名-导出.yaml」，订阅轮「导出-时间戳」。
 func TestRoundOutputPathFollowsOutputMode(t *testing.T) {
 	now := time.Date(2026, 9, 27, 15, 30, 1, 0, time.Local)
 	execDir := filepath.Join("/", "opt", "clash-speedtest-plus")
@@ -280,7 +280,7 @@ func TestRoundOutputPathFollowsOutputMode(t *testing.T) {
 }
 
 // applyPickerOptions 按输出模式三态解释输出设置（见 CONTEXT.md「输出模式」）：
-// 自定义写词干，默认当前路径开自动命名，关闭清空——按 Esc 重跑时关掉输出
+// 自定义写词干，当前目录下开自动命名，关闭清空——按 Esc 重跑时关掉输出
 // 必须真的关掉，不能沿用上一轮的值。
 func TestApplyPickerOptionsInterpretsOutputMode(t *testing.T) {
 	origOutputPath, origAuto := outputPath, outputAuto
@@ -295,7 +295,7 @@ func TestApplyPickerOptionsInterpretsOutputMode(t *testing.T) {
 
 	applyPickerOptions(picker.Options{OutputMode: picker.OutputModeDefaultPath})
 	if *outputPath != "" || !outputAuto {
-		t.Fatalf("默认当前路径态应清词干开自动: path=%q auto=%v", *outputPath, outputAuto)
+		t.Fatalf("当前目录下态应清词干开自动: path=%q auto=%v", *outputPath, outputAuto)
 	}
 
 	applyPickerOptions(picker.Options{OutputMode: picker.OutputModeClosed})
