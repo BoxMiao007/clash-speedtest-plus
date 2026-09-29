@@ -359,8 +359,9 @@ func TestHelpPutsCommonFlagsFirstAndUsesMegabytes(t *testing.T) {
 }
 
 // writeMergedExport 的触发条件（CONTEXT.md「合并导出」词条、ADR-0014）：
-// 输出模式非关闭、队列正常结束、至少两轮正常测完。关闭态、单轮、Esc 中断、
-// Ctrl+C 退出全部、保存失败、准备错误都不写。
+// 输出模式非关闭、队列正常测完（实际测完轮数等于期望轮数）、至少两轮。
+// 关闭态、单轮、Esc 中断、保存失败、准备错误都不写；中途 q/Ctrl+C 留下没
+// 测完的轮（轮数对不上期望）不写；全部测完后的 q/Ctrl+C 只是离开方式，照写。
 func TestWriteMergedExportTriggers(t *testing.T) {
 	now := time.Date(2026, 9, 27, 15, 30, 1, 0, time.Local)
 	roundA := []map[string]any{{"name": "A", "server": "1.1.1.1", "type": "ss"}}
@@ -371,21 +372,23 @@ func TestWriteMergedExportTriggers(t *testing.T) {
 		result     tui.QueueResult
 		outputOpen bool
 		rounds     [][]map[string]any
+		expected   int
 		wantFile   bool
 	}{
-		{"输出开启两轮正常结束", tui.QueueResult{}, true, twoRounds, true},
-		{"输出关闭不写", tui.QueueResult{}, false, twoRounds, false},
-		{"单轮不写", tui.QueueResult{}, true, [][]map[string]any{roundA}, false},
-		{"没有轮不写", tui.QueueResult{}, true, nil, false},
-		{"Esc 中断不写", tui.QueueResult{Escaped: true}, true, twoRounds, false},
-		{"Ctrl+C 退出全部不写", tui.QueueResult{ExitAll: true}, true, twoRounds, false},
-		{"保存失败不写", tui.QueueResult{Failed: true}, true, twoRounds, false},
-		{"准备错误不写", tui.QueueResult{SetupErr: errors.New("加载节点失败")}, true, twoRounds, false},
+		{"输出开启两轮正常结束", tui.QueueResult{}, true, twoRounds, 2, true},
+		{"输出关闭不写", tui.QueueResult{}, false, twoRounds, 2, false},
+		{"单轮不写", tui.QueueResult{}, true, [][]map[string]any{roundA}, 1, false},
+		{"没有轮不写", tui.QueueResult{}, true, nil, 0, false},
+		{"Esc 中断不写", tui.QueueResult{Escaped: true}, true, twoRounds, 2, false},
+		{"全部测完后 Ctrl+C 照写", tui.QueueResult{ExitAll: true}, true, twoRounds, 2, true},
+		{"中途 Ctrl+C 留缺口不写", tui.QueueResult{ExitAll: true}, true, [][]map[string]any{roundA}, 2, false},
+		{"保存失败不写", tui.QueueResult{Failed: true}, true, twoRounds, 2, false},
+		{"准备错误不写", tui.QueueResult{SetupErr: errors.New("加载节点失败")}, true, twoRounds, 2, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			path := writeMergedExport(tc.result, tc.outputOpen, dir, tc.rounds, now)
+			path := writeMergedExport(tc.result, tc.outputOpen, dir, tc.rounds, tc.expected, now)
 			entries, err := os.ReadDir(dir)
 			if err != nil {
 				t.Fatalf("读临时目录失败: %v", err)
@@ -447,7 +450,7 @@ func TestWriteMergedExportUnitesRoundsWithRoundCaliber(t *testing.T) {
 	}
 
 	rounds := [][]map[string]any{buildProxies(results1, filter), buildProxies(results2, filter)}
-	mergedPath := writeMergedExport(tui.QueueResult{}, true, dir, rounds, now)
+	mergedPath := writeMergedExport(tui.QueueResult{}, true, dir, rounds, len(rounds), now)
 	wantPath := filepath.Join(dir, "导出-合并-20260927-153001.yaml")
 	if mergedPath != wantPath {
 		t.Fatalf("合并文件路径 = %q，期望 %q", mergedPath, wantPath)

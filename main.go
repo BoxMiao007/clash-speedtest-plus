@@ -331,8 +331,10 @@ func runSourceQueue(sources []picker.SourceSpec, execDir string, escapeToParent 
 			completed = append(completed, proxies)
 		}
 		// 逐轮同步跑完且没有致命退出才到这里：非交互没有 Esc/退出全部语义，
-		// 等价队列正常结束，按「合并导出」条件写（ADR-0014）。
-		if path := writeMergedExport(tui.QueueResult{}, outputOpen, execDir, completed, time.Now()); path != "" {
+		// 中途失败都走 log.Fatalf / os.Exit，能走到这里即全部轮正常测完——
+		// 零值 QueueResult 只当「正常结束」哨兵，不表达退出意图；期望轮数取
+		// 实际轮数，按「合并导出」条件写（ADR-0014）。
+		if path := writeMergedExport(tui.QueueResult{}, outputOpen, execDir, completed, len(completed), time.Now()); path != "" {
 			fmt.Fprintf(os.Stderr, "已保存合并配置: %s\n", path)
 		}
 	}
@@ -480,6 +482,7 @@ type queueRunner struct {
 	current            *speedtester.SpeedTester // 最近一轮启动的测试，作废时停掉
 	mergeMu            sync.Mutex
 	mergedRounds       [][]map[string]any // 正常测完轮的过筛节点，按完成顺序，供合并导出
+	skippedSources     int                // 0 节点被跳过的源数：期望轮数 = 源总数 − 跳过数
 }
 
 // recordMergedRound 收下一轮过筛后的节点列表（与该轮写盘同一构建），供队列
@@ -489,6 +492,14 @@ func (r *queueRunner) recordMergedRound(proxies []map[string]any) {
 	r.mergeMu.Lock()
 	defer r.mergeMu.Unlock()
 	r.mergedRounds = append(r.mergedRounds, proxies)
+}
+
+// expectedRounds 返回队列全部正常测完时应有的轮数：源总数减去 0 节点被跳过
+// 的源（ADR-0014 的「≥2 轮」按实际测完的轮计）。
+func (r *queueRunner) expectedRounds() int {
+	r.mergeMu.Lock()
+	defer r.mergeMu.Unlock()
+	return len(r.sources) - r.skippedSources
 }
 
 // collectedRounds 返回已收集的各轮过筛节点（按完成顺序）。
@@ -533,6 +544,9 @@ func (r *queueRunner) prepare(index int) (tui.QueueRound, bool, error) {
 			who = src.DisplayName
 		}
 		fmt.Fprintf(os.Stderr, "%s：解析出 0 个节点，跳过这一轮\n", who)
+		r.mergeMu.Lock()
+		r.skippedSources++
+		r.mergeMu.Unlock()
 		return nil, true, nil
 	}
 	if r.voided.Load() {
@@ -689,9 +703,11 @@ func runQueueProgram(sources []picker.SourceSpec, execDir, originalOutputPath st
 	for _, status := range result.Statuses {
 		fmt.Fprintf(os.Stderr, "%s\n", status)
 	}
-	// 「合并导出」先于退出处理判断：Esc 回选源、Ctrl+C 退出全部、保存失败、
-	// 准备错误都算队列未正常结束，不写（CONTEXT.md「合并导出」、ADR-0014）。
-	if path := writeMergedExport(result, runner.outputOpen, execDir, runner.collectedRounds(), time.Now()); path != "" {
+	// 「合并导出」先于退出处理判断：Esc 回选源、保存失败、准备错误都算队列
+	// 未正常结束，不写；q/Ctrl+C 只是离开方式，不一票否决——全部轮测完后的
+	// 退出照写，中途退出留下没测完的轮，实际轮数对不上期望自然不写
+	//（CONTEXT.md「合并导出」、ADR-0014）。
+	if path := writeMergedExport(result, runner.outputOpen, execDir, runner.collectedRounds(), runner.expectedRounds(), time.Now()); path != "" {
 		fmt.Fprintf(os.Stderr, "已保存合并配置: %s\n", path)
 	}
 	if result.SetupErr != nil {
@@ -841,17 +857,23 @@ func writeConfigFile(path string, proxies []map[string]any) error {
 }
 
 // writeMergedExport 按「合并导出」写合并文件（CONTEXT.md「合并导出」词条、
-// ADR-0014）：输出模式非关闭、队列正常结束（无 Esc 回选源、无 Ctrl+C 退出
-// 全部、无保存失败、无准备错误）、且至少两轮正常测完才写。内容是各轮过筛
-// 节点（与各轮写盘同一构建）按完成顺序求并集，重名节点跳过、保留先完成轮
-// 的；文件名「导出-合并-时间戳」不带产物序号，也不参与 Gist/仓库上传。
-// 非交互路径没有中断语义，传零值 QueueResult 即视为正常结束。返回写入路径；
-// 没触发或写失败返回空串，写失败只报 stderr 不影响退出码。
-func writeMergedExport(result tui.QueueResult, outputOpen bool, execDir string, rounds [][]map[string]any, now time.Time) string {
-	if result.Escaped || result.ExitAll || result.Failed || result.SetupErr != nil {
+// ADR-0014）：输出模式非关闭、队列正常测完才写——无 Esc 回选源、无保存失败、
+// 无准备错误，且实际测完写盘的轮数恰好等于期望轮数（源总数减 0 节点跳过的
+// 源）。q/Ctrl+C 只是离开方式，不一票否决：全部轮测完后的退出照写，中途
+// 退出留下没测完的轮，轮数对不上自然不写。内容是各轮过筛节点（与各轮写盘
+// 同一构建）按完成顺序求并集，重名节点跳过、保留先完成轮的；文件名
+// 「导出-合并-时间戳」不带产物序号，也不参与 Gist/仓库上传。写失败只在
+// stderr 提示、不影响退出码：合并文件是测速之外的额外产物，不拖垮主流程。
+// 非交互路径没有中断语义：中途失败都是 os.Exit，能走到调用处即全部轮正常
+// 测完，传零值 QueueResult 当「正常结束」哨兵并取 len(rounds) 为期望轮数。
+// 返回写入路径；没触发或写失败返回空串。
+func writeMergedExport(result tui.QueueResult, outputOpen bool, execDir string, rounds [][]map[string]any, expectedRounds int, now time.Time) string {
+	if result.Escaped || result.Failed || result.SetupErr != nil {
 		return ""
 	}
-	if !outputOpen || len(rounds) < 2 {
+	// 「队列正常测完」以实际数据为准：正常测完并写盘的轮数必须恰好等于期望
+	// 轮数，差着数说明有轮没测完或被作废（中途退出），不写（ADR-0014）。
+	if !outputOpen || len(rounds) != expectedRounds || len(rounds) < 2 {
 		return ""
 	}
 	seen := make(map[string]bool)
