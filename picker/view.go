@@ -559,7 +559,7 @@ func selectedLine(plain string, width int) string {
 }
 
 // outputSuffixHint 是聚焦输出路径行时该灰显的缺省后缀段；自定义态没打字
-// 或后缀已写全时为空，关闭/默认当前路径态没有编辑中的词干也不显示。只有
+// 或后缀已写全时为空，关闭/当前目录下态没有编辑中的词干也不显示。只有
 // 输出路径一行有灰显提示，其余文本行原样。
 func (m Model) outputSuffixHint(row optionRow) string {
 	if row.option != OptionOutputPath {
@@ -576,7 +576,7 @@ func (m Model) outputSuffixHint(row optionRow) string {
 }
 
 // outputModeValue 给出输出模式行的显示值（见 CONTEXT.md「输出模式」词条）：
-// 关闭与默认当前路径带 < > 提示左右键和点击可循环；自定义态显示词干，
+// 关闭与当前目录下带 < > 提示左右键和点击可循环；自定义态显示词干，
 // 没打字时提示态名并可接着输入。
 func (m Model) outputModeValue(focused bool) string {
 	switch m.options.OutputMode {
@@ -596,14 +596,14 @@ func (m Model) outputModeValue(focused bool) string {
 		}
 		return value
 	case OutputModeDefaultPath:
-		return "< 默认当前路径 >"
+		return "< 当前目录下 >"
 	default:
 		return "< 关闭 >"
 	}
 }
 
 // outputModePlaceholder 报告输出模式行的值是不是占位提示：关闭态、
-// 自定义态还没打字时灰显；默认当前路径与已填词干按普通值渲染。
+// 自定义态还没打字时灰显；当前目录下与已填词干按普通值渲染。
 func (m Model) outputModePlaceholder() bool {
 	switch m.options.OutputMode {
 	case OutputModeClosed:

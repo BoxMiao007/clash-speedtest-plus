@@ -73,6 +73,16 @@ type QueueRound interface {
 	Quitting() bool
 }
 
+// enableRoundSwitchHint 给就位的轮视图亮出轮间切换键位：只有壳的真实视图
+// （tuiModel）承接得到，其他实现原样返回。
+func enableRoundSwitchHint(view QueueRound) QueueRound {
+	if m, ok := view.(tuiModel); ok {
+		m.SetRoundSwitchHint(true)
+		return m
+	}
+	return view
+}
+
 // QueueResult 是队列程序结束后的结局，main 据此决定回选源、退出码与 stderr 收尾。
 type QueueResult struct {
 	// Escaped 为真表示按了 Esc：中断本轮＋作废剩余＋回选源界面。
@@ -119,6 +129,11 @@ func NewQueueModel(
 	total int,
 	voided *atomic.Bool,
 ) QueueModel {
+	// 多轮队列从第一个轮视图就位起就亮出轮间切换提示：壳启动时已知总轮
+	// 数（总源数），不必等第二个视图；单轮队列键位无效，维持不标注。
+	if total > 1 {
+		first = enableRoundSwitchHint(first)
+	}
 	return QueueModel{
 		rounds:     []QueueRound{first},
 		active:     0,
@@ -301,14 +316,10 @@ func (q QueueModel) handleNextRound(msg nextRoundMsg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, tagRoundCmd(sizeCmd, newIdx))
 		}
 	}
-	// 第二个轮视图就位后，帮助行亮出轮间切换键位（仅多轮）。
-	if len(q.rounds) > 1 {
-		for i := range q.rounds {
-			if m, ok := q.rounds[i].(tuiModel); ok {
-				m.SetRoundSwitchHint(true)
-				q.rounds[i] = m
-			}
-		}
+	// 新就位的轮视图也要亮出轮间切换键位：多轮队列每个视图就位即启用
+	// （首轮在壳启动时已启用），单轮队列不标注。
+	if q.total > 1 {
+		q.rounds[newIdx] = enableRoundSwitchHint(q.rounds[newIdx])
 	}
 	// 后续轮的等待命令（结果、进度、提前结束）在这里启动。
 	if initCmd := msg.view.Init(); initCmd != nil {

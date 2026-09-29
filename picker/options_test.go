@@ -70,11 +70,11 @@ func TestOptionEnabledFollowsModeAndOutput(t *testing.T) {
 		t.Fatal("full mode disabled upload options")
 	}
 
-	// 输出开关跟着输出模式走（见 CONTEXT.md「输出模式」）：默认当前路径
+	// 输出开关跟着输出模式走（见 CONTEXT.md「输出模式」）：当前目录下
 	// 恒开（自动命名不需要词干），自定义要有非空词干，关闭不开。
 	auto := OptionState{Mode: "download", OutputMode: OutputModeDefaultPath}
 	if !auto.Enabled(OptionRename) || !auto.Enabled(OptionGistAddress) || !auto.Enabled(OptionRepoFilePath) {
-		t.Fatal("默认当前路径态应让重命名与上传可用")
+		t.Fatal("当前目录下态应让重命名与上传可用")
 	}
 	emptyCustom := OptionState{Mode: "download", OutputMode: OutputModeCustom, OutputPath: "  "}
 	if emptyCustom.Enabled(OptionRename) || emptyCustom.Enabled(OptionRepoToken) {

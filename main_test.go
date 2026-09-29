@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -235,7 +236,7 @@ func TestCompletedOutputPathFeedsExportName(t *testing.T) {
 }
 
 // 每轮最终产物路径由输出模式决定：自定义模式与 v2.3.0 完全一致（回归钉住），
-// 「默认当前路径」自动命名——本地源「基名-导出.yaml」，订阅轮「导出-时间戳」。
+// 「当前目录下」自动命名——本地源「基名-导出.yaml」，订阅轮「导出-时间戳」。
 func TestRoundOutputPathFollowsOutputMode(t *testing.T) {
 	now := time.Date(2026, 9, 27, 15, 30, 1, 0, time.Local)
 	execDir := filepath.Join("/", "opt", "clash-speedtest-plus")
@@ -280,7 +281,7 @@ func TestRoundOutputPathFollowsOutputMode(t *testing.T) {
 }
 
 // applyPickerOptions 按输出模式三态解释输出设置（见 CONTEXT.md「输出模式」）：
-// 自定义写词干，默认当前路径开自动命名，关闭清空——按 Esc 重跑时关掉输出
+// 自定义写词干，当前目录下开自动命名，关闭清空——按 Esc 重跑时关掉输出
 // 必须真的关掉，不能沿用上一轮的值。
 func TestApplyPickerOptionsInterpretsOutputMode(t *testing.T) {
 	origOutputPath, origAuto := outputPath, outputAuto
@@ -295,7 +296,7 @@ func TestApplyPickerOptionsInterpretsOutputMode(t *testing.T) {
 
 	applyPickerOptions(picker.Options{OutputMode: picker.OutputModeDefaultPath})
 	if *outputPath != "" || !outputAuto {
-		t.Fatalf("默认当前路径态应清词干开自动: path=%q auto=%v", *outputPath, outputAuto)
+		t.Fatalf("当前目录下态应清词干开自动: path=%q auto=%v", *outputPath, outputAuto)
 	}
 
 	applyPickerOptions(picker.Options{OutputMode: picker.OutputModeClosed})
@@ -498,4 +499,178 @@ func TestWriteMergedExportUnitesRoundsWithRoundCaliber(t *testing.T) {
 	// 合并文件：过筛掉「慢」，重名「快」保留先完成轮的，并集按完成顺序排列。
 	assertProxies("合并", readProxies(mergedPath),
 		[]parsedProxy{{Name: "快", Server: "1.1.1.1"}, {Name: "新", Server: "4.4.4.4"}})
+}
+
+// 写盘产物的解析视图：只声明外部可见的 yaml 字段，断言不依赖写盘实现的结构。
+type writtenProfile struct {
+	MixedPort   int              `yaml:"mixed-port"`
+	Proxies     []map[string]any `yaml:"proxies"`
+	ProxyGroups []struct {
+		Name     string   `yaml:"name"`
+		Type     string   `yaml:"type"`
+		Proxies  []string `yaml:"proxies"`
+		URL      string   `yaml:"url"`
+		Interval int      `yaml:"interval"`
+	} `yaml:"proxy-groups"`
+	Rules []string `yaml:"rules"`
+}
+
+// writeAndParseProfile 走真实写盘再解析回来，供导出形态断言共用。
+func writeAndParseProfile(t *testing.T, proxies []map[string]any) ([]byte, writtenProfile) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "out.yaml")
+	if err := writeConfigFile(path, proxies); err != nil {
+		t.Fatalf("写盘失败: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读盘失败: %v", err)
+	}
+	var profile writtenProfile
+	if err := yaml.Unmarshal(data, &profile); err != nil {
+		t.Fatalf("解析写盘产物失败: %v\n%s", err, data)
+	}
+	return data, profile
+}
+
+// fakeProxy 手搓一个写盘用的假节点（测试不走内核解析，字段够断言即可）。
+func fakeProxy(name, server string) map[string]any {
+	return map[string]any{"name": name, "type": "ss", "server": server, "port": 8388}
+}
+
+// wantExportRules 组装导出骨架的期望 rules：直连四条两条测试共用一份字面量，
+// MATCH 兜底引用最终落定的「节点选择」组名（ADR-0016）。
+func wantExportRules(selectName string) []string {
+	return append([]string{
+		"IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+		"IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+		"IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+		"GEOIP,CN,DIRECT",
+	}, "MATCH,"+selectName)
+}
+
+// writeConfigFile 写出的应是完整可用 profile（CONTEXT.md「导出文件形态」、
+// ADR-0016）：mixed-port 7890、select/url-test 两组、国内直连与 MATCH 兜底，
+// 除骨架外不加任何字段，也不再有空 proxy-providers 噪音行。各轮导出、合并
+// 导出、命令行 -o 三处共用本函数，形态天然一致。
+func TestWriteConfigFileWritesFullProfile(t *testing.T) {
+	proxies := []map[string]any{
+		fakeProxy("香港 01", "1.2.3.4"),
+		fakeProxy("日本 02", "5.6.7.8"),
+	}
+	data, profile := writeAndParseProfile(t, proxies)
+
+	if strings.Contains(string(data), "proxy-providers") {
+		t.Fatalf("不应出现 proxy-providers 行:\n%s", data)
+	}
+	var keys map[string]any
+	if err := yaml.Unmarshal(data, &keys); err != nil {
+		t.Fatalf("解析顶层键失败: %v", err)
+	}
+	if len(keys) != 4 {
+		t.Fatalf("顶层应只有骨架四键，实际 %v", keys)
+	}
+	for _, key := range []string{"mixed-port", "proxies", "proxy-groups", "rules"} {
+		if _, ok := keys[key]; !ok {
+			t.Fatalf("顶层缺 %s 键: %v", key, keys)
+		}
+	}
+
+	if profile.MixedPort != 7890 {
+		t.Fatalf("mixed-port = %d，期望 7890", profile.MixedPort)
+	}
+	if len(profile.Proxies) != 2 || fmt.Sprint(profile.Proxies[0]["name"]) != "香港 01" || fmt.Sprint(profile.Proxies[1]["name"]) != "日本 02" {
+		t.Fatalf("proxies 应原样带全部过筛节点: %v", profile.Proxies)
+	}
+	if len(profile.ProxyGroups) != 2 {
+		t.Fatalf("应有两个组，实际 %d 个: %+v", len(profile.ProxyGroups), profile.ProxyGroups)
+	}
+	selectGroup, autoGroup := profile.ProxyGroups[0], profile.ProxyGroups[1]
+	if selectGroup.Name != "节点选择" || selectGroup.Type != "select" {
+		t.Fatalf("第一组应是 select「节点选择」: %+v", selectGroup)
+	}
+	wantMembers := []string{"自动选择", "香港 01", "日本 02"}
+	if !reflect.DeepEqual(selectGroup.Proxies, wantMembers) {
+		t.Fatalf("select 组成员 = %v，期望 %v", selectGroup.Proxies, wantMembers)
+	}
+	if autoGroup.Name != "自动选择" || autoGroup.Type != "url-test" {
+		t.Fatalf("第二组应是 url-test「自动选择」: %+v", autoGroup)
+	}
+	if !reflect.DeepEqual(autoGroup.Proxies, []string{"香港 01", "日本 02"}) {
+		t.Fatalf("url-test 组成员 = %v，期望全部节点", autoGroup.Proxies)
+	}
+	if autoGroup.URL != "http://www.gstatic.com/generate_204" || autoGroup.Interval != 300 {
+		t.Fatalf("url-test 组 url/interval = %q/%d", autoGroup.URL, autoGroup.Interval)
+	}
+	wantRules := wantExportRules("节点选择")
+	if !reflect.DeepEqual(profile.Rules, wantRules) {
+		t.Fatalf("rules = %v，期望 %v", profile.Rules, wantRules)
+	}
+}
+
+// 0 节点退回纯清单：只有 proxies: []，无端口无组无规则——空组引用是无效
+// 配置，而「输出开着必写文件」是既有预期（ADR-0016）。
+func TestWriteConfigFileZeroNodesFallsBackToPlainList(t *testing.T) {
+	data, profile := writeAndParseProfile(t, []map[string]any{})
+	if string(data) != "proxies: []\n" {
+		t.Fatalf("0 节点应只写纯清单，实际:\n%s", data)
+	}
+	if len(profile.Proxies) != 0 || profile.MixedPort != 0 || len(profile.ProxyGroups) != 0 || len(profile.Rules) != 0 {
+		t.Fatalf("0 节点不应带骨架字段: %+v", profile)
+	}
+}
+
+// 节点名与组名撞名时组名追加递增后缀避让：两个组独立检查，后缀也撞就继续
+// 递增（多组同时撞则逐个避让）；rules 的 MATCH 引用避让后的最终「节点选择」
+// 组名；用户节点名保持原样（ADR-0016）。
+func TestWriteConfigFileAvoidsGroupNameCollision(t *testing.T) {
+	cases := []struct {
+		name       string
+		nodeNames  []string
+		wantSelect string
+		wantAuto   string
+	}{
+		{"无撞名", []string{"香港 01", "日本 02"}, "节点选择", "自动选择"},
+		{"节点选择撞名", []string{"节点选择", "日本 02"}, "节点选择-1", "自动选择"},
+		{"自动选择撞名", []string{"自动选择", "日本 02"}, "节点选择", "自动选择-1"},
+		{"自动选择后缀也撞继续递增", []string{"自动选择", "自动选择-1", "香港 01"}, "节点选择", "自动选择-2"},
+		{"节点选择后缀也撞继续递增", []string{"节点选择", "节点选择-1"}, "节点选择-2", "自动选择"},
+		{"两组同时撞逐个避让", []string{"节点选择", "自动选择"}, "节点选择-1", "自动选择-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			proxies := make([]map[string]any, 0, len(tc.nodeNames))
+			for i, name := range tc.nodeNames {
+				proxies = append(proxies, fakeProxy(name, fmt.Sprintf("1.1.1.%d", i+1)))
+			}
+			_, profile := writeAndParseProfile(t, proxies)
+
+			if len(profile.ProxyGroups) != 2 {
+				t.Fatalf("应有两个组，实际 %d 个", len(profile.ProxyGroups))
+			}
+			selectGroup, autoGroup := profile.ProxyGroups[0], profile.ProxyGroups[1]
+			if selectGroup.Name != tc.wantSelect || selectGroup.Type != "select" {
+				t.Fatalf("select 组 = %s(%s)，期望 %s", selectGroup.Name, selectGroup.Type, tc.wantSelect)
+			}
+			if autoGroup.Name != tc.wantAuto || autoGroup.Type != "url-test" {
+				t.Fatalf("url-test 组 = %s(%s)，期望 %s", autoGroup.Name, autoGroup.Type, tc.wantAuto)
+			}
+			// select 组成员：避让后的自动组名 + 全部节点名（用户节点名不动）。
+			wantMembers := append([]string{tc.wantAuto}, tc.nodeNames...)
+			if !reflect.DeepEqual(selectGroup.Proxies, wantMembers) {
+				t.Fatalf("select 组成员 = %v，期望 %v", selectGroup.Proxies, wantMembers)
+			}
+			wantRules := wantExportRules(tc.wantSelect)
+			if !reflect.DeepEqual(profile.Rules, wantRules) {
+				t.Fatalf("rules = %v，期望 %v", profile.Rules, wantRules)
+			}
+			gotNames := make([]string, 0, len(profile.Proxies))
+			for _, proxy := range profile.Proxies {
+				gotNames = append(gotNames, fmt.Sprint(proxy["name"]))
+			}
+			if !reflect.DeepEqual(gotNames, tc.nodeNames) {
+				t.Fatalf("节点名不应被改动: %v，期望 %v", gotNames, tc.nodeNames)
+			}
+		})
+	}
 }

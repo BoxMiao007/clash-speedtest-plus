@@ -349,7 +349,7 @@ func (m *Model) pressEnter() {
 // finalizeOutputPath 在回车开始测速、校验通过后按输出模式落定（见
 // CONTEXT.md「输出模式」词条）：自定义态沿用「后缀补全」，词干不带后缀
 // 时补 .yaml（result → result.yaml），自带 .yml 原样，纯空白视同关闭；
-// 关闭态与默认当前路径态不消费自定义词干——自动命名在测速端按源算，
+// 关闭态与当前目录下态不消费自定义词干——自动命名在测速端按源算，
 // 已填值原样保留，Esc 返回后切回自定义态还能看到。此后（含 Esc 返回
 // 选源界面）行内显示落定后的值。
 func (m *Model) finalizeOutputPath() {
@@ -533,7 +533,7 @@ func (m *Model) typeOption(text string) {
 		}
 	}
 	if option == OptionOutputPath && m.options.OutputMode != OutputModeCustom {
-		// 关闭/默认当前路径态打字：自动跳自定义并进入编辑，从空词干开始，
+		// 关闭/当前目录下态打字：自动跳自定义并进入编辑，从空词干开始，
 		// 不把没显示出来的残留值接进新输入（见 CONTEXT.md「输出模式」词条）。
 		m.options.OutputMode = OutputModeCustom
 		m.options.OutputPath = ""
@@ -547,7 +547,7 @@ func (m *Model) backspaceOption() {
 	}
 	option := optionOrder[m.optionIndex].option
 	if option == OptionOutputPath && m.options.OutputMode != OutputModeCustom {
-		// 关闭/默认当前路径态行内没有可删的内容，退格不动（打字才跳自定义）。
+		// 关闭/当前目录下态行内没有可删的内容，退格不动（打字才跳自定义）。
 		return
 	}
 	value := m.options.value(option)

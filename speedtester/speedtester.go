@@ -189,9 +189,26 @@ type CProxy struct {
 	Config map[string]any
 }
 
+// ProxyGroup 是 proxy-groups 一项的形状，只覆盖导出骨架用到的字段；解析时
+// 其余字段忽略。
+type ProxyGroup struct {
+	Name     string   `yaml:"name"`
+	Type     string   `yaml:"type"`
+	Proxies  []string `yaml:"proxies"`
+	URL      string   `yaml:"url,omitempty"`
+	Interval int      `yaml:"interval,omitempty"`
+}
+
+// RawConfig 既当 Clash/Mihomo 配置的解析载体（LoadProxies），也是导出 profile
+// 的写盘载体（main 的 buildExportProfile 组装，ADR-0016）。Providers 带
+// omitempty：导出时 nil 不再渲染成空的 proxy-providers 噪音行；
+// mixed-port/proxy-groups/rules 仅导出时置值，解析侧只是多接住这几个字段。
 type RawConfig struct {
-	Providers map[string]map[string]any `yaml:"proxy-providers"`
-	Proxies   []map[string]any          `yaml:"proxies"`
+	MixedPort   int                       `yaml:"mixed-port,omitempty"`
+	Providers   map[string]map[string]any `yaml:"proxy-providers,omitempty"`
+	Proxies     []map[string]any          `yaml:"proxies"`
+	ProxyGroups []ProxyGroup              `yaml:"proxy-groups,omitempty"`
+	Rules       []string                  `yaml:"rules,omitempty"`
 }
 
 func (st *SpeedTester) LoadProxies() (map[string]*CProxy, error) {
