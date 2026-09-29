@@ -48,7 +48,8 @@ const (
 	kindBool
 	kindText
 	// kindOutput 是输出路径行专属：三态循环（左右键或点击）加打字编辑，
-	// 关闭/默认当前路径态显示 < > 符号，自定义态显示词干。
+	// 关闭/默认当前路径态显示 < > 符号，自定义态没打字时同样显示（可切），
+	// 有内容后退回纯词干（编辑锁定）。
 	kindOutput
 )
 
@@ -79,6 +80,13 @@ func cycleOutputMode(mode OutputMode, delta int) OutputMode {
 // changeOutputMode 循环输出模式三态，左右键、空格与点击 < > 共用。
 func (o *Options) changeOutputMode(delta int) {
 	o.OutputMode = cycleOutputMode(o.OutputMode, delta)
+}
+
+// outputModeLocked 报告自定义态是否进入编辑锁定：有内容（TrimSpace 判空，
+// 纯空白不算）时左右键、空格与点击都不切换，退格清空后恢复可切
+// （见 CONTEXT.md「输出模式」词条）。锁定判断在调用侧，本函数不做切换。
+func (o *Options) outputModeLocked() bool {
+	return o.OutputMode == OutputModeCustom && strings.TrimSpace(o.OutputPath) != ""
 }
 
 // optionRow 是选项在界面上的呈现：顺序即排列，kind 决定怎么编辑。
