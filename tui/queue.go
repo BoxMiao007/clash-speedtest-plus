@@ -65,7 +65,8 @@ type QueueRound interface {
 	Model
 	// AdvanceRequested 报告本轮已完成且产物已保存、应推进下一轮。
 	AdvanceRequested() bool
-	// ExitAll 报告用户要求退出整个队列：未完成轮的 q/Ctrl+C，或已完成轮的 Ctrl+C。
+	// ExitAll 报告用户要求退出整个队列：未完成轮或已完成中途轮的 q/Ctrl+C
+	//（剩余轮没测完）；最后一轮测完后的正常离开不算。
 	ExitAll() bool
 	// Quitting 报告本轮视图正在退出。裸 QuitMsg 不经过 Update，
 	// 壳的收尾（状态捕获）只能靠轮询这个意图。
@@ -76,7 +77,7 @@ type QueueRound interface {
 type QueueResult struct {
 	// Escaped 为真表示按了 Esc：中断本轮＋作废剩余＋回选源界面。
 	Escaped bool
-	// ExitAll 为真表示离开方式是退出全部（q/Ctrl+C），不再回选源。
+	// ExitAll 为真表示用户在队列未走完时要求退出全部（q/Ctrl+C），不再回选源。
 	ExitAll bool
 	// Failed 为真表示任一轮保存失败或被强制退出，退出码非 0。
 	Failed bool
@@ -204,8 +205,8 @@ func (q QueueModel) afterRoundUpdate(idx int, cmd tea.Cmd) (tea.Model, tea.Cmd) 
 		return q, tea.Quit
 	}
 	if r.ExitAll() {
-		// Ctrl+C（或未完成轮的 q）：退出全部。立即作废在途的轮准备；
-		// 实际退出看 Quitting，等待落盘的退出要在保存完成后才走。
+		// 退出全部（未完成轮或已完成中途轮的 q/Ctrl+C）：立即作废在途的轮
+		// 准备；实际退出看 Quitting，等待落盘的退出要在保存完成后才走。
 		q.exitAll = true
 		q.voided.Store(true)
 	}
@@ -238,8 +239,8 @@ func (q QueueModel) afterRoundUpdate(idx int, cmd tea.Cmd) (tea.Model, tea.Cmd) 
 	return q, cmd
 }
 
-// consumeAdvance 清掉一轮的推进标记。标记由壳消费一次；不然切走的轮
-// （例如在已完成轮上按过 q）残留标记，后续每条消息都会让壳再开一轮。
+// consumeAdvance 清掉一轮的推进标记。标记由壳消费一次；不然轮上残留的
+// 标记会让壳每条消息都再开一轮。
 func (q *QueueModel) consumeAdvance(idx int) {
 	m, ok := q.rounds[idx].(tuiModel)
 	if !ok || !m.advanceRequested {

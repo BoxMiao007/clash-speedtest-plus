@@ -222,8 +222,8 @@ func TestQueueBackgroundRoundKeepsReceivingResults(t *testing.T) {
 	}
 }
 
-// 后台在测轮测完自动推进，不抢用户正看的视图；在已完成旧轮上按 q 残留的
-// 推进请求被壳忽略，不会提前开新轮。
+// 后台在测轮测完自动推进，不抢用户正看的视图；推进由轮完成事件驱动，
+// 与用户正看着哪一轮无关。
 func TestQueueBackgroundAdvanceKeepsCurrentView(t *testing.T) {
 	prepared := []int{}
 	round1 := newQueueTestRound(t, true)
@@ -239,19 +239,6 @@ func TestQueueBackgroundAdvanceKeepsCurrentView(t *testing.T) {
 	// 切回第一轮（已完成）。
 	updated, _ := q.Update(tea.KeyMsg{Type: tea.KeyCtrlUp})
 	q = updated.(QueueModel)
-
-	// 在已完成旧轮上按 q：保存完标记推进，但队列已在它后面，壳应忽略。
-	updated, saveCmd := q.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
-	q = updated.(QueueModel)
-	saved, ok := runQueueCmd(t, saveCmd).(imageSavedMsg)
-	if !ok {
-		t.Fatalf("已完成轮按 q 应触发收尾保存: %T", saved)
-	}
-	updated, _ = q.Update(roundOwnedMsg{round: 0, msg: saved})
-	q = updated.(QueueModel)
-	if len(prepared) != 1 {
-		t.Fatalf("旧轮的推进请求应被忽略: %v", prepared)
-	}
 
 	// 后台在测的第二轮测完：推进第三轮，当前视图不被动。
 	updated, prepareCmd := q.Update(roundOwnedMsg{round: 1, msg: doneMsg{}})
@@ -275,6 +262,55 @@ func TestQueueBackgroundAdvanceKeepsCurrentView(t *testing.T) {
 	q = updated.(QueueModel)
 	if q.active != 2 {
 		t.Fatalf("应能切到第三轮: active=%d", q.active)
+	}
+}
+
+// 已完成轮（含切回去看的旧轮）按 q：退出整个队列而不是开新轮（「退出」
+// 词条、ADR-0002）；剩余轮作废，在途的轮准备不再激活新视图。
+func TestQueueQuitKeyOnFinishedRoundExitsQueue(t *testing.T) {
+	prepared := []int{}
+	round1 := newQueueTestRound(t, true)
+	round1.SetImageExport(inRepoTempDir(t), false)
+	prepare := func(index int) (QueueRound, bool, error) {
+		prepared = append(prepared, index)
+		return newQueueTestRound(t, false), false, nil
+	}
+	voided := &atomic.Bool{}
+	q := NewQueueModel(round1, 0, prepare, 3, voided)
+	q = advanceToNextRound(t, q)
+	// 切回已完成的第一轮。
+	updated, _ := q.Update(tea.KeyMsg{Type: tea.KeyCtrlUp})
+	q = updated.(QueueModel)
+
+	// 按 q：先走收尾保存，标记退出全部。
+	updated, saveCmd := q.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	q = updated.(QueueModel)
+	if saveCmd == nil {
+		t.Fatal("已完成轮按 q 应走收尾保存")
+	}
+	if result := q.Result(); !result.ExitAll {
+		t.Fatalf("已完成中途轮按 q 应标记退出全部: %+v", result)
+	}
+	saved, ok := runQueueCmd(t, saveCmd).(imageSavedMsg)
+	if !ok {
+		t.Fatalf("收尾保存应返回 imageSavedMsg: %T", saved)
+	}
+	updated, quitCmd := q.Update(saved)
+	q = updated.(QueueModel)
+	if _, ok := quitCmd().(tea.QuitMsg); !ok {
+		t.Fatalf("保存完应退出整个队列: %T", quitCmd())
+	}
+	// 剩余轮作废：不开新的轮，在途准备的结果也不入列。
+	if len(prepared) != 1 {
+		t.Fatalf("退出后不应再准备新的轮: %v", prepared)
+	}
+	if !voided.Load() {
+		t.Fatal("退出全部应作废剩余轮")
+	}
+	updated, _ = q.Update(nextRoundMsg{view: newQueueTestRound(t, false)})
+	q = updated.(QueueModel)
+	if len(q.rounds) != 2 {
+		t.Fatalf("作废后的准备结果不应入列: rounds=%d", len(q.rounds))
 	}
 }
 

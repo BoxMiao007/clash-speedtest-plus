@@ -149,7 +149,8 @@ type tuiModel struct {
 	autoAdvance bool
 	// advanceRequested 表示本轮已完成且产物已保存、应推进下一轮，队列壳轮询。
 	advanceRequested bool
-	// exitAll 表示用户要求退出整个队列：未完成轮的 q/Ctrl+C，或已完成轮的 Ctrl+C。
+	// exitAll 表示用户要求退出整个队列：未完成轮的 q/Ctrl+C，或已完成中途轮的
+	// q/Ctrl+C（剩余轮没测完）；最后一轮测完后的离开是正常收尾，不算。
 	exitAll bool
 }
 
@@ -386,62 +387,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.returningToParent = true
 				return m, tea.Quit
 			}
-		case "ctrl+c":
-			// Ctrl+C 恒等于退出全部：中断当前轮、作废剩余轮（「多轮测速」、ADR-0002）。
+		case "q", "ctrl+c":
+			// q 与 Ctrl+C 语义相同（「退出」词条）：在任何轮视图都结束整个
+			// 进程。中途轮测完后的退出等同退出全部——剩余轮还没测，自动推进
+			// 只由轮完成事件驱动，与按键无关（ADR-0002）。
 			if m.quittingAfterSave {
 				return m, m.forceQuitNow()
 			}
-			m.exitAll = true
 			if m.roundFinished() {
-				// 整轮结束通常已自动保存过产物，直接退出，避免退出时重复出图。
-				if m.autoImageDone && !m.savingImage && !m.saveFailed {
-					m.quitting = true
-					if m.uploadCancel != nil {
-						m.uploadCancel()
-					}
-					return m, tea.Quit
+				if m.autoAdvance {
+					m.exitAll = true
 				}
-				// 产物尚未落盘：等保存完再走（见「退出」）。
-				m.quittingAfterSave = true
-				m.help.setSaving(true)
-				m.setStatus("正在保存")
-				if m.savingImage {
-					return m, nil
-				}
-				m.savingImage = true
-				return m, m.saveImageCmd(true, true)
+				return m, m.quitWhenRoundFinished()
 			}
 			// 本轮尚未结束：丢掉在测节点，不写 yaml 和自动图，并删掉半截图。
-			m.abortRound()
-			return m, tea.Quit
-		case "q":
-			if m.quittingAfterSave {
-				return m, m.forceQuitNow()
-			}
-			if m.roundFinished() {
-				// 整轮结束通常已自动保存过产物，直接离开，避免退出时重复出图。
-				if m.autoImageDone && !m.savingImage && !m.saveFailed {
-					if m.autoAdvance {
-						// 中途轮：产物已存，队列壳负责开下一轮（ADR-0015）。
-						m.advanceRequested = true
-						return m, nil
-					}
-					m.quitting = true
-					if m.uploadCancel != nil {
-						m.uploadCancel()
-					}
-					return m, tea.Quit
-				}
-				m.quittingAfterSave = true
-				m.help.setSaving(true)
-				m.setStatus("正在保存")
-				if m.savingImage {
-					return m, nil
-				}
-				m.savingImage = true
-				return m, m.saveImageCmd(true, true)
-			}
-			// 本轮尚未结束：q 结束整个进程（「退出」、ADR-0002）。
 			m.exitAll = true
 			m.abortRound()
 			return m, tea.Quit
@@ -639,14 +598,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setStatus(msg.text)
 		if m.quittingAfterSave {
+			// 等待落盘的 q/Ctrl+C：保存完离开整个队列，不再借道推进下一轮
+			//（q 在任何轮视图都表达退出，见「退出」词条）。
 			m.help.setSaving(false)
-			if m.autoAdvance && !m.exitAll {
-				// 中途轮按 q 离开：保存完自动进下一轮（轮间自动推进）。
-				m.quittingAfterSave = false
-				m.advanceRequested = true
-				return m, nil
-			}
-			// 最后一轮，或离开方式是 Ctrl+C：保存完退出整个队列。
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -864,6 +818,26 @@ func (m tuiModel) roundFinished() bool {
 	return !m.testing || m.earlyStopped
 }
 
+// quitWhenRoundFinished 整轮已结束时的退出收尾（q 与 Ctrl+C 共用）：
+// 产物通常已自动落盘，直接走避免重复出图；尚未落盘则等保存完再走（见「退出」）。
+func (m *tuiModel) quitWhenRoundFinished() tea.Cmd {
+	if m.autoImageDone && !m.savingImage && !m.saveFailed {
+		m.quitting = true
+		if m.uploadCancel != nil {
+			m.uploadCancel()
+		}
+		return tea.Quit
+	}
+	m.quittingAfterSave = true
+	m.help.setSaving(true)
+	m.setStatus("正在保存")
+	if m.savingImage {
+		return nil
+	}
+	m.savingImage = true
+	return m.saveImageCmd(true, true)
+}
+
 // forceQuitNow 等待落盘时再按一次退出：立刻走，写完的文件保留、半截删除。
 func (m *tuiModel) forceQuitNow() tea.Cmd {
 	m.forceQuit = true
@@ -935,7 +909,8 @@ func (m tuiModel) AdvanceRequested() bool {
 	return m.advanceRequested
 }
 
-// ExitAll 报告用户要求退出整个队列：未完成轮的 q/Ctrl+C，或已完成轮的 Ctrl+C。
+// ExitAll 报告用户要求退出整个队列：未完成轮的 q/Ctrl+C，或已完成中途轮的
+// q/Ctrl+C（剩余轮没测完）；最后一轮测完后的正常离开不算。
 func (m tuiModel) ExitAll() bool {
 	return m.exitAll
 }

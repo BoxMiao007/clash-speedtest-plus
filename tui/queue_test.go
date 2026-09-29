@@ -310,8 +310,9 @@ func TestQuitKeyMidRoundExitsAll(t *testing.T) {
 	}
 }
 
-// 中途轮产物已存时按 q：标记推进下一轮，而不是退出整个队列。
-func TestQuitOnFinishedMidQueueRoundRequestsAdvance(t *testing.T) {
+// 中途轮产物已存时按 q：退出整个队列（「退出」词条、ADR-0002），不再借道
+// 推进下一轮；自动推进只由轮完成事件驱动，与按键无关。
+func TestQuitKeyOnFinishedMidRoundExitsAll(t *testing.T) {
 	dir := inRepoTempDir(t)
 	model := newQueueTestRound(t, true)
 	model.SetImageExport(dir, true)
@@ -335,16 +336,21 @@ func TestQuitOnFinishedMidQueueRoundRequestsAdvance(t *testing.T) {
 		t.Fatalf("自动保存应写一次配置: %d", saveCount)
 	}
 
-	// 再按 q：产物已存，直接标记推进，不退出。
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	// 再按 q：产物已存，直接退出整个队列，不开新轮也不再次保存。
+	// （推进标记已在自动保存后置位，先按壳的消费动作清掉再钉住「按键不再推进」。）
+	m.advanceRequested = false
+	updated, quitCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	m = updated.(tuiModel)
-	if m.quitting {
-		t.Fatal("中途轮按 q 不应退出，由队列壳推进下一轮")
+	if !m.ExitAll() || !m.quitting {
+		t.Fatalf("中途轮测完按 q 应退出整个队列: exitAll=%v quitting=%v", m.ExitAll(), m.quitting)
 	}
-	if !m.AdvanceRequested() {
-		t.Fatal("中途轮按 q 应标记推进下一轮")
+	if m.AdvanceRequested() {
+		t.Fatal("按 q 不应标记推进，自动推进只由轮完成事件驱动")
 	}
 	if saveCount != 1 {
 		t.Fatalf("按 q 不应再次保存: %d", saveCount)
+	}
+	if _, ok := quitCmd().(tea.QuitMsg); !ok {
+		t.Fatalf("应返回退出命令: %T", quitCmd())
 	}
 }
