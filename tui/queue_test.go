@@ -17,6 +17,20 @@ func newQueueTestRound(t *testing.T, autoAdvance bool) tuiModel {
 	return model
 }
 
+// runQueueCmd 执行壳返回的命令并解开属主包裹：轮视图命令产出的消息带
+// roundOwnedMsg 标记，壳侧命令（轮准备）原样返回。模拟运行时投递用。
+func runQueueCmd(t *testing.T, cmd tea.Cmd) tea.Msg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("命令不应为空")
+	}
+	msg := cmd()
+	if owned, ok := msg.(roundOwnedMsg); ok {
+		return owned.msg
+	}
+	return msg
+}
+
 // 队列壳核心行为（ADR-0015 seam）：一个程序承载整个队列，轮推进时开新一轮
 // 视图，已完成轮的数据保留不丢，最后一轮照旧停在界面等退出键。
 func TestQueueAdvancesAndKeepsRoundResults(t *testing.T) {
@@ -83,7 +97,7 @@ func TestQueueAdvancesAndKeepsRoundResults(t *testing.T) {
 	if saveCmd == nil {
 		t.Fatal("最后一轮按 q 应触发收尾保存")
 	}
-	saved, ok := saveCmd().(imageSavedMsg)
+	saved, ok := runQueueCmd(t, saveCmd).(imageSavedMsg)
 	if !ok {
 		t.Fatalf("收尾保存应返回 imageSavedMsg: %T", saved)
 	}
@@ -259,7 +273,7 @@ func TestQueueCtrlCOnFinishedRoundExitsAll(t *testing.T) {
 	if saveCmd == nil {
 		t.Fatal("收尾保存应先于退出")
 	}
-	saved, ok := saveCmd().(imageSavedMsg)
+	saved, ok := runQueueCmd(t, saveCmd).(imageSavedMsg)
 	if !ok {
 		t.Fatalf("收尾保存应返回 imageSavedMsg: %T", saved)
 	}

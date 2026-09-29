@@ -924,6 +924,12 @@ func (m *tuiModel) SetAutoAdvance(hasMore bool) {
 	m.autoAdvance = hasMore
 }
 
+// SetRoundSwitchHint 多轮队列里在帮助行标注 Ctrl+↑/↓ 轮间切换。由队列壳
+// 在第二个轮视图就位时对所有轮开启；单轮队列不标注。
+func (m *tuiModel) SetRoundSwitchHint(enabled bool) {
+	m.help.setRoundSwitch(enabled)
+}
+
 // AdvanceRequested 报告本轮已完成且产物已保存、应推进下一轮；由队列壳轮询。
 func (m tuiModel) AdvanceRequested() bool {
 	return m.advanceRequested
