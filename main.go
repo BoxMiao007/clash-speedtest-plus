@@ -860,7 +860,12 @@ func buildExportProfile(proxies []map[string]any) *speedtester.RawConfig {
 	names := make([]string, 0, len(proxies))
 	taken := make(map[string]bool, len(proxies)+2)
 	for _, proxy := range proxies {
-		name := fmt.Sprint(proxy["name"])
+		// 组员名必须是字符串：上游 buildProxies 已跳过缺 name 的节点，这里
+		// 兜底跳过 name 缺失或非字符串的节点，不让 <nil> 混进组员列表。
+		name, ok := proxy["name"].(string)
+		if !ok {
+			continue
+		}
 		names = append(names, name)
 		taken[name] = true
 	}

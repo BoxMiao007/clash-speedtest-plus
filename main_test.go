@@ -538,6 +538,17 @@ func fakeProxy(name, server string) map[string]any {
 	return map[string]any{"name": name, "type": "ss", "server": server, "port": 8388}
 }
 
+// wantExportRules 组装导出骨架的期望 rules：直连四条两条测试共用一份字面量，
+// MATCH 兜底引用最终落定的「节点选择」组名（ADR-0016）。
+func wantExportRules(selectName string) []string {
+	return append([]string{
+		"IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+		"IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+		"IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+		"GEOIP,CN,DIRECT",
+	}, "MATCH,"+selectName)
+}
+
 // writeConfigFile 写出的应是完整可用 profile（CONTEXT.md「导出文件形态」、
 // ADR-0016）：mixed-port 7890、select/url-test 两组、国内直连与 MATCH 兜底，
 // 除骨架外不加任何字段，也不再有空 proxy-providers 噪音行。各轮导出、合并
@@ -591,13 +602,7 @@ func TestWriteConfigFileWritesFullProfile(t *testing.T) {
 	if autoGroup.URL != "http://www.gstatic.com/generate_204" || autoGroup.Interval != 300 {
 		t.Fatalf("url-test 组 url/interval = %q/%d", autoGroup.URL, autoGroup.Interval)
 	}
-	wantRules := []string{
-		"IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
-		"IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
-		"IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
-		"GEOIP,CN,DIRECT",
-		"MATCH,节点选择",
-	}
+	wantRules := wantExportRules("节点选择")
 	if !reflect.DeepEqual(profile.Rules, wantRules) {
 		t.Fatalf("rules = %v，期望 %v", profile.Rules, wantRules)
 	}
@@ -655,13 +660,7 @@ func TestWriteConfigFileAvoidsGroupNameCollision(t *testing.T) {
 			if !reflect.DeepEqual(selectGroup.Proxies, wantMembers) {
 				t.Fatalf("select 组成员 = %v，期望 %v", selectGroup.Proxies, wantMembers)
 			}
-			wantRules := []string{
-				"IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
-				"IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
-				"IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
-				"GEOIP,CN,DIRECT",
-				"MATCH," + tc.wantSelect,
-			}
+			wantRules := wantExportRules(tc.wantSelect)
 			if !reflect.DeepEqual(profile.Rules, wantRules) {
 				t.Fatalf("rules = %v，期望 %v", profile.Rules, wantRules)
 			}
