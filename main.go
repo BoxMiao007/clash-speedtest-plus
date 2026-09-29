@@ -839,13 +839,78 @@ func buildProxies(results []*speedtester.Result, filter resultFilter) []map[stri
 	return proxies
 }
 
-// writeConfigFile 把节点列表 marshal 成合格配置写盘。路径由调用方显式传入：
-// 队列壳下各轮并存，不读全局，避免与下一轮的全局改写竞争。
-func writeConfigFile(path string, proxies []map[string]any) error {
-	config := &speedtester.RawConfig{
-		Proxies: proxies,
+// 导出骨架常量（ADR-0016）：完整 profile 的固定形态，不可配置是有意为之。
+const (
+	exportMixedPort   = 7890
+	selectGroupName   = "节点选择"
+	autoGroupName     = "自动选择"
+	autoGroupURL      = "http://www.gstatic.com/generate_204"
+	autoGroupInterval = 300
+)
+
+// buildExportProfile 把过筛节点组装成完整可用 profile（CONTEXT.md「导出文件
+// 形态」、ADR-0016）：监听端口、select/url-test 两组、国内直连与 MATCH 兜底，
+// 除骨架外不加任何字段。各轮导出、合并导出、命令行 -o 共用 writeConfigFile
+// 走到这里，三处形态天然一致。0 节点退回纯清单：空组引用是无效配置，而
+// 「输出开着必写文件」是既有预期。节点名与组名撞名时组名避让，不改用户节点名。
+func buildExportProfile(proxies []map[string]any) *speedtester.RawConfig {
+	if len(proxies) == 0 {
+		return &speedtester.RawConfig{Proxies: proxies}
 	}
-	yamlData, err := yaml.Marshal(config)
+	names := make([]string, 0, len(proxies))
+	taken := make(map[string]bool, len(proxies)+2)
+	for _, proxy := range proxies {
+		name := fmt.Sprint(proxy["name"])
+		names = append(names, name)
+		taken[name] = true
+	}
+	// 两个组独立避让；先落定的组名也占位，后定的不会再撞上它。
+	selectName := uniqueGroupName(selectGroupName, taken)
+	taken[selectName] = true
+	autoName := uniqueGroupName(autoGroupName, taken)
+	taken[autoName] = true
+	return &speedtester.RawConfig{
+		MixedPort: exportMixedPort,
+		Proxies:   proxies,
+		ProxyGroups: []speedtester.ProxyGroup{
+			{
+				Name:    selectName,
+				Type:    "select",
+				Proxies: append([]string{autoName}, names...),
+			},
+			{
+				Name:     autoName,
+				Type:     "url-test",
+				Proxies:  names,
+				URL:      autoGroupURL,
+				Interval: autoGroupInterval,
+			},
+		},
+		Rules: []string{
+			"IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+			"IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+			"IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+			"GEOIP,CN,DIRECT",
+			"MATCH," + selectName,
+		},
+	}
+}
+
+// uniqueGroupName 给组名避让：候选名与 taken（节点名与已落定组名）撞名时
+// 追加 -1、-2 递增后缀，后缀也撞就继续递增；不修改用户节点名（ADR-0016）。
+func uniqueGroupName(base string, taken map[string]bool) string {
+	name := base
+	for i := 1; taken[name]; i++ {
+		name = fmt.Sprintf("%s-%d", base, i)
+	}
+	return name
+}
+
+// writeConfigFile 把过筛节点写成完整可用 profile（形态见 buildExportProfile）。
+// 路径由调用方显式传入：队列壳下各轮并存，不读全局，避免与下一轮的全局改写
+// 竞争。各轮导出、合并导出、命令行 -o 三处共用本函数。
+func writeConfigFile(path string, proxies []map[string]any) error {
+	yamlData, err := yaml.Marshal(buildExportProfile(proxies))
 	if err != nil {
 		return err
 	}
