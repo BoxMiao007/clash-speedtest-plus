@@ -46,7 +46,7 @@ var (
 	parallel          = intFlag("p", "parallel", 1, "同时测试的节点数")
 	noImage           = flag.Bool("no-image", false, "关闭自动导出结果表图，仍可按 s 手动保存")
 	imageSpeedOnly    = flag.Bool("image-speed-only", false, "结果图只保留下载或上传速度大于 0 的行；快速模式会忽略")
-	outputPath        = stringFlag("o", "output", "", "输出配置文件路径")
+	outputPath        = stringFlag("o", "output", "", "输出配置文件路径，不带 .yaml/.yml 后缀时自动补 .yaml")
 	gistToken         = flag.String("gist-token", "", "用于更新 Gist 的 GitHub token")
 	gistAddress       = flag.String("gist-address", "", "要更新的 Gist 地址或 ID（文件名使用输出文件名）")
 	repoToken         = flag.String("repo-token", "", "用于更新仓库文件的 GitHub token")
@@ -201,6 +201,19 @@ func applyPickerOptions(o picker.Options) {
 	*userAgent = o.UserAgent
 }
 
+// normalizeOutputFlag 在 flag 解析后应用 -o 的「后缀补全」：
+// 不带 .yaml/.yml 后缀（不分大小写）时补 .yaml，写全时文件名一字不差。
+// 以 / 或 \ 结尾是目录意图，启动即报错，不进测速。留空（含纯空白）仍
+// 表示不输出。校验口径与选源界面共用 picker.ValidateOutputPath。
+func normalizeOutputFlag() error {
+	value, err := picker.ValidateOutputPath(*outputPath)
+	if err != nil {
+		return fmt.Errorf("输出路径不合法：%w", err)
+	}
+	*outputPath = picker.CompleteYAMLSuffix(value)
+	return nil
+}
+
 func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "用法：clash-speedtest-plus [选项]\n")
@@ -215,6 +228,11 @@ func main() {
 	if *versionFlag {
 		fmt.Printf("clash-speedtest-plus version %s (commit %s)\n", version, commit)
 		os.Exit(0)
+	}
+
+	// -o 的后缀补全与目录意图校验在解析后立刻做：错误在测速开始前暴露。
+	if err := normalizeOutputFlag(); err != nil {
+		log.Fatalln(err)
 	}
 
 	args := os.Args[1:]

@@ -125,6 +125,207 @@ func TestEnterWithBadTimeoutStaysOnThatRow(t *testing.T) {
 	}
 }
 
+// focusOutputPath 把焦点挪到输出路径行并打字，模拟用户上下键选中后输入。
+func focusOutputPath(t *testing.T, model Model, text string) Model {
+	t.Helper()
+	model.focus = focusOptions
+	model.optionIndex = optionIndexFor(OptionOutputPath)
+	if text == "" {
+		return model
+	}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
+	return updated.(Model)
+}
+
+func TestEnterFinalizesOutputPathSuffix(t *testing.T) {
+	cases := []struct{ name, input, want string }{
+		{"词干补 .yaml", "result", "result.yaml"},
+		{"自带 .yml 原样", "result.yml", "result.yml"},
+		{"留空仍是不输出", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := focusOutputPath(t, New(sessionFixture()), tc.input)
+			model.checked[0] = true
+			updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			got := updated.(Model)
+			if !got.started {
+				t.Fatal("回车确认后应开始测速")
+			}
+			if cmd == nil {
+				t.Fatal("回车确认后应返回 tea.Quit 结束选源界面")
+			}
+			if value := got.Options().OutputPath; value != tc.want {
+				t.Fatalf("OutputPath = %q, want %q", value, tc.want)
+			}
+			if tc.want != "" && !strings.Contains(stripANSI(got.View()), tc.want) {
+				t.Fatalf("落定后行内应显示补全后的值 %q:\n%s", tc.want, stripANSI(got.View()))
+			}
+		})
+	}
+}
+
+func TestEnterWithTrailingSeparatorStaysAndExplains(t *testing.T) {
+	for _, input := range []string{"abc/", `abc\`} {
+		t.Run(input, func(t *testing.T) {
+			model := focusOutputPath(t, New(sessionFixture()), input)
+			model.checked[0] = true
+			if view := stripANSI(model.View()); !strings.Contains(view, input) {
+				t.Fatalf("打字过程中行内应显示原样输入:\n%s", view)
+			}
+			updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			got := updated.(Model)
+			if got.started || got.fetching {
+				t.Fatalf("目录意图不该开始测速: started=%v fetching=%v", got.started, got.fetching)
+			}
+			if !strings.Contains(got.status, "输出路径") || !strings.Contains(got.status, "不合法") {
+				t.Fatalf("status = %q", got.status)
+			}
+			// 目录意图的原因要在状态行露出，不能被「不合法」包装吞掉。
+			if !strings.Contains(got.status, "目录意图") {
+				t.Fatalf("状态行应带上目录意图的原因: %q", got.status)
+			}
+			if value := got.Options().OutputPath; value != input {
+				t.Fatalf("报错不应改写已填的值: %q", value)
+			}
+		})
+	}
+}
+
+func TestEnterFetchesAfterFinalizingOutputPath(t *testing.T) {
+	model := focusOutputPath(t, New(sessionFixture()), "result")
+	model.address = "https://example.com/a"
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := updated.(Model)
+	if got.started || !got.fetching {
+		t.Fatalf("填了地址应先获取: started=%v fetching=%v", got.started, got.fetching)
+	}
+	if value := got.Options().OutputPath; value != "result.yaml" {
+		t.Fatalf("获取前就应落定输出路径: %q", value)
+	}
+}
+
+// Esc 返回帧：测速中按 Esc 返回选源界面时，main 把落定后的同一个 model
+// 原样再喂给 runPickerModel。再渲染的帧要仍显示补全后的值，再次回车
+// 也不得把后缀叠成 result.yaml.yaml。
+func TestOutputPathFinalizedFrameSurvivesEscReturn(t *testing.T) {
+	model := focusOutputPath(t, New(sessionFixture()), "result")
+	model.checked[0] = true
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	returned := updated.(Model)
+	if view := stripANSI(returned.View()); !strings.Contains(view, "result.yaml") {
+		t.Fatalf("Esc 返回后的帧应显示补全后的输出路径:\n%s", view)
+	}
+	reentered, _ := returned.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := reentered.(Model)
+	if value := got.Options().OutputPath; value != "result.yaml" {
+		t.Fatalf("再次回车不应叠加后缀: %q", value)
+	}
+}
+
+func TestModeChangeKeepsOutputPathUncompleted(t *testing.T) {
+	model := focusOutputPath(t, New(sessionFixture()), "result")
+	// 回到模式行切换测速模式：该行不重置，也不在此刻补全。
+	model.optionIndex = optionIndexFor(OptionSpeedMode)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	got := updated.(Model)
+	if got.Options().Mode != "full" {
+		t.Fatalf("应切到 full 模式: %q", got.Options().Mode)
+	}
+	if value := got.Options().OutputPath; value != "result" {
+		t.Fatalf("切模式不应重置或补全输出路径: %q", value)
+	}
+}
+
+// outputOptionLineTail 取画面里输出路径行标签之后的部分，避免断言被
+// 同一物理行左栏的文件名干扰。
+func outputOptionLineTail(t *testing.T, model Model) string {
+	t.Helper()
+	for _, line := range strings.Split(model.View(), "\n") {
+		if idx := strings.Index(line, "输出路径"); idx >= 0 {
+			return line[idx:]
+		}
+	}
+	t.Fatal("画面里没有输出路径行")
+	return ""
+}
+
+func TestViewGreysMissingSuffixOnFocusedOutputPath(t *testing.T) {
+	// 测试环境不是 TTY，lipgloss 会剥掉转义序列；强制彩色输出以便断言灰显。
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+	cases := []struct{ name, input, hint string }{
+		{"词干缺 .yaml", "result", ".yaml"},
+		{"半截扩展名缺 yaml", "result.", "yaml"},
+		{"目录段加词干", "dir/result", ".yaml"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := focusOutputPath(t, New(sessionFixture()), tc.input)
+			tail := outputOptionLineTail(t, model)
+			if !strings.Contains(tail, greyStyle.Render(tc.hint)) {
+				t.Fatalf("聚焦输出路径应灰显缺省后缀 %q:\n%s", tc.hint, tail)
+			}
+			// 纯文本上灰显段落在光标前。
+			if plain := stripANSI(tail); !strings.Contains(plain, tc.input+tc.hint+"▌") {
+				t.Fatalf("灰显段应在光标前:\n%s", plain)
+			}
+			// 纯渲染不改值。
+			if value := model.Options().OutputPath; value != tc.input {
+				t.Fatalf("灰显不应进入实际值: %q", value)
+			}
+		})
+	}
+}
+
+func TestViewHidesSuffixHintWhenCompleteOrEmptyStem(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+	for _, input := range []string{"result.yml", "result.yaml", "result.YAML", ".yaml", ".yml", "."} {
+		t.Run(input, func(t *testing.T) {
+			model := focusOutputPath(t, New(sessionFixture()), input)
+			tail := outputOptionLineTail(t, model)
+			for _, hint := range []string{"yaml", ".yaml"} {
+				if strings.Contains(tail, greyStyle.Render(hint)) {
+					t.Fatalf("后缀已写全或词干为空时不应灰显 %q:\n%s", hint, tail)
+				}
+			}
+			if plain := stripANSI(tail); !strings.Contains(plain, input+"▌") {
+				t.Fatalf("行内应显示原样输入加光标:\n%s", plain)
+			}
+			if value := model.Options().OutputPath; value != input {
+				t.Fatalf("无灰显时也不应改值: %q", value)
+			}
+		})
+	}
+}
+
+func TestViewShowsOutputPathAsIsWhenUnfocused(t *testing.T) {
+	model := New(sessionFixture())
+	model.options.OutputPath = "result"
+	plain := stripANSI(outputOptionLineTail(t, model))
+	if !strings.Contains(plain, "result") {
+		t.Fatalf("未聚焦的输出路径行应显示原样输入:\n%s", plain)
+	}
+	if strings.Contains(plain, "yaml") {
+		t.Fatalf("未聚焦时不应有灰显补全:\n%s", plain)
+	}
+}
+
+func TestFocusedOutputPathWithHintStaysWithinWidth(t *testing.T) {
+	model := New(sessionFixture())
+	model.focus = focusOptions
+	model.optionIndex = optionIndexFor(OptionOutputPath)
+	model.options.OutputPath = strings.Repeat("r", 100)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 40, Height: 40})
+	model = updated.(Model)
+	for i, line := range strings.Split(model.View(), "\n") {
+		if w := lipgloss.Width(line); w > 40 {
+			t.Fatalf("第 %d 行超宽 %d:\n%s", i, w, line)
+		}
+	}
+}
+
 func TestViewShowsCheckAndUnselectableReason(t *testing.T) {
 	model := New(sessionFixture())
 	model.checked[0] = true

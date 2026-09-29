@@ -18,6 +18,7 @@
 - 中间填订阅地址。多条之间用「逗号加空格」或换行分开。不带空格的逗号仍是 URL 的一部分，避免把查询串切开。
 - 右侧是测速选项。左右键调整当前项：模式循环，数字按步长增减。点 `<` 减、点 `>` 加，点数值本身只选中。开关只有点中「开/关」（左右各带一格）才翻转，点标签只是选中；选中后空格和左右键仍可切换。
 - 切换测速模式时，数字步进项和三个开关恢复界面默认值，灰掉的项也重置。过滤正则、屏蔽关键字、输出路径、重命名模板、Gist/仓库、测速服务器、拉取订阅 UA，以及已填地址、已勾配置都保留。只选中模式行不会重置。
+- 输出路径按**后缀补全**处理：回车开始测速、校验通过那一刻落定——`result` 落定为 `result.yaml`，自带 `.yml` 原样保留，留空仍是不输出；以 `/` 或 `\` 结尾是目录意图，状态行报「输出路径」不合法且不开始测速。落定后的值一直显示，含按 Esc 返回选源界面时。
 - 回车开始测速。多个源**不混测**：每个勾选的配置、每条订阅各自一轮，自动连续测完。状态行写「第 X/N 轮」和当轮源名。某个源解析出 0 个节点就提示并跳过，不废掉后面的轮。
 - 测速界面按 **Esc** 回到这里：本轮中断，剩余轮作废，不写产物。勾选、地址和选项都还在。选源界面本身只能用 Ctrl+C 退出，`q` 和 Esc 都不退出。
 - 选项不跨进程记忆。同一次运行里按 Esc 返回，选项仍保留。
@@ -76,7 +77,7 @@ clash-speedtest-plus -h
   -b string
         按关键字屏蔽节点，多个关键字用 | 分隔
   -o string
-        输出配置文件路径（也可写 -output）
+        输出配置文件路径，不带 .yaml/.yml 后缀时自动补 .yaml（也可写 -output）
   -p int
         同时测试的节点数（也可写 -parallel，默认 1）
   -concurrent int
@@ -173,6 +174,8 @@ clash-speedtest-plus -c "https://domain.com/api/v1/client/subscribe?token=secret
 ## 产物
 
 结果图，以及相对路径的 `-o`，写到**程序文件所在目录**，不是启动时的当前目录。绝对路径照写。`go run` 的程序目录是临时构建目录，产物不会落在仓库根。
+
+输出路径会做后缀补全：文件名段不以 `.yaml` / `.yml` 结尾（不分大小写）时自动补 `.yaml`——`-o result` 落定为 `result.yaml`，`result.txt` 落定为 `result.txt.yaml`；以点结尾的半截扩展名直接接 `yaml`（`result.` → `result.yaml`）；只打 `.yaml`、`.yml` 或裸点原样保留；目录段里的点不影响判定（`./v1.2/out` → `out.yaml`）。`.yml` 是唯一能原样保留的自定义后缀。以 `/` 或 `\` 结尾是目录意图，启动即报「输出路径」不合法。留空仍是不输出。补全发生在最前，最终文件名仍按下面的规则叠加基名与序号。
 
 ![结果表图](assets/result.png)
 
@@ -362,7 +365,7 @@ Usage of clash-speedtest:
   -concurrent int
         download concurrent size (default 4)
   -output string
-        output config file path (default "")
+        output config file path; .yaml is appended when the file name has no .yaml/.yml suffix (default "")
   -max-latency duration
         filter latency greater than this value (default 800ms)
   -max-packet-loss float

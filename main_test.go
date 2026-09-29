@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"flag"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/BoxMiao007/clash-speedtest-plus/output"
 	"github.com/BoxMiao007/clash-speedtest-plus/picker"
 )
 
@@ -150,13 +152,78 @@ func TestOutputShortAndLongFlagsShareValue(t *testing.T) {
 	for _, tc := range cases {
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
 		flag.CommandLine = fs
-		p := stringFlag("o", "output", "", "输出配置文件路径")
+		p := stringFlag("o", "output", "", "输出配置文件路径，不带 .yaml/.yml 后缀时自动补 .yaml")
 		if err := fs.Parse(tc.args); err != nil {
 			t.Fatalf("%v: %v", tc.args, err)
 		}
 		if *p != tc.want {
 			t.Fatalf("%v 得到 %q，期望 %q", tc.args, *p, tc.want)
 		}
+	}
+}
+
+func TestNormalizeOutputFlagCompletesSuffix(t *testing.T) {
+	orig := outputPath
+	t.Cleanup(func() { outputPath = orig })
+
+	cases := []struct{ in, want string }{
+		{"result", "result.yaml"},
+		{"result.", "result.yaml"},
+		{"result.txt", "result.txt.yaml"},
+		{"result.yml", "result.yml"},
+		{"result.YAML", "result.YAML"},
+		{".yaml", ".yaml"},
+		{"dir/result", "dir/result.yaml"},
+		{"", ""},
+		{"  result  ", "result.yaml"},
+		{" ", ""},
+		{"\t", ""},
+	}
+	for _, tc := range cases {
+		*outputPath = tc.in
+		if err := normalizeOutputFlag(); err != nil {
+			t.Fatalf("-o %q 不应报错: %v", tc.in, err)
+		}
+		if *outputPath != tc.want {
+			t.Fatalf("-o %q 落定为 %q，期望 %q", tc.in, *outputPath, tc.want)
+		}
+	}
+}
+
+func TestNormalizeOutputFlagRejectsTrailingSeparator(t *testing.T) {
+	orig := outputPath
+	t.Cleanup(func() { outputPath = orig })
+
+	for _, in := range []string{"out/", `out\`, "/tmp/", "out/ "} {
+		*outputPath = in
+		err := normalizeOutputFlag()
+		if err == nil {
+			t.Fatalf("-o %q 应报目录意图错误", in)
+		}
+		if !strings.Contains(err.Error(), "输出路径不合法") {
+			t.Fatalf("-o %q 的错误文案应含「输出路径不合法」: %v", in, err)
+		}
+		if *outputPath != in {
+			t.Fatalf("报错时不应改写 -o 的值: %q 变成 %q", in, *outputPath)
+		}
+	}
+}
+
+// 落定后的输出路径要按「产物跟随文件名」和「产物序号」参与最终产物名：
+// -o result 落定为 result.yaml，文件轮带基名、序号排最前（1.机场A-result.yaml）。
+func TestCompletedOutputPathFeedsExportName(t *testing.T) {
+	orig := outputPath
+	t.Cleanup(func() { outputPath = orig })
+
+	*outputPath = "result"
+	if err := normalizeOutputFlag(); err != nil {
+		t.Fatalf("-o result 不应报错: %v", err)
+	}
+	anchored := picker.ResolveOutputPath("/opt/clash-speedtest-plus", *outputPath)
+	final := output.FollowedConfigExportPath(anchored, "机场A", time.Now(), 1)
+	want := filepath.Join("/opt/clash-speedtest-plus", "1.机场A-result.yaml")
+	if final != want {
+		t.Fatalf("最终产物名 = %q，期望 %q", final, want)
 	}
 }
 
@@ -187,7 +254,7 @@ func TestHelpPutsCommonFlagsFirstAndUsesMegabytes(t *testing.T) {
 	_ = flag.String("c", "", "配置文件路径，也支持 http(s) 地址")
 	_ = flag.Int("download-size", 50, "下载测试大小（单位：MB）")
 	_ = flag.Int("upload-size", 20, "上传测试大小，仅完整模式（单位：MB）")
-	_ = stringFlag("o", "output", "", "输出配置文件路径")
+	_ = stringFlag("o", "output", "", "输出配置文件路径，不带 .yaml/.yml 后缀时自动补 .yaml")
 	_ = flag.String("gist-token", "", "用于更新 Gist 的 GitHub token")
 	printFlagDefaults(fs)
 	help := buf.String()

@@ -1,6 +1,7 @@
 package picker
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -183,6 +184,12 @@ func validateText(option Option, value string) error {
 		}
 	case OptionTimeout, OptionMaxLatency:
 		if _, err := time.ParseDuration(value); err != nil {
+			return err
+		}
+	case OptionOutputPath:
+		// 目录意图校验与命令行 -o 共用同一份口径
+		// （paths.go ValidateOutputPath，见 CONTEXT.md「后缀补全」词条）。
+		if _, err := ValidateOutputPath(value); err != nil {
 			return err
 		}
 	}
@@ -417,6 +424,11 @@ func (m Model) validateEnabledRows() (optionRow, error) {
 			continue
 		}
 		if err := validateText(row.option, m.options.value(row.option)); err != nil {
+			if errors.Is(err, ErrOutputPathDirectory) {
+				// 目录意图的原因对用户有用：状态行带上原因，其余选项
+				// 维持「不合法」的短包装。
+				return row, fmt.Errorf("「%s」不合法：%v", row.label, err)
+			}
 			return row, fmt.Errorf("「%s」不合法", row.label)
 		}
 	}

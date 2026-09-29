@@ -73,3 +73,33 @@ func TestListConfigsCountsNodesAndProviders(t *testing.T) {
 		}
 	}
 }
+
+// 补全规则产出的文件名要能被「合格配置」识别回圈：用户输入 result.txt
+// 之类词干，落定后写出的 result.txt.yaml（双层后缀）仍能列出并勾选。
+func TestListConfigsRecognizesCompletedNames(t *testing.T) {
+	dir := t.TempDir()
+	body := "proxies:\n  - {name: a, type: ss}\n"
+	for _, stem := range []string{"result.txt", "result.", "机场A"} {
+		name := CompleteYAMLSuffix(stem)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := ListConfigs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := map[string]ConfigEntry{}
+	for _, entry := range got {
+		entries[entry.Name] = entry
+	}
+	for _, name := range []string{"result.txt.yaml", "result.yaml", "机场A.yaml"} {
+		entry, ok := entries[name]
+		if !ok {
+			t.Fatalf("补全后的文件名 %s 应被列出: %#v", name, got)
+		}
+		if !entry.Selectable || entry.Nodes != 1 {
+			t.Fatalf("%s 应可选且有节点: %+v", name, entry)
+		}
+	}
+}

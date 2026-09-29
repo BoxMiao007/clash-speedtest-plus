@@ -138,13 +138,13 @@ func (m Model) paneLine(lo layout, left string, row int) string {
 func (m Model) filePaneRows(lo layout) []string {
 	width := lo.filesW
 	rows := make([]string, 0, lo.paneH)
-	rows = append(rows, joinParts(width,
+	rows = append(rows, joinParts(width, lipgloss.Style{},
 		part{"▎", sectionMarkStyle},
 		part{" 文件", sectionStyle},
 	))
 	if len(m.configs) == 0 {
 		if lo.paneH > 1 {
-			rows = append(rows, joinParts(width, part{"（程序目录里没有可勾选的 .yaml）", greyStyle}))
+			rows = append(rows, joinParts(width, lipgloss.Style{}, part{"（程序目录里没有可勾选的 .yaml）", greyStyle}))
 		}
 		return padRows(rows, lo.paneH)
 	}
@@ -200,7 +200,7 @@ func (m Model) entryRows(lo layout, index int) []string {
 		return rows
 	}
 	if count == "" {
-		rows = append(rows, joinParts(width,
+		rows = append(rows, joinParts(width, lipgloss.Style{},
 			part{mark, markStyle},
 			part{strings.TrimPrefix(left, mark), nameStyle},
 		))
@@ -209,14 +209,14 @@ func (m Model) entryRows(lo layout, index int) []string {
 		line := withTrailingCount(left, count, width)
 		idx := strings.LastIndex(line, count)
 		head, tail := line[:idx], line[idx:]
-		rows = append(rows, joinParts(width,
+		rows = append(rows, joinParts(width, lipgloss.Style{},
 			part{mark, markStyle},
 			part{strings.TrimPrefix(head, mark), nameStyle},
 			part{tail, dimStyle},
 		))
 	}
 	for _, chunk := range chunks[1:] {
-		rows = append(rows, joinParts(width, part{indent + chunk, nameStyle}))
+		rows = append(rows, joinParts(width, lipgloss.Style{}, part{indent + chunk, nameStyle}))
 	}
 	return rows
 }
@@ -343,7 +343,7 @@ func (m Model) optionLine(lo layout, row int) string {
 		width = 0 // 宽度未知时不截断
 	}
 	if row == 0 {
-		return joinParts(width,
+		return joinParts(width, lipgloss.Style{},
 			part{"▎", sectionMarkStyle},
 			part{" 选项", sectionStyle},
 		)
@@ -370,6 +370,16 @@ func (m Model) optionLine(lo layout, row int) string {
 	prefix := "  " + padDisplay(optionRow.label, optionLabelWidth())
 	plain := prefix + "  " + value
 	if focused {
+		if hint := m.outputSuffixHint(optionRow); hint != "" {
+			// 输出路径行聚焦时，缺的后缀段灰显在光标前（见 CONTEXT.md
+			// 「后缀补全」词条）。此时值非空，行尾必是 optionValue 补的光标。
+			// 行尾补白传选中样式，整行高亮与 selectedLine 一致。
+			return joinParts(width, selectedStyle,
+				part{strings.TrimSuffix(plain, "▌"), selectedStyle},
+				part{hint, greyStyle},
+				part{"▌", selectedStyle},
+			)
+		}
 		shown := plain
 		if !enabled {
 			shown += "  不可用"
@@ -385,7 +395,7 @@ func (m Model) optionLine(lo layout, row int) string {
 		}
 		return greyStyle.Render(padPlain(truncatePlain(plain, base), base)) + disabledStyle.Render(suffix)
 	}
-	return joinParts(width,
+	return joinParts(width, lipgloss.Style{},
 		part{prefix, labelStyle},
 		part{"  ", plainStyle},
 		part{value, valueStyle},
@@ -406,7 +416,7 @@ func (m Model) addressLine(lo layout) string {
 	if m.focus == focusAddress {
 		return selectedLine(plain, width)
 	}
-	return joinParts(width,
+	return joinParts(width, lipgloss.Style{},
 		part{"  " + padDisplay("订阅地址", optionLabelWidth()), labelStyle},
 		part{"  ", plainStyle},
 		part{value, valueStyle},
@@ -414,7 +424,7 @@ func (m Model) addressLine(lo layout) string {
 }
 
 func (m Model) headerLine(width int) string {
-	left := joinParts(0,
+	left := joinParts(0, lipgloss.Style{},
 		part{"clash-speedtest-plus", titleStyle},
 		part{" · 选源界面", titleDimStyle},
 	)
@@ -453,7 +463,7 @@ func ruleLine(width int, marker string) string {
 func (m Model) statusLine(width int) string {
 	switch {
 	case m.fetching:
-		return joinParts(width,
+		return joinParts(width, lipgloss.Style{},
 			part{"● ", warnStyle},
 			part{m.status + " · 按 Ctrl+C 取消", warnStyle},
 		)
@@ -462,9 +472,9 @@ func (m Model) statusLine(width int) string {
 		if strings.HasPrefix(m.status, "已用") {
 			style = okStyle
 		}
-		return joinParts(width, part{"● ", style}, part{m.status, style})
+		return joinParts(width, lipgloss.Style{}, part{"● ", style}, part{m.status, style})
 	default:
-		return joinParts(width, part{"●", greyStyle})
+		return joinParts(width, lipgloss.Style{}, part{"●", greyStyle})
 	}
 }
 
@@ -518,7 +528,7 @@ func (m Model) helpLine(width int) string {
 		}
 		parts = append(parts, part{span.key, style}, part{span.label, labelStyle})
 	}
-	return joinParts(width, parts...)
+	return joinParts(width, lipgloss.Style{}, parts...)
 }
 
 // helpZones 算出可点段在帮助行内的 X 范围（内容坐标）。
@@ -544,6 +554,20 @@ func (m Model) helpZones() (enter, quit [2]int) {
 
 func selectedLine(plain string, width int) string {
 	return selectedStyle.Render(padPlain(truncatePlain(plain, width), width))
+}
+
+// outputSuffixHint 是聚焦输出路径行时该灰显的缺省后缀段；留空（含纯
+// 空白，此时行内显示「不输出」）或后缀已写全时为空。只有输出路径一行
+// 有灰显提示，其余文本行原样。
+func (m Model) outputSuffixHint(row optionRow) string {
+	if row.option != OptionOutputPath {
+		return ""
+	}
+	value := m.options.OutputPath
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	return MissingYAMLSuffix(value)
 }
 
 // optionValue 给出该行显示的值。可调行带「< >」符号提示点击方向，
@@ -612,8 +636,10 @@ type part struct {
 }
 
 // joinParts 先按显示宽度截断纯文本，再逐段上色，最后补齐行宽。
-// 先截断后上色是为了不把 ANSI 序列拦腰砍断。
-func joinParts(width int, parts ...part) string {
+// 先截断后上色是为了不把 ANSI 序列拦腰砍断。pad 是行尾补白的样式：
+// 零值原样补空格（绝大多数调用）；整行高亮的行传选中样式，让补白
+// 也带上高亮、与 selectedLine 一致。
+func joinParts(width int, pad lipgloss.Style, parts ...part) string {
 	total := 0
 	rendered := make([]string, 0, len(parts))
 	for _, p := range parts {
@@ -633,7 +659,7 @@ func joinParts(width int, parts ...part) string {
 	}
 	line := strings.Join(rendered, "")
 	if width > 0 && total < width {
-		line += strings.Repeat(" ", width-total)
+		line += pad.Render(strings.Repeat(" ", width-total))
 	}
 	return line
 }

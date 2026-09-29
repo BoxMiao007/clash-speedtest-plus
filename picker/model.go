@@ -334,12 +334,27 @@ func (m *Model) pressEnter() {
 		m.status = err.Error()
 		return
 	}
+	m.finalizeOutputPath()
 	if strings.TrimSpace(m.address) != "" {
 		m.fetching = true
 		m.status = "正在获取"
 		return
 	}
 	m.started = true
+}
+
+// finalizeOutputPath 在回车开始测速、校验通过后应用「后缀补全」：
+// 词干不带后缀时补 .yaml（result → result.yaml），自带 .yml 原样，
+// 纯空白视同留空。目录意图在 validateEnabledRows 一步已拦下。此后
+// （含 Esc 返回选源界面）行内显示落定后的值。
+func (m *Model) finalizeOutputPath() {
+	// 与命令行 -o 同一份校验口径，落定的都是去空白后的值。
+	value, err := ValidateOutputPath(m.options.OutputPath)
+	if err != nil {
+		// 校验通过才会走到这里，不该再见到目录意图；原样保留等用户改。
+		return
+	}
+	m.options.OutputPath = CompleteYAMLSuffix(value)
 }
 
 // adjustOption 用左右键调当前选项的值：模式循环、开关切换、数字按步长增减。
