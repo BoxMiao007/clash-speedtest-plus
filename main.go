@@ -33,6 +33,11 @@ var (
 	commit  = "unknown"
 )
 
+// outputAuto 表示输出模式处于「默认当前路径」：每轮不填词干，按基名或
+// 时间戳自动命名。命令行 -o 只有自定义语义、没有自动模式入口，该开关
+// 只来自选源界面（见 CONTEXT.md「输出模式」词条）。
+var outputAuto bool
+
 var (
 	configPathsConfig = flag.String("c", "", "配置文件路径，也支持 http(s) 地址；逗号分隔多个源，每个源各自一轮分别测速")
 	filterRegexConfig = flag.String("f", ".+", "按节点名过滤，使用正则")
@@ -184,8 +189,19 @@ func applyPickerOptions(o picker.Options) {
 	}
 	*imageSpeedOnly = o.ImageSpeedOnly
 	*noImage = o.NoImage
-	if o.OutputPath != "" {
+	// 输出设置按三态解释（见 CONTEXT.md「输出模式」）：自定义写词干，
+	// 默认当前路径开自动命名，关闭清空——按 Esc 重跑时关掉输出必须真的
+	// 关掉，不能沿用上一轮的值。
+	switch o.OutputMode {
+	case picker.OutputModeCustom:
 		*outputPath = o.OutputPath
+		outputAuto = false
+	case picker.OutputModeDefaultPath:
+		*outputPath = ""
+		outputAuto = true
+	default:
+		*outputPath = ""
+		outputAuto = false
 	}
 	*renameNodes = o.Rename
 	*renameTemplate = o.RenameTemplate
@@ -345,12 +361,8 @@ func runSpeedTest(execDir string, round speedRound, escapeToParent bool) roundOu
 		nameBase = output.CleanNameBase(src.DisplayName)
 	}
 
-	// 每轮从用户原始输出路径算起：文件轮加基名前缀，订阅轮靠序号区分
-	// （序号停用才退回时间戳）；序号与结果图同轮同号。保存与上传都读这个最终路径。
-	*outputPath = round.outputPath
-	if *outputPath != "" {
-		*outputPath = output.FollowedConfigExportPath(*outputPath, nameBase, time.Now(), round.seq)
-	}
+	// 每轮从用户原始输出路径算起最终产物名（见 roundOutputPath）。
+	*outputPath = roundOutputPath(round.outputPath, outputAuto, execDir, nameBase, time.Now(), round.seq)
 
 	var err error
 	speedTester, effectiveMode, resultFilter, stopper, err := buildTester()
@@ -523,6 +535,22 @@ func runSpeedTest(execDir string, round speedRound, escapeToParent bool) roundOu
 	}
 	waitForUpload()
 	return roundDone
+}
+
+// roundOutputPath 算出一轮的最终产物路径，保存与上传都读它。自定义模式
+// 按「产物跟随文件名」叠基名与序号（订阅轮没有基名靠序号区分，序号停用
+// 才退回时间戳）；「默认当前路径」没有用户词干，本地源按「基名-导出.yaml」
+// 自动命名，订阅轮用「导出-时间戳」兜底（见 CONTEXT.md「输出模式」「产物
+// 序号」词条）。两种模式的产物序号与结果图同轮同号。
+func roundOutputPath(customPath string, auto bool, execDir, nameBase string, now time.Time, seq int) string {
+	switch {
+	case customPath != "":
+		return output.FollowedConfigExportPath(customPath, nameBase, now, seq)
+	case auto:
+		return filepath.Join(execDir, output.AutoExportPath(nameBase, now, seq))
+	default:
+		return ""
+	}
 }
 
 func imageSpeedFilterEnabled(mode speedtester.SpeedMode) bool {
