@@ -1,9 +1,31 @@
 package picker
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 )
+
+// ErrOutputPathDirectory 是输出路径以 / 或 \ 结尾（目录意图）的校验错误，
+// 文案就是原因本身：界面状态行把它接在「输出路径」不合法之后，命令行
+// 把它接在「输出路径不合法」之后。
+var ErrOutputPathDirectory = errors.New("以 / 或 \\ 结尾是目录意图，请写到具体文件名")
+
+// ValidateOutputPath 是输出路径落定前的统一校验口径，选源界面与命令行
+// -o 共用：先去首尾空白，剩下的为空视同留空（不输出、不补全），返回
+// 空值；以 / 或 \ 结尾是目录意图，报 ErrOutputPathDirectory（见
+// CONTEXT.md「后缀补全」词条）。其余原样返回，后缀补全由调用方接
+// CompleteYAMLSuffix 做。
+func ValidateOutputPath(path string) (string, error) {
+	value := strings.TrimSpace(path)
+	if value == "" {
+		return "", nil
+	}
+	if strings.HasSuffix(value, "/") || strings.HasSuffix(value, `\`) {
+		return "", ErrOutputPathDirectory
+	}
+	return value, nil
+}
 
 // ResolveOutputPath 把输出路径锚到程序目录。
 // 空路径保持为空，表示不写文件。绝对路径不动。相对路径含 ../ 时按程序目录解析。

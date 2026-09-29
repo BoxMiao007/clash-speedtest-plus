@@ -1,6 +1,7 @@
 package picker
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -76,6 +77,40 @@ func TestMissingYAMLSuffix(t *testing.T) {
 	for _, tc := range cases {
 		if got := MissingYAMLSuffix(tc.in); got != tc.want {
 			t.Fatalf("MissingYAMLSuffix(%q) = %q，期望 %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// ValidateOutputPath 是命令行 -o 与选源界面共用的落定前口径：纯空白视同
+// 留空、目录意图报 ErrOutputPathDirectory、其余去空白原样返回。
+func TestValidateOutputPath(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", ""},
+		{" ", ""},
+		{"\t \n", ""},
+		{"  result  ", "result"},
+		{"result.yaml", "result.yaml"},
+		{"dir/result", "dir/result"},
+	}
+	for _, tc := range cases {
+		got, err := ValidateOutputPath(tc.in)
+		if err != nil {
+			t.Fatalf("ValidateOutputPath(%q) 不应报错: %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Fatalf("ValidateOutputPath(%q) = %q，期望 %q", tc.in, got, tc.want)
+		}
+	}
+	for _, in := range []string{"out/", `out\`, "out/ ", " /tmp/ "} {
+		got, err := ValidateOutputPath(in)
+		if !errors.Is(err, ErrOutputPathDirectory) {
+			t.Fatalf("ValidateOutputPath(%q) 应报目录意图，得到 %q, %v", in, got, err)
+		}
+		if got != "" {
+			t.Fatalf("报错时不应返回值: %q", got)
 		}
 	}
 }

@@ -2,16 +2,20 @@ package picker
 
 import "testing"
 
-// 输出路径的尾分隔符校验：以 / 或 \ 结尾是目录意图，回车校验要拦下；
-// 留空与写全后缀都不报错。
+// 输出路径的落定前口径（与命令行 -o 共用 ValidateOutputPath）：
+// 纯空白视同留空不报错，以 / 或 \ 结尾（含空白后才是分隔符）是目录意图，
+// 回车校验要拦下；写全后缀不报错。
 func TestValidateTextOutputPath(t *testing.T) {
 	if err := validateText(OptionOutputPath, ""); err != nil {
 		t.Fatalf("留空仍是不输出: %v", err)
 	}
+	if err := validateText(OptionOutputPath, " "); err != nil {
+		t.Fatalf("纯空白应视同留空: %v", err)
+	}
 	if err := validateText(OptionOutputPath, "result.yaml"); err != nil {
 		t.Fatalf("写全后缀不应报错: %v", err)
 	}
-	for _, value := range []string{"abc/", `abc\`, "abc/ "} {
+	for _, value := range []string{"abc/", `abc\`, "abc/ ", "out/ ", " /tmp/ "} {
 		if err := validateText(OptionOutputPath, value); err == nil {
 			t.Fatalf("以分隔符结尾的 %q 应报目录意图", value)
 		}

@@ -181,6 +181,10 @@ func TestEnterWithTrailingSeparatorStaysAndExplains(t *testing.T) {
 			if !strings.Contains(got.status, "输出路径") || !strings.Contains(got.status, "不合法") {
 				t.Fatalf("status = %q", got.status)
 			}
+			// 目录意图的原因要在状态行露出，不能被「不合法」包装吞掉。
+			if !strings.Contains(got.status, "目录意图") {
+				t.Fatalf("状态行应带上目录意图的原因: %q", got.status)
+			}
 			if value := got.Options().OutputPath; value != input {
 				t.Fatalf("报错不应改写已填的值: %q", value)
 			}
@@ -198,6 +202,24 @@ func TestEnterFetchesAfterFinalizingOutputPath(t *testing.T) {
 	}
 	if value := got.Options().OutputPath; value != "result.yaml" {
 		t.Fatalf("获取前就应落定输出路径: %q", value)
+	}
+}
+
+// Esc 返回帧：测速中按 Esc 返回选源界面时，main 把落定后的同一个 model
+// 原样再喂给 runPickerModel。再渲染的帧要仍显示补全后的值，再次回车
+// 也不得把后缀叠成 result.yaml.yaml。
+func TestOutputPathFinalizedFrameSurvivesEscReturn(t *testing.T) {
+	model := focusOutputPath(t, New(sessionFixture()), "result")
+	model.checked[0] = true
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	returned := updated.(Model)
+	if view := stripANSI(returned.View()); !strings.Contains(view, "result.yaml") {
+		t.Fatalf("Esc 返回后的帧应显示补全后的输出路径:\n%s", view)
+	}
+	reentered, _ := returned.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := reentered.(Model)
+	if value := got.Options().OutputPath; value != "result.yaml" {
+		t.Fatalf("再次回车不应叠加后缀: %q", value)
 	}
 }
 
