@@ -17,8 +17,8 @@ func outputModel(t *testing.T) Model {
 	return model
 }
 
-// 左右键在关闭 → 自定义 → 默认当前路径之间循环，默认停在关闭
-// （见 CONTEXT.md「输出模式」词条）。
+// 左右键循环输出模式，默认停在关闭。关闭与默认当前路径之间可自由循环；
+// 自定义态是编辑态，循环进得去、左右键不再切走（见 CONTEXT.md「输出模式」词条）。
 func TestOutputModeCyclesWithArrowKeys(t *testing.T) {
 	model := outputModel(t)
 	if model.options.OutputMode != OutputModeClosed {
@@ -28,12 +28,11 @@ func TestOutputModeCyclesWithArrowKeys(t *testing.T) {
 		key  tea.KeyType
 		want OutputMode
 	}{
-		{tea.KeyRight, OutputModeCustom},
-		{tea.KeyRight, OutputModeDefaultPath},
-		{tea.KeyRight, OutputModeClosed},
 		{tea.KeyLeft, OutputModeDefaultPath},
+		{tea.KeyRight, OutputModeClosed},
+		{tea.KeyRight, OutputModeCustom},
+		{tea.KeyRight, OutputModeCustom}, // 自定义态左右键不切走
 		{tea.KeyLeft, OutputModeCustom},
-		{tea.KeyLeft, OutputModeClosed},
 	}
 	for i, step := range steps {
 		updated, _ := model.Update(tea.KeyMsg{Type: step.key})
@@ -72,12 +71,10 @@ func TestOutputModeClickCycles(t *testing.T) {
 		t.Fatalf("点 > 应切到自定义态: %v", got)
 	}
 
-	// 右键循环回关闭态，再点左箭头反向到默认当前路径。
+	// 回到关闭态再点左箭头反向到默认当前路径。自定义态是编辑态，左右键
+	// 不切走、也没有 < > 热区，直接设值回去。
 	model = updated.(Model)
-	for model.options.OutputMode != OutputModeClosed {
-		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRight})
-		model = updated.(Model)
-	}
+	model.options.OutputMode = OutputModeClosed
 	updated, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: x, Y: y})
 	if got := updated.(Model).options.OutputMode; got != OutputModeDefaultPath {
 		t.Fatalf("点 < 应反向切到默认当前路径态: %v", got)
@@ -119,6 +116,37 @@ func TestCustomModeTypingAppends(t *testing.T) {
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("sult")})
 	if got := updated.(Model).options.OutputPath; got != "result" {
 		t.Fatalf("自定义态打字应追加: %q", got)
+	}
+}
+
+// 自定义态是编辑态：左右键不循环三态、留给路径输入（词干不动），点击也没
+// 有 < > 热区、只选中该行——键鼠行为对齐（见 CONTEXT.md「输出模式」词条）。
+func TestCustomModeArrowKeysAndClickDoNotCycle(t *testing.T) {
+	model := outputModel(t)
+	model.options.OutputMode = OutputModeCustom
+	model.options.OutputPath = "re"
+	for _, key := range []tea.KeyType{tea.KeyLeft, tea.KeyRight} {
+		updated, _ := model.Update(tea.KeyMsg{Type: key})
+		got := updated.(Model)
+		if got.options.OutputMode != OutputModeCustom {
+			t.Fatalf("自定义态按 %v 不应切走: %v", key, got.options.OutputMode)
+		}
+		if got.options.OutputPath != "re" {
+			t.Fatalf("自定义态按 %v 不应改词干: %q", key, got.options.OutputPath)
+		}
+	}
+
+	// 点击行内（值区域）只选中，不循环三态。
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	model = updated.(Model)
+	x, y := renderedOptionPosition(t, model, "输出路径")
+	updated, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: x + 3, Y: y})
+	got := updated.(Model)
+	if got.options.OutputMode != OutputModeCustom || got.options.OutputPath != "re" {
+		t.Fatalf("自定义态点击不应切走: mode=%v path=%q", got.options.OutputMode, got.options.OutputPath)
+	}
+	if got.focus != focusOptions || got.optionIndex != optionIndexFor(OptionOutputPath) {
+		t.Fatalf("自定义态点击应选中该行: focus=%v index=%v", got.focus, got.optionIndex)
 	}
 }
 

@@ -385,6 +385,11 @@ func (m *Model) adjustOption(delta int) {
 	case kindMode:
 		m.options.changeMode(delta)
 	case kindOutput:
+		if m.options.OutputMode == OutputModeCustom {
+			// 自定义态是编辑态：左右键留给路径输入，不循环三态——与点击
+			// 的豁免一致（arrowSymbolX 在自定义态不算热区）。
+			return
+		}
 		m.options.changeOutputMode(delta)
 	case kindBool:
 		m.options.toggle(row.option)
