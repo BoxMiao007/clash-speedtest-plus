@@ -215,6 +215,95 @@ func TestModeChangeKeepsOutputPathUncompleted(t *testing.T) {
 	}
 }
 
+// outputOptionLineTail 取画面里输出路径行标签之后的部分，避免断言被
+// 同一物理行左栏的文件名干扰。
+func outputOptionLineTail(t *testing.T, model Model) string {
+	t.Helper()
+	for _, line := range strings.Split(model.View(), "\n") {
+		if idx := strings.Index(line, "输出路径"); idx >= 0 {
+			return line[idx:]
+		}
+	}
+	t.Fatal("画面里没有输出路径行")
+	return ""
+}
+
+func TestViewGreysMissingSuffixOnFocusedOutputPath(t *testing.T) {
+	// 测试环境不是 TTY，lipgloss 会剥掉转义序列；强制彩色输出以便断言灰显。
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+	cases := []struct{ name, input, hint string }{
+		{"词干缺 .yaml", "result", ".yaml"},
+		{"半截扩展名缺 yaml", "result.", "yaml"},
+		{"目录段加词干", "dir/result", ".yaml"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := focusOutputPath(t, New(sessionFixture()), tc.input)
+			tail := outputOptionLineTail(t, model)
+			if !strings.Contains(tail, greyStyle.Render(tc.hint)) {
+				t.Fatalf("聚焦输出路径应灰显缺省后缀 %q:\n%s", tc.hint, tail)
+			}
+			// 纯文本上灰显段落在光标前。
+			if plain := stripANSI(tail); !strings.Contains(plain, tc.input+tc.hint+"▌") {
+				t.Fatalf("灰显段应在光标前:\n%s", plain)
+			}
+			// 纯渲染不改值。
+			if value := model.Options().OutputPath; value != tc.input {
+				t.Fatalf("灰显不应进入实际值: %q", value)
+			}
+		})
+	}
+}
+
+func TestViewHidesSuffixHintWhenCompleteOrEmptyStem(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+	for _, input := range []string{"result.yml", "result.yaml", "result.YAML", ".yaml", ".yml", "."} {
+		t.Run(input, func(t *testing.T) {
+			model := focusOutputPath(t, New(sessionFixture()), input)
+			tail := outputOptionLineTail(t, model)
+			for _, hint := range []string{"yaml", ".yaml"} {
+				if strings.Contains(tail, greyStyle.Render(hint)) {
+					t.Fatalf("后缀已写全或词干为空时不应灰显 %q:\n%s", hint, tail)
+				}
+			}
+			if plain := stripANSI(tail); !strings.Contains(plain, input+"▌") {
+				t.Fatalf("行内应显示原样输入加光标:\n%s", plain)
+			}
+			if value := model.Options().OutputPath; value != input {
+				t.Fatalf("无灰显时也不应改值: %q", value)
+			}
+		})
+	}
+}
+
+func TestViewShowsOutputPathAsIsWhenUnfocused(t *testing.T) {
+	model := New(sessionFixture())
+	model.options.OutputPath = "result"
+	plain := stripANSI(outputOptionLineTail(t, model))
+	if !strings.Contains(plain, "result") {
+		t.Fatalf("未聚焦的输出路径行应显示原样输入:\n%s", plain)
+	}
+	if strings.Contains(plain, "yaml") {
+		t.Fatalf("未聚焦时不应有灰显补全:\n%s", plain)
+	}
+}
+
+func TestFocusedOutputPathWithHintStaysWithinWidth(t *testing.T) {
+	model := New(sessionFixture())
+	model.focus = focusOptions
+	model.optionIndex = optionIndexFor(OptionOutputPath)
+	model.options.OutputPath = strings.Repeat("r", 100)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 40, Height: 40})
+	model = updated.(Model)
+	for i, line := range strings.Split(model.View(), "\n") {
+		if w := lipgloss.Width(line); w > 40 {
+			t.Fatalf("第 %d 行超宽 %d:\n%s", i, w, line)
+		}
+	}
+}
+
 func TestViewShowsCheckAndUnselectableReason(t *testing.T) {
 	model := New(sessionFixture())
 	model.checked[0] = true
