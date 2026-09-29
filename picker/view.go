@@ -363,7 +363,9 @@ func (m Model) optionLine(lo layout, row int) string {
 		valueStyle = okStyle
 	case optionRow.kind == kindBool:
 		valueStyle = dimStyle
-	case optionRow.kind == kindText && (strings.HasPrefix(value, "默认") || value == "不输出"):
+	case optionRow.kind == kindText && strings.HasPrefix(value, "默认"):
+		valueStyle = dimStyle
+	case optionRow.kind == kindOutput && m.outputModePlaceholder():
 		valueStyle = dimStyle
 	}
 
@@ -556,11 +558,14 @@ func selectedLine(plain string, width int) string {
 	return selectedStyle.Render(padPlain(truncatePlain(plain, width), width))
 }
 
-// outputSuffixHint 是聚焦输出路径行时该灰显的缺省后缀段；留空（含纯
-// 空白，此时行内显示「不输出」）或后缀已写全时为空。只有输出路径一行
-// 有灰显提示，其余文本行原样。
+// outputSuffixHint 是聚焦输出路径行时该灰显的缺省后缀段；自定义态没打字
+// 或后缀已写全时为空，关闭/默认当前路径态没有编辑中的词干也不显示。只有
+// 输出路径一行有灰显提示，其余文本行原样。
 func (m Model) outputSuffixHint(row optionRow) string {
 	if row.option != OptionOutputPath {
+		return ""
+	}
+	if m.options.OutputMode != OutputModeCustom {
 		return ""
 	}
 	value := m.options.OutputPath
@@ -570,8 +575,46 @@ func (m Model) outputSuffixHint(row optionRow) string {
 	return MissingYAMLSuffix(value)
 }
 
+// outputModeValue 给出输出模式行的显示值（见 CONTEXT.md「输出模式」词条）：
+// 关闭与默认当前路径带 < > 提示左右键和点击可循环；自定义态显示词干，
+// 没打字时提示态名并可接着输入。
+func (m Model) outputModeValue(focused bool) string {
+	switch m.options.OutputMode {
+	case OutputModeCustom:
+		value := m.options.OutputPath
+		if strings.TrimSpace(value) == "" {
+			if focused {
+				return "自定义▌"
+			}
+			return "自定义"
+		}
+		if focused {
+			return value + "▌"
+		}
+		return value
+	case OutputModeDefaultPath:
+		return "< 默认当前路径 >"
+	default:
+		return "< 关闭 >"
+	}
+}
+
+// outputModePlaceholder 报告输出模式行的值是不是占位提示：关闭态、
+// 自定义态还没打字时灰显；默认当前路径与已填词干按普通值渲染。
+func (m Model) outputModePlaceholder() bool {
+	switch m.options.OutputMode {
+	case OutputModeClosed:
+		return true
+	case OutputModeCustom:
+		return strings.TrimSpace(m.options.OutputPath) == ""
+	default:
+		return false
+	}
+}
+
 // optionValue 给出该行显示的值。可调行带「< >」符号提示点击方向，
-// 下载/上传大小显示 MB 单位；文本行留空显示「默认 (…)」，输出路径例外。
+// 下载/上传大小显示 MB 单位；文本行留空显示「默认 (…)」，输出模式行
+// 按三态显示（见 outputModeValue）。
 func (m Model) optionValue(row optionRow, focused bool) string {
 	if row.kind == kindBool {
 		return m.options.value(row.option)
@@ -579,11 +622,11 @@ func (m Model) optionValue(row optionRow, focused bool) string {
 	if row.kind == kindMode {
 		return "< " + modeLabel(m.options.Mode) + " >"
 	}
+	if row.kind == kindOutput {
+		return m.outputModeValue(focused)
+	}
 	value := m.options.value(row.option)
 	if strings.TrimSpace(value) == "" {
-		if row.option == OptionOutputPath {
-			return "不输出"
-		}
 		if hint := defaultHint(row.option); hint != "" {
 			return hint
 		}

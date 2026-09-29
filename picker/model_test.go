@@ -235,6 +235,9 @@ func TestModeChangeKeepsOutputPathUncompleted(t *testing.T) {
 	if value := got.Options().OutputPath; value != "result" {
 		t.Fatalf("切模式不应重置或补全输出路径: %q", value)
 	}
+	if mode := got.Options().OutputMode; mode != OutputModeCustom {
+		t.Fatalf("切模式不应重置输出模式: %v", mode)
+	}
 }
 
 // outputOptionLineTail 取画面里输出路径行标签之后的部分，避免断言被
@@ -302,6 +305,7 @@ func TestViewHidesSuffixHintWhenCompleteOrEmptyStem(t *testing.T) {
 
 func TestViewShowsOutputPathAsIsWhenUnfocused(t *testing.T) {
 	model := New(sessionFixture())
+	model.options.OutputMode = OutputModeCustom
 	model.options.OutputPath = "result"
 	plain := stripANSI(outputOptionLineTail(t, model))
 	if !strings.Contains(plain, "result") {
@@ -316,6 +320,7 @@ func TestFocusedOutputPathWithHintStaysWithinWidth(t *testing.T) {
 	model := New(sessionFixture())
 	model.focus = focusOptions
 	model.optionIndex = optionIndexFor(OptionOutputPath)
+	model.options.OutputMode = OutputModeCustom
 	model.options.OutputPath = strings.Repeat("r", 100)
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 40, Height: 40})
 	model = updated.(Model)
@@ -709,6 +714,7 @@ func TestFastModeGreysSpeedOptionsAndEmptyOutputGreysRename(t *testing.T) {
 	}
 
 	model.options.Mode = "download"
+	model.options.OutputMode = OutputModeCustom
 	model.options.OutputPath = "out.yaml"
 	view = model.View()
 	if optionLineDisabled(view, "下载大小") || optionLineDisabled(view, "重命名") {
@@ -1160,6 +1166,7 @@ func TestClickBooleanOnlyAtRenderedValue(t *testing.T) {
 				for _, offset := range []int{-3, -2, -1, 0, 1, 2, 3, 5} {
 					t.Run(fmt.Sprintf("%s/宽%d/开%t/偏移%d", label, width, on, offset), func(t *testing.T) {
 						model := New(sessionFixture())
+						model.options.OutputMode = OutputModeCustom
 						model.options.OutputPath = "out.yaml"
 						model.options.ImageSpeedOnly, model.options.NoImage, model.options.Rename = on, on, on
 						updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: 30})
@@ -1197,6 +1204,7 @@ func TestBooleanKeyboardAndDisabledClicks(t *testing.T) {
 		label := optionOrder[optionIndexFor(option)].label
 		t.Run(label, func(t *testing.T) {
 			model := New(sessionFixture())
+			model.options.OutputMode = OutputModeCustom
 			model.options.OutputPath = "out.yaml"
 			updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 			model = updated.(Model)

@@ -37,7 +37,8 @@ func TestApplyPickerOptionsWritesFlags(t *testing.T) {
 		DownloadSize: "80", UploadSize: "30", Concurrent: "8", Parallel: "4",
 		Timeout: "9s", EarlyStop: "20", MaxLatency: "2s", MaxPacketLoss: "50",
 		MinDownload: "6", MinUpload: "3", ImageSpeedOnly: true, NoImage: true,
-		OutputPath: "out.yaml", Rename: false, RenameTemplate: "{{.Index}}",
+		OutputMode: picker.OutputModeCustom, OutputPath: "out.yaml",
+		Rename: false, RenameTemplate: "{{.Index}}",
 		GistToken: "gt", GistAddress: "ga", RepoToken: "rt", RepoAddress: "user/repo",
 		RepoFilePath: "p.yaml", RepoBranch: "dev", ServerURL: "https://s.example.com", UserAgent: "ua/1",
 	})
@@ -224,6 +225,76 @@ func TestCompletedOutputPathFeedsExportName(t *testing.T) {
 	want := filepath.Join("/opt/clash-speedtest-plus", "1.机场A-result.yaml")
 	if final != want {
 		t.Fatalf("最终产物名 = %q，期望 %q", final, want)
+	}
+}
+
+// 每轮最终产物路径由输出模式决定：自定义模式与 v2.3.0 完全一致（回归钉住），
+// 「默认当前路径」自动命名——本地源「基名-导出.yaml」，订阅轮「导出-时间戳」。
+func TestRoundOutputPathFollowsOutputMode(t *testing.T) {
+	now := time.Date(2026, 9, 27, 15, 30, 1, 0, time.Local)
+	execDir := filepath.Join("/", "opt", "clash-speedtest-plus")
+	cases := []struct {
+		name       string
+		customPath string
+		auto       bool
+		nameBase   string
+		seq        int
+		want       string
+	}{
+		{
+			"自定义文件轮（v2.3.0 行为）",
+			filepath.Join(execDir, "result.yaml"), false, "机场A", 1,
+			filepath.Join(execDir, "1.机场A-result.yaml"),
+		},
+		{
+			"自定义订阅轮靠序号（v2.3.0 行为）",
+			filepath.Join(execDir, "result.yaml"), false, "", 2,
+			filepath.Join(execDir, "2.result.yaml"),
+		},
+		{"关闭不加自动", "", false, "机场A", 3, ""},
+		{
+			"自动本地源按基名-导出",
+			"", true, "机场A", 1,
+			filepath.Join(execDir, "1.机场A-导出.yaml"),
+		},
+		{
+			"自动订阅轮导出-时间戳兜底",
+			"", true, "", 2,
+			filepath.Join(execDir, "2.导出-20260927-153001.yaml"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := roundOutputPath(tc.customPath, tc.auto, execDir, tc.nameBase, now, tc.seq)
+			if got != tc.want {
+				t.Fatalf("roundOutputPath = %q，期望 %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// applyPickerOptions 按输出模式三态解释输出设置（见 CONTEXT.md「输出模式」）：
+// 自定义写词干，默认当前路径开自动命名，关闭清空——按 Esc 重跑时关掉输出
+// 必须真的关掉，不能沿用上一轮的值。
+func TestApplyPickerOptionsInterpretsOutputMode(t *testing.T) {
+	origOutputPath, origAuto := outputPath, outputAuto
+	t.Cleanup(func() { outputPath, outputAuto = origOutputPath, origAuto })
+
+	*outputPath, outputAuto = "stale.yaml", true
+
+	applyPickerOptions(picker.Options{OutputMode: picker.OutputModeCustom, OutputPath: "out.yaml"})
+	if *outputPath != "out.yaml" || outputAuto {
+		t.Fatalf("自定义态应写词干关自动: path=%q auto=%v", *outputPath, outputAuto)
+	}
+
+	applyPickerOptions(picker.Options{OutputMode: picker.OutputModeDefaultPath})
+	if *outputPath != "" || !outputAuto {
+		t.Fatalf("默认当前路径态应清词干开自动: path=%q auto=%v", *outputPath, outputAuto)
+	}
+
+	applyPickerOptions(picker.Options{OutputMode: picker.OutputModeClosed})
+	if *outputPath != "" || outputAuto {
+		t.Fatalf("关闭态应清掉输出设置: path=%q auto=%v", *outputPath, outputAuto)
 	}
 }
 

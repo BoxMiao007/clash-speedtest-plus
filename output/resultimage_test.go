@@ -157,6 +157,32 @@ func TestFollowedConfigExportPath(t *testing.T) {
 	}
 }
 
+// AutoExportPath 是输出模式「默认当前路径」的自动产物名：本地源按
+// 「基名-导出.yaml」，订阅轮没有基名用「导出-时间戳」兜底；产物序号
+// 照常加在最前（见 CONTEXT.md「输出模式」词条）。
+func TestAutoExportPath(t *testing.T) {
+	now := time.Date(2026, 9, 27, 15, 30, 1, 0, time.Local)
+	cases := []struct {
+		name string
+		base string
+		seq  int
+		want string
+	}{
+		{"本地源带序号", "机场A", 1, "1.机场A-导出.yaml"},
+		{"本地源序号停用", "机场A", 0, "机场A-导出.yaml"},
+		{"订阅轮兜底带序号", "", 2, "2.导出-20260927-153001.yaml"},
+		{"订阅轮兜底序号停用", "", 0, "导出-20260927-153001.yaml"},
+		{"本地源多轮递增", "机场A", 12, "12.机场A-导出.yaml"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := AutoExportPath(c.base, now, c.seq); got != c.want {
+				t.Fatalf("AutoExportPath(%q, %v, %d) = %q, want %q", c.base, now, c.seq, got, c.want)
+			}
+		})
+	}
+}
+
 // CleanNameBase 把配置文件名收成产物名前缀：剥扩展、剥路径、剔非法字符、
 // 限长；洗不出来就回空串（调用方退化到默认命名）。
 func TestCleanNameBase(t *testing.T) {

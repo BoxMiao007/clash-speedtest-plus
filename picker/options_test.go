@@ -30,7 +30,8 @@ func TestEveryOptionHasValue(t *testing.T) {
 		Concurrent: "4", Parallel: "6", Timeout: "5s", EarlyStop: "9", MaxLatency: "1s",
 		MaxPacketLoss: "100", MinDownload: "5", MinUpload: "2",
 		ImageSpeedOnly: true, NoImage: true,
-		OutputPath: "o.yaml", Rename: true, RenameTemplate: "t",
+		OutputMode: OutputModeCustom, OutputPath: "o.yaml",
+		Rename: true, RenameTemplate: "t",
 		GistToken: "g", GistAddress: "ga", RepoToken: "r", RepoAddress: "ra",
 		RepoFilePath: "p", RepoBranch: "br", ServerURL: "s", UserAgent: "ua",
 	}
@@ -50,7 +51,7 @@ func TestOptionEnabledFollowsModeAndOutput(t *testing.T) {
 		t.Fatal("fast mode left upload options enabled")
 	}
 
-	download := OptionState{Mode: "download", OutputPath: "out.yaml"}
+	download := OptionState{Mode: "download", OutputMode: OutputModeCustom, OutputPath: "out.yaml"}
 	if !download.Enabled(OptionDownloadSize) || !download.Enabled(OptionMinDownload) || !download.Enabled(OptionImageSpeedOnly) {
 		t.Fatal("download mode disabled download options")
 	}
@@ -67,5 +68,16 @@ func TestOptionEnabledFollowsModeAndOutput(t *testing.T) {
 	}
 	if !noOutput.Enabled(OptionUploadSize) || !noOutput.Enabled(OptionMinUpload) {
 		t.Fatal("full mode disabled upload options")
+	}
+
+	// 输出开关跟着输出模式走（见 CONTEXT.md「输出模式」）：默认当前路径
+	// 恒开（自动命名不需要词干），自定义要有非空词干，关闭不开。
+	auto := OptionState{Mode: "download", OutputMode: OutputModeDefaultPath}
+	if !auto.Enabled(OptionRename) || !auto.Enabled(OptionGistAddress) || !auto.Enabled(OptionRepoFilePath) {
+		t.Fatal("默认当前路径态应让重命名与上传可用")
+	}
+	emptyCustom := OptionState{Mode: "download", OutputMode: OutputModeCustom, OutputPath: "  "}
+	if emptyCustom.Enabled(OptionRename) || emptyCustom.Enabled(OptionRepoToken) {
+		t.Fatal("自定义态词干为空时重命名与上传应不可用")
 	}
 }
