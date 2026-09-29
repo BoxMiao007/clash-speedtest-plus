@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +13,9 @@ import (
 
 	"github.com/BoxMiao007/clash-speedtest-plus/output"
 	"github.com/BoxMiao007/clash-speedtest-plus/picker"
+	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/tui"
+	"gopkg.in/yaml.v2"
 )
 
 func TestLaunchOpensPickerOnlyWithoutArgsOnTerminal(t *testing.T) {
@@ -350,4 +356,143 @@ func TestHelpPutsCommonFlagsFirstAndUsesMegabytes(t *testing.T) {
 	if strings.Contains(help, "\n  -output ") {
 		t.Fatalf("-output 不应再单独占一行:\n%s", help)
 	}
+}
+
+// writeMergedExport 的触发条件（CONTEXT.md「合并导出」词条、ADR-0014）：
+// 输出模式非关闭、队列正常结束、至少两轮正常测完。关闭态、单轮、Esc 中断、
+// Ctrl+C 退出全部、保存失败、准备错误都不写。
+func TestWriteMergedExportTriggers(t *testing.T) {
+	now := time.Date(2026, 9, 27, 15, 30, 1, 0, time.Local)
+	roundA := []map[string]any{{"name": "A", "server": "1.1.1.1", "type": "ss"}}
+	roundB := []map[string]any{{"name": "B", "server": "2.2.2.2", "type": "ss"}}
+	twoRounds := [][]map[string]any{roundA, roundB}
+	cases := []struct {
+		name       string
+		result     tui.QueueResult
+		outputOpen bool
+		rounds     [][]map[string]any
+		wantFile   bool
+	}{
+		{"输出开启两轮正常结束", tui.QueueResult{}, true, twoRounds, true},
+		{"输出关闭不写", tui.QueueResult{}, false, twoRounds, false},
+		{"单轮不写", tui.QueueResult{}, true, [][]map[string]any{roundA}, false},
+		{"没有轮不写", tui.QueueResult{}, true, nil, false},
+		{"Esc 中断不写", tui.QueueResult{Escaped: true}, true, twoRounds, false},
+		{"Ctrl+C 退出全部不写", tui.QueueResult{ExitAll: true}, true, twoRounds, false},
+		{"保存失败不写", tui.QueueResult{Failed: true}, true, twoRounds, false},
+		{"准备错误不写", tui.QueueResult{SetupErr: errors.New("加载节点失败")}, true, twoRounds, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeMergedExport(tc.result, tc.outputOpen, dir, tc.rounds, now)
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatalf("读临时目录失败: %v", err)
+			}
+			if !tc.wantFile {
+				if path != "" {
+					t.Fatalf("不应触发合并导出，却返回 %q", path)
+				}
+				if len(entries) != 0 {
+					t.Fatalf("不应写任何文件，目录里有 %d 个", len(entries))
+				}
+				return
+			}
+			want := filepath.Join(dir, "导出-合并-20260927-153001.yaml")
+			if path != want {
+				t.Fatalf("合并文件路径 = %q，期望 %q", path, want)
+			}
+			if len(entries) != 1 {
+				t.Fatalf("目录里应只有合并文件，实际 %d 个", len(entries))
+			}
+		})
+	}
+}
+
+// 合并内容是各轮过筛节点并集：过滤口径与各轮写盘完全一致（同一 buildProxies
+// 构建，对应交互轮 saver 与非交互写盘的生产组合），重名节点跳过、保留先完成
+// 轮的。重命名在同一次构建里生效，合并拿到的就是重命名后的节点。
+func TestWriteMergedExportUnitesRoundsWithRoundCaliber(t *testing.T) {
+	origRename := *renameNodes
+	*renameNodes = false
+	t.Cleanup(func() { *renameNodes = origRename })
+
+	// 与 newResultFilter 同口径：完整模式按下载速度过筛。
+	filter := resultFilter{
+		mode:             speedtester.SpeedModeDownload,
+		maxPacketLoss:    100,
+		minDownloadSpeed: 5 * 1024 * 1024,
+		downloadSize:     50,
+	}
+	results1 := []*speedtester.Result{
+		{ProxyName: "快", ProxyConfig: map[string]any{"name": "快", "server": "1.1.1.1", "type": "ss"}, DownloadSpeed: 10 * 1024 * 1024},
+		{ProxyName: "慢", ProxyConfig: map[string]any{"name": "慢", "server": "2.2.2.2", "type": "ss"}, DownloadSpeed: 1 * 1024 * 1024},
+	}
+	results2 := []*speedtester.Result{
+		// 与第一轮重名的节点：server 不同，合并必须保留第一轮的版本。
+		{ProxyName: "快", ProxyConfig: map[string]any{"name": "快", "server": "3.3.3.3", "type": "ss"}, DownloadSpeed: 9 * 1024 * 1024},
+		{ProxyName: "新", ProxyConfig: map[string]any{"name": "新", "server": "4.4.4.4", "type": "ss"}, DownloadSpeed: 8 * 1024 * 1024},
+	}
+
+	dir := t.TempDir()
+	now := time.Date(2026, 9, 27, 15, 30, 1, 0, time.Local)
+
+	// 各轮写盘走生产组合（buildProxies 一次构建、writeConfigFile 落盘）。
+	for i, results := range [][]*speedtester.Result{results1, results2} {
+		roundPath := filepath.Join(dir, fmt.Sprintf("round-%d.yaml", i+1))
+		if err := writeConfigFile(roundPath, buildProxies(results, filter)); err != nil {
+			t.Fatalf("写第 %d 轮文件失败: %v", i+1, err)
+		}
+	}
+
+	rounds := [][]map[string]any{buildProxies(results1, filter), buildProxies(results2, filter)}
+	mergedPath := writeMergedExport(tui.QueueResult{}, true, dir, rounds, now)
+	wantPath := filepath.Join(dir, "导出-合并-20260927-153001.yaml")
+	if mergedPath != wantPath {
+		t.Fatalf("合并文件路径 = %q，期望 %q", mergedPath, wantPath)
+	}
+
+	type parsedProxy struct {
+		Name   string `yaml:"name"`
+		Server string `yaml:"server"`
+	}
+	readProxies := func(path string) []parsedProxy {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("读 %s 失败: %v", path, err)
+		}
+		var cfg speedtester.RawConfig
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			t.Fatalf("解析 %s 失败: %v", path, err)
+		}
+		proxies := make([]parsedProxy, 0, len(cfg.Proxies))
+		for _, proxy := range cfg.Proxies {
+			name, _ := proxy["name"].(string)
+			server, _ := proxy["server"].(string)
+			proxies = append(proxies, parsedProxy{Name: name, Server: server})
+		}
+		return proxies
+	}
+
+	assertProxies := func(who string, got []parsedProxy, want []parsedProxy) {
+		if len(got) != len(want) {
+			t.Fatalf("%s 节点 = %v，期望 %v", who, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("%s 节点[%d] = %v，期望 %v", who, i, got[i], want[i])
+			}
+		}
+	}
+
+	// 每轮文件各留各的（含第二轮自己的重名版本）。
+	assertProxies("第 1 轮", readProxies(filepath.Join(dir, "round-1.yaml")),
+		[]parsedProxy{{Name: "快", Server: "1.1.1.1"}})
+	assertProxies("第 2 轮", readProxies(filepath.Join(dir, "round-2.yaml")),
+		[]parsedProxy{{Name: "快", Server: "3.3.3.3"}, {Name: "新", Server: "4.4.4.4"}})
+
+	// 合并文件：过筛掉「慢」，重名「快」保留先完成轮的，并集按完成顺序排列。
+	assertProxies("合并", readProxies(mergedPath),
+		[]parsedProxy{{Name: "快", Server: "1.1.1.1"}, {Name: "新", Server: "4.4.4.4"}})
 }

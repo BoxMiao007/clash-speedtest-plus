@@ -183,6 +183,27 @@ func TestAutoExportPath(t *testing.T) {
 	}
 }
 
+// MergedExportPath 是「合并导出」文件名：固定「导出-合并-时间戳」，时间戳
+// 格式与「导出-时间戳」兜底命名一致；不属于任何轮，永远不带产物序号（见
+// CONTEXT.md「合并导出」词条、ADR-0014）。
+func TestMergedExportPath(t *testing.T) {
+	cases := []struct {
+		name string
+		now  time.Time
+		want string
+	}{
+		{"固定前缀加时间戳", time.Date(2026, 9, 27, 15, 30, 1, 0, time.Local), "导出-合并-20260927-153001.yaml"},
+		{"另一时刻只变时间戳", time.Date(2026, 9, 29, 8, 5, 9, 0, time.Local), "导出-合并-20260929-080509.yaml"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := MergedExportPath(c.now); got != c.want {
+				t.Fatalf("MergedExportPath(%v) = %q，期望 %q", c.now, got, c.want)
+			}
+		})
+	}
+}
+
 // CleanNameBase 把配置文件名收成产物名前缀：剥扩展、剥路径、剔非法字符、
 // 限长；洗不出来就回空串（调用方退化到默认命名）。
 func TestCleanNameBase(t *testing.T) {

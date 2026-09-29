@@ -298,13 +298,18 @@ func runSourceQueue(sources []picker.SourceSpec, execDir string, escapeToParent 
 	// 各轮会把全局改成自己的最终名，所以锚定值必须存局部变量。
 	*outputPath = picker.ResolveOutputPath(execDir, *outputPath)
 	originalOutputPath := *outputPath
+	// 输出模式非关闭：自定义词干（命令行 -o 或选源自定义态）或默认当前路径
+	// （outputAuto）。「合并导出」以此为前提（CONTEXT.md「合并导出」词条）。
+	outputOpen := originalOutputPath != "" || outputAuto
 
 	var escaped bool
 	if output.DetermineOutputMode(output.IsTerminalFile) == output.OutputModeInteractive {
-		escaped = runQueueProgram(sources, execDir, originalOutputPath, escapeToParent)
+		escaped = runQueueProgram(sources, execDir, originalOutputPath, outputOpen, escapeToParent)
 	} else {
 		// 非交互模式没有界面：stdout 保留给 TSV/管道，逐轮同步跑。
 		startSeq := output.NextImageSequence(execDir)
+		// 各轮过筛节点按完成顺序收集，队列走完后供「合并导出」求并集。
+		var completed [][]map[string]any
 		for i, src := range sources {
 			// 单源不画轮次（跟「多源才亮轮数」的口径一致），多源标「第 X/N 轮 源名」。
 			label := ""
@@ -319,9 +324,16 @@ func runSourceQueue(sources []picker.SourceSpec, execDir string, escapeToParent 
 				hasMore:    i < len(sources)-1,
 				outputPath: originalOutputPath,
 			}
-			if runSpeedTest(execDir, round) == roundSkipped {
+			outcome, proxies := runSpeedTest(execDir, round)
+			if outcome == roundSkipped {
 				continue
 			}
+			completed = append(completed, proxies)
+		}
+		// 逐轮同步跑完且没有致命退出才到这里：非交互没有 Esc/退出全部语义，
+		// 等价队列正常结束，按「合并导出」条件写（ADR-0014）。
+		if path := writeMergedExport(tui.QueueResult{}, outputOpen, execDir, completed, time.Now()); path != "" {
+			fmt.Fprintf(os.Stderr, "已保存合并配置: %s\n", path)
 		}
 	}
 	// 全局在轮内被改写成各轮最终名，离开队列前恢复成用户原始路径，
@@ -370,7 +382,8 @@ func setupRound(execDir string, round speedRound) string {
 
 // runSpeedTest 跑非交互（TSV/管道）路径的一轮：同步收集结果、写 TSV、
 // 落盘 yaml 与结果图、等上传。交互路径由 runQueueProgram 承载，不经过这里。
-func runSpeedTest(execDir string, round speedRound) roundOutcome {
+// 返回本轮结局与过筛后的节点列表（输出关闭时为 nil），供合并导出求并集。
+func runSpeedTest(execDir string, round speedRound) (roundOutcome, []map[string]any) {
 	src := round.source
 	nameBase := setupRound(execDir, round)
 
@@ -390,7 +403,7 @@ func runSpeedTest(execDir string, round speedRound) roundOutcome {
 			who = src.DisplayName
 		}
 		fmt.Fprintf(os.Stderr, "%s：解析出 0 个节点，跳过这一轮\n", who)
-		return roundSkipped
+		return roundSkipped, nil
 	}
 
 	// 非交互模式没有进度行，多轮时轮次提示走 stderr，stdout 保留给 TSV/管道。
@@ -416,12 +429,14 @@ func runSpeedTest(execDir string, round speedRound) roundOutcome {
 
 	results = output.SortResults(results, effectiveMode)
 
+	var savedProxies []map[string]any
 	if *outputPath != "" {
-		err = saveConfigInterruptible(*outputPath, results, resultFilter)
+		proxies, err := saveConfigInterruptible(*outputPath, results, resultFilter)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "保存配置失败: %s\n", err)
 			os.Exit(1)
 		}
+		savedProxies = proxies
 		// 非交互模式路径走 stderr，stdout 保留给 TSV/管道输出。
 		fmt.Fprintf(os.Stderr, "已保存配置: %s\n", *outputPath)
 	}
@@ -432,7 +447,7 @@ func runSpeedTest(execDir string, round speedRound) roundOutcome {
 		exportNonInteractiveImage(execDir, src.DisplayName, nameBase, round.seq, results, effectiveMode, len(allProxies), imageSpeedFilterEnabled(effectiveMode))
 	}
 	waitForUpload()
-	return roundDone
+	return roundDone, savedProxies
 }
 
 // roundOutputPath 算出一轮的最终产物路径，保存与上传都读它。自定义模式
@@ -457,11 +472,30 @@ type queueRunner struct {
 	sources            []picker.SourceSpec
 	execDir            string
 	originalOutputPath string
+	outputOpen         bool // 输出模式非关闭：「合并导出」的前提
 	escapeToParent     bool
 	startSeq           int
 	voided             *atomic.Bool
 	mu                 sync.Mutex
 	current            *speedtester.SpeedTester // 最近一轮启动的测试，作废时停掉
+	mergeMu            sync.Mutex
+	mergedRounds       [][]map[string]any // 正常测完轮的过筛节点，按完成顺序，供合并导出
+}
+
+// recordMergedRound 收下一轮过筛后的节点列表（与该轮写盘同一构建），供队列
+// 正常结束后合并导出。saver 在 bubbletea 命令 goroutine 里执行，与收尾读取
+// 并发，需加锁。
+func (r *queueRunner) recordMergedRound(proxies []map[string]any) {
+	r.mergeMu.Lock()
+	defer r.mergeMu.Unlock()
+	r.mergedRounds = append(r.mergedRounds, proxies)
+}
+
+// collectedRounds 返回已收集的各轮过筛节点（按完成顺序）。
+func (r *queueRunner) collectedRounds() [][]map[string]any {
+	r.mergeMu.Lock()
+	defer r.mergeMu.Unlock()
+	return r.mergedRounds
 }
 
 // prepare 准备第 index 轮并返回就绪的轮视图。源解析不出节点时返回 skipped；
@@ -570,7 +604,11 @@ func (r *queueRunner) prepare(index int) (tui.QueueRound, bool, error) {
 		roundSavePath := *outputPath
 		model.SetConfigSaver(func(done []*speedtester.Result) (string, error) {
 			sorted := output.SortResults(append([]*speedtester.Result(nil), done...), effectiveMode)
-			if err := saveConfig(roundSavePath, sorted, resultFilter); err != nil {
+			// 各轮写盘与合并导出共用同一构建：先过筛重命名，再落盘并记入
+			// 合并来源，保证两边口径完全一致（ADR-0014）。
+			proxies := buildProxies(sorted, resultFilter)
+			r.recordMergedRound(proxies)
+			if err := writeConfigFile(roundSavePath, proxies); err != nil {
 				return "", err
 			}
 			return roundSavePath, nil
@@ -603,12 +641,14 @@ func (r *queueRunner) stopCurrent() {
 }
 
 // runQueueProgram 用一个 tea.Program 承载整个队列（ADR-0015）：每轮一个视图、
-// 全部保留在内存里，轮与轮自动推进，界面全程不重启。返回是否按 Esc 回选源界面。
-func runQueueProgram(sources []picker.SourceSpec, execDir, originalOutputPath string, escapeToParent bool) bool {
+// 全部保留在内存里，轮与轮自动推进，界面全程不重启。outputOpen 表示输出模式
+// 非关闭（「合并导出」的前提）。返回是否按 Esc 回选源界面。
+func runQueueProgram(sources []picker.SourceSpec, execDir, originalOutputPath string, outputOpen, escapeToParent bool) bool {
 	runner := &queueRunner{
 		sources:            sources,
 		execDir:            execDir,
 		originalOutputPath: originalOutputPath,
+		outputOpen:         outputOpen,
 		escapeToParent:     escapeToParent,
 		startSeq:           output.NextImageSequence(execDir),
 		voided:             &atomic.Bool{},
@@ -648,6 +688,11 @@ func runQueueProgram(sources []picker.SourceSpec, execDir, originalOutputPath st
 	// 各轮离开 TUI 后补一行状态（已保存路径/失败原因），方便复制。
 	for _, status := range result.Statuses {
 		fmt.Fprintf(os.Stderr, "%s\n", status)
+	}
+	// 「合并导出」先于退出处理判断：Esc 回选源、Ctrl+C 退出全部、保存失败、
+	// 准备错误都算队列未正常结束，不写（CONTEXT.md「合并导出」、ADR-0014）。
+	if path := writeMergedExport(result, runner.outputOpen, execDir, runner.collectedRounds(), time.Now()); path != "" {
+		fmt.Fprintf(os.Stderr, "已保存合并配置: %s\n", path)
 	}
 	if result.SetupErr != nil {
 		log.Fatalf("%s", result.SetupErr)
@@ -719,28 +764,35 @@ func writeNonInteractiveImage(ctx context.Context, execDir, imageSource, nameBas
 	fmt.Fprintf(os.Stderr, "%s\n", output.JoinStatus("已保存 "+path, warning))
 }
 
-func saveConfigInterruptible(path string, results []*speedtester.Result, filter resultFilter) error {
+// saveConfigInterruptible 过筛、重命名并写盘，Ctrl+C 可中断。成功时返回
+// 构建出的节点列表：与各轮写盘同一构建，供「合并导出」复用（ADR-0014）。
+func saveConfigInterruptible(path string, results []*speedtester.Result, filter resultFilter) ([]map[string]any, error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	errCh := make(chan error, 1)
+	type saveOutcome struct {
+		proxies []map[string]any
+		err     error
+	}
+	ch := make(chan saveOutcome, 1)
 	go func() {
 		if ctx.Err() != nil {
-			errCh <- ctx.Err()
+			ch <- saveOutcome{err: ctx.Err()}
 			return
 		}
-		errCh <- saveConfig(path, results, filter)
+		proxies := buildProxies(results, filter)
+		ch <- saveOutcome{proxies: proxies, err: writeConfigFile(path, proxies)}
 	}()
 	select {
-	case err := <-errCh:
-		return err
+	case out := <-ch:
+		return out.proxies, out.err
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 }
 
-// saveConfig 把过筛后的节点写成合格配置。路径由调用方显式传入：队列壳下
-// 各轮并存，不读全局，避免与下一轮的全局改写竞争。
-func saveConfig(path string, results []*speedtester.Result, filter resultFilter) error {
+// buildProxies 按过筛口径把测速结果收成写盘用的节点列表：各轮写盘与合并
+// 导出共用同一构建，保证过滤与重命名口径完全一致（ADR-0014）。
+func buildProxies(results []*speedtester.Result, filter resultFilter) []map[string]any {
 	proxies := make([]map[string]any, 0)
 	nameCount := make(map[string]int) // Track name usage to avoid duplicates
 
@@ -768,7 +820,12 @@ func saveConfig(path string, results []*speedtester.Result, filter resultFilter)
 		}
 		proxies = append(proxies, proxyConfig)
 	}
+	return proxies
+}
 
+// writeConfigFile 把节点列表 marshal 成合格配置写盘。路径由调用方显式传入：
+// 队列壳下各轮并存，不读全局，避免与下一轮的全局改写竞争。
+func writeConfigFile(path string, proxies []map[string]any) error {
 	config := &speedtester.RawConfig{
 		Proxies: proxies,
 	}
@@ -781,6 +838,40 @@ func saveConfig(path string, results []*speedtester.Result, filter resultFilter)
 		return err
 	}
 	return nil
+}
+
+// writeMergedExport 按「合并导出」写合并文件（CONTEXT.md「合并导出」词条、
+// ADR-0014）：输出模式非关闭、队列正常结束（无 Esc 回选源、无 Ctrl+C 退出
+// 全部、无保存失败、无准备错误）、且至少两轮正常测完才写。内容是各轮过筛
+// 节点（与各轮写盘同一构建）按完成顺序求并集，重名节点跳过、保留先完成轮
+// 的；文件名「导出-合并-时间戳」不带产物序号，也不参与 Gist/仓库上传。
+// 非交互路径没有中断语义，传零值 QueueResult 即视为正常结束。返回写入路径；
+// 没触发或写失败返回空串，写失败只报 stderr 不影响退出码。
+func writeMergedExport(result tui.QueueResult, outputOpen bool, execDir string, rounds [][]map[string]any, now time.Time) string {
+	if result.Escaped || result.ExitAll || result.Failed || result.SetupErr != nil {
+		return ""
+	}
+	if !outputOpen || len(rounds) < 2 {
+		return ""
+	}
+	seen := make(map[string]bool)
+	proxies := make([]map[string]any, 0)
+	for _, round := range rounds {
+		for _, proxy := range round {
+			name := fmt.Sprint(proxy["name"])
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			proxies = append(proxies, proxy)
+		}
+	}
+	path := filepath.Join(execDir, output.MergedExportPath(now))
+	if err := writeConfigFile(path, proxies); err != nil {
+		fmt.Fprintf(os.Stderr, "保存合并配置失败: %s\n", err)
+		return ""
+	}
+	return path
 }
 
 // uploadConfig 把已写好的 yaml 同步到 Gist 或仓库。失败只记日志，不影响退出码。
