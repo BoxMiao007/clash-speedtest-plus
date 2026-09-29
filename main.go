@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -271,43 +272,46 @@ func main() {
 
 // runSourceQueue 逐源跑完整测速：每个源一轮，测完自动进下一轮；
 // 选源路径按 Esc 中断本轮并作废剩余轮（返回 true），命令行路径返回恒为 false。
+// 交互路径由一个 tea.Program 承载整个队列（ADR-0015），非交互（TSV/管道）
+// 保持逐轮同步执行。
 func runSourceQueue(sources []picker.SourceSpec, execDir string, escapeToParent bool) bool {
 	if len(sources) == 0 {
 		log.Fatalln("请指定配置文件")
 	}
 	// 输出路径只锚一次；每轮从原始路径算自己的产物名，免得基名层层叠加。
-	// runSpeedTest 会把全局改成各轮的最终名，所以锚定值必须存局部变量。
+	// 各轮会把全局改成自己的最终名，所以锚定值必须存局部变量。
 	*outputPath = picker.ResolveOutputPath(execDir, *outputPath)
 	originalOutputPath := *outputPath
-	// 产物序号接着目录里已有的带号结果图往下编，跨运行延续；
-	// 单轮也编——每次测试都是目录序列的一环。
-	startSeq := output.NextImageSequence(execDir)
-	for i, src := range sources {
-		// 单源不画轮次（跟「多源才亮轮数」的口径一致），多源标「第 X/N 轮 源名」。
-		label := ""
-		if len(sources) > 1 {
-			label = fmt.Sprintf("第 %d/%d 轮 %s", i+1, len(sources), src.DisplayName)
-		}
-		// 序号按队列位置排：跳过的轮也占号，图上的号和界面「第 X/N 轮」对得齐。
-		round := speedRound{
-			source:     src,
-			label:      label,
-			seq:        startSeq + i,
-			hasMore:    i < len(sources)-1,
-			outputPath: originalOutputPath,
-		}
-		switch runSpeedTest(execDir, round, escapeToParent) {
-		case roundEscaped:
-			// 全局在轮内被改写成各轮最终名，离开队列前恢复成用户原始路径，
-			// 免得选源界面清空输出路径时残留名被当原始路径再叠一层。
-			*outputPath = originalOutputPath
-			return true
-		case roundSkipped:
-			continue
+
+	var escaped bool
+	if output.DetermineOutputMode(output.IsTerminalFile) == output.OutputModeInteractive {
+		escaped = runQueueProgram(sources, execDir, originalOutputPath, escapeToParent)
+	} else {
+		// 非交互模式没有界面：stdout 保留给 TSV/管道，逐轮同步跑。
+		startSeq := output.NextImageSequence(execDir)
+		for i, src := range sources {
+			// 单源不画轮次（跟「多源才亮轮数」的口径一致），多源标「第 X/N 轮 源名」。
+			label := ""
+			if len(sources) > 1 {
+				label = fmt.Sprintf("第 %d/%d 轮 %s", i+1, len(sources), src.DisplayName)
+			}
+			// 序号按队列位置排：跳过的轮也占号，图上的号和界面「第 X/N 轮」对得齐。
+			round := speedRound{
+				source:     src,
+				label:      label,
+				seq:        startSeq + i,
+				hasMore:    i < len(sources)-1,
+				outputPath: originalOutputPath,
+			}
+			if runSpeedTest(execDir, round) == roundSkipped {
+				continue
+			}
 		}
 	}
+	// 全局在轮内被改写成各轮最终名，离开队列前恢复成用户原始路径，
+	// 免得选源界面清空输出路径时残留名被当原始路径再叠一层。
 	*outputPath = originalOutputPath
-	return false
+	return escaped
 }
 
 // speedRound 是队列里的一轮：测哪个源、界面怎么标、产物名带什么序号、
@@ -316,43 +320,45 @@ type speedRound struct {
 	source     picker.SourceSpec
 	label      string // 多轮时「第 X/N 轮 源名」；单轮空
 	seq        int    // 产物序号，加在图与输出配置文件名最前
-	hasMore    bool   // 之后还有轮：本轮测完保存完自动退出
+	hasMore    bool   // 之后还有轮：本轮测完保存完由队列壳推进
 	outputPath string // 用户原始输出路径（锚定后），每轮从它算最终名
 }
 
-// roundOutcome 是一轮测速的结局：正常结束、Esc 中断（选源路径）、源加载不出节点跳过。
+// roundOutcome 是一轮非交互测速的结局：正常结束，或源加载不出节点跳过。
 type roundOutcome int
 
 const (
 	roundDone roundOutcome = iota
-	roundEscaped
 	roundSkipped
 )
 
-// runSpeedTest 按当前参数跑一个源的完整测速流程（交互表格或 TSV）。
-// 每轮只测 round.source 这一个源。escapeToParent 为真时测试界面允许用
-// Esc 中断本轮返回选源界面。
-func runSpeedTest(execDir string, round speedRound, escapeToParent bool) roundOutcome {
+// setupRound 把全局参数切到本轮：-c 指向本轮源，输出路径从用户原始路径算出
+// 本轮最终名（文件轮加基名前缀，订阅轮靠序号区分；序号与结果图同轮同号）。
+// 返回图名基名，供交互轮与非交互导出共用。
+func setupRound(round speedRound) string {
 	src := round.source
 	*configPathsConfig = src.Value
 	if *configPathsConfig == "" {
 		log.Fatalln("请指定配置文件")
 	}
-
 	// 「产物跟随文件名」恒定开启，只跟本地配置文件；订阅源没有可跟的名字，保持默认。
 	nameBase := ""
 	if !src.FromSubscription {
 		nameBase = output.CleanNameBase(src.DisplayName)
 	}
-
-	// 每轮从用户原始输出路径算起：文件轮加基名前缀，订阅轮靠序号区分
-	// （序号停用才退回时间戳）；序号与结果图同轮同号。保存与上传都读这个最终路径。
 	*outputPath = round.outputPath
 	if *outputPath != "" {
 		*outputPath = output.FollowedConfigExportPath(*outputPath, nameBase, time.Now(), round.seq)
 	}
+	return nameBase
+}
 
-	var err error
+// runSpeedTest 跑非交互（TSV/管道）路径的一轮：同步收集结果、写 TSV、
+// 落盘 yaml 与结果图、等上传。交互路径由 runQueueProgram 承载，不经过这里。
+func runSpeedTest(execDir string, round speedRound) roundOutcome {
+	src := round.source
+	nameBase := setupRound(round)
+
 	speedTester, effectiveMode, resultFilter, stopper, err := buildTester()
 	if err != nil {
 		log.Fatalf("%s", err)
@@ -372,134 +378,23 @@ func runSpeedTest(execDir string, round speedRound, escapeToParent bool) roundOu
 		return roundSkipped
 	}
 
-	outputMode := output.DetermineOutputMode(output.IsTerminalFile)
-
-	var tsvWriter *output.TSVWriter
-	if outputMode == output.OutputModeTSV {
-		// 非交互模式没有进度行，多轮时轮次提示走 stderr，stdout 保留给 TSV/管道。
-		if round.label != "" {
-			fmt.Fprintf(os.Stderr, "%s\n", round.label)
-		}
-		var err error
-		tsvWriter, err = output.NewTSVWriter(os.Stdout, effectiveMode)
-		if err != nil {
-			log.Fatalf("创建 TSV 输出失败: %s", err)
-		}
+	// 非交互模式没有进度行，多轮时轮次提示走 stderr，stdout 保留给 TSV/管道。
+	if round.label != "" {
+		fmt.Fprintf(os.Stderr, "%s\n", round.label)
+	}
+	tsvWriter, err := output.NewTSVWriter(os.Stdout, effectiveMode)
+	if err != nil {
+		log.Fatalf("创建 TSV 输出失败: %s", err)
 	}
 
 	results := make([]*speedtester.Result, 0, len(allProxies))
-
-	if outputMode == output.OutputModeInteractive {
-		collectResults := *outputPath != ""
-		// Run TUI for Interactive mode
-		resultChannel := make(chan *speedtester.Result, len(allProxies))
-		resultsDone := make(chan struct{})
-
-		// 进度事件通道：把节点开始/阶段变化/瞬时速度转发给 TUI 在测行。
-		progressChannel := make(chan speedtester.Progress, 256)
-		speedTester.SetProgressFunc(func(p speedtester.Progress) {
-			// TUI 退出后不再消费，非阻塞丢弃避免测试 goroutine 卡死。
-			select {
-			case progressChannel <- p:
-			default:
-			}
-		})
-
-		// 提前结束信号：过筛数达到限额后关闸，TUI 收到后隐藏空格、停止显示剩余。
-		earlyStopSignal := make(chan struct{})
-		var earlyStopOnce sync.Once
-		notifyEarlyStop := func() {
-			earlyStopOnce.Do(func() { close(earlyStopSignal) })
-		}
-
-		// Start testing in goroutine to send results to channel
-		go func() {
-			onStart := func(name, proxyType string) {
-				select {
-				case progressChannel <- speedtester.Progress{Name: name, Type: proxyType, Phase: speedtester.PhaseLatency}:
-				default:
-				}
-			}
-			speedTester.TestProxiesUntil(allProxies, onStart, func(result *speedtester.Result) bool {
-				if collectResults {
-					results = append(results, result)
-				}
-				resultChannel <- result
-				if !stopper.ShouldContinue(result) {
-					notifyEarlyStop()
-					return false
-				}
-				return true
-			})
-			close(resultChannel)
-			close(resultsDone)
-		}()
-
-		// Create and run TUI
-		model := tui.NewTUIModelWithEngine(effectiveMode, len(allProxies), resultChannel, speedTester, progressChannel, earlyStopSignal)
-		if escapeToParent {
-			model.SetEscapeToParent(true)
-		}
-		model.SetImageExport(execDir, !*noImage)
-		model.SetImageSpeedOnly(*imageSpeedOnly)
-		model.NoteFastImageSpeedIgnored()
-		model.SetImageSource(src.DisplayName)
-		model.SetRoundLabel(round.label)
-		model.SetAutoAdvance(round.hasMore)
-		model.SetImageNameBase(nameBase)
-		model.SetImageSeq(round.seq)
-		if collectResults {
-			model.SetConfigSaver(func(done []*speedtester.Result) (string, error) {
-				sorted := output.SortResults(append([]*speedtester.Result(nil), done...), effectiveMode)
-				if err := saveConfig(sorted, resultFilter); err != nil {
-					return "", err
-				}
-				return *outputPath, nil
-			})
-		}
-		if uploadNeeded() {
-			uploadCtx, cancelUpload := context.WithCancel(context.Background())
-			defer cancelUpload()
-			model.SetUploader(func() string {
-				uploadConfig(uploadCtx)
-				if uploadCtx.Err() != nil {
-					return "上传已中断"
-				}
-				return "上传已结束"
-			}, cancelUpload)
-		}
-		p := tea.NewProgram(
-			model,
-			tea.WithAltScreen(),
-			tea.WithMouseAllMotion(),
-		)
-		finalModel, err := p.Run()
-		if err != nil {
-			log.Fatalf("界面运行失败: %s", err)
-		}
-		finished, _ := finalModel.(tui.Model)
-		if finished.EscapedToParent() {
-			// 按下 Esc 返回上一级：本轮不写产物，选源界面原样恢复。
-			return roundEscaped
-		}
-		status, failed := finished.ExitStatus()
-		if status != "" {
-			fmt.Fprintf(os.Stderr, "%s\n", status)
-		}
-		if failed {
-			os.Exit(1)
-		}
-		return roundDone
-	}
 
 	// TSV mode: collect results synchronously
 	speedTester.TestProxiesUntil(allProxies, nil, func(result *speedtester.Result) bool {
 		results = append(results, result)
 
-		if tsvWriter != nil {
-			if err := tsvWriter.WriteRow(result, len(results)-1); err != nil {
-				log.Printf("写入 TSV 行失败: %s", err)
-			}
+		if err := tsvWriter.WriteRow(result, len(results)-1); err != nil {
+			log.Printf("写入 TSV 行失败: %s", err)
 		}
 		return stopper.ShouldContinue(result)
 	})
@@ -507,7 +402,7 @@ func runSpeedTest(execDir string, round speedRound, escapeToParent bool) roundOu
 	results = output.SortResults(results, effectiveMode)
 
 	if *outputPath != "" {
-		err = saveConfigInterruptible(results, resultFilter)
+		err = saveConfigInterruptible(*outputPath, results, resultFilter)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "保存配置失败: %s\n", err)
 			os.Exit(1)
@@ -523,6 +418,216 @@ func runSpeedTest(execDir string, round speedRound, escapeToParent bool) roundOu
 	}
 	waitForUpload()
 	return roundDone
+}
+
+// queueRunner 为队列壳准备每一轮：切全局参数、组装测速器、启动测试 goroutine、
+// 配好轮视图。prepare 由壳在轮推进时调用（ADR-0015）。
+type queueRunner struct {
+	sources            []picker.SourceSpec
+	execDir            string
+	originalOutputPath string
+	escapeToParent     bool
+	startSeq           int
+	voided             *atomic.Bool
+	mu                 sync.Mutex
+	current            *speedtester.SpeedTester // 最近一轮启动的测试，作废时停掉
+}
+
+// prepare 准备第 index 轮并返回就绪的轮视图。源解析不出节点时返回 skipped；
+// 致命错误返回 err，由队列壳退出界面后再报错终止，终端能正常还原。
+func (r *queueRunner) prepare(index int) (tui.QueueRound, bool, error) {
+	src := r.sources[index]
+	// 单源不画轮次（跟「多源才亮轮数」的口径一致），多源标「第 X/N 轮 源名」。
+	label := ""
+	if len(r.sources) > 1 {
+		label = fmt.Sprintf("第 %d/%d 轮 %s", index+1, len(r.sources), src.DisplayName)
+	}
+	// 序号按队列位置排：跳过的轮也占号，图上的号和界面「第 X/N 轮」对得齐。
+	round := speedRound{
+		source:     src,
+		label:      label,
+		seq:        r.startSeq + index,
+		hasMore:    index < len(r.sources)-1,
+		outputPath: r.originalOutputPath,
+	}
+	nameBase := setupRound(round)
+
+	speedTester, effectiveMode, resultFilter, stopper, err := buildTester()
+	if err != nil {
+		return nil, false, err
+	}
+
+	allProxies, err := speedTester.LoadProxies()
+	if err != nil {
+		return nil, false, fmt.Errorf("加载节点失败: %w", err)
+	}
+	if len(allProxies) == 0 {
+		// 多源队列里一个源空了不该废掉整个队列：说明原因后跳过继续。
+		who := round.label
+		if who == "" {
+			who = src.DisplayName
+		}
+		fmt.Fprintf(os.Stderr, "%s：解析出 0 个节点，跳过这一轮\n", who)
+		return nil, true, nil
+	}
+	if r.voided.Load() {
+		return nil, true, nil
+	}
+
+	hasOutput := *outputPath != ""
+	resultChannel := make(chan *speedtester.Result, len(allProxies))
+
+	// 进度事件通道：把节点开始/阶段变化/瞬时速度转发给 TUI 在测行。
+	progressChannel := make(chan speedtester.Progress, 256)
+	speedTester.SetProgressFunc(func(p speedtester.Progress) {
+		// TUI 退出后不再消费，非阻塞丢弃避免测试 goroutine 卡死。
+		select {
+		case progressChannel <- p:
+		default:
+		}
+	})
+
+	// 提前结束信号：过筛数达到限额后关闸，TUI 收到后隐藏空格、停止显示剩余。
+	earlyStopSignal := make(chan struct{})
+	var earlyStopOnce sync.Once
+	notifyEarlyStop := func() {
+		earlyStopOnce.Do(func() { close(earlyStopSignal) })
+	}
+
+	// Start testing in goroutine to send results to channel
+	go func() {
+		onStart := func(name, proxyType string) {
+			select {
+			case progressChannel <- speedtester.Progress{Name: name, Type: proxyType, Phase: speedtester.PhaseLatency}:
+			default:
+			}
+		}
+		speedTester.TestProxiesUntil(allProxies, onStart, func(result *speedtester.Result) bool {
+			resultChannel <- result
+			if !stopper.ShouldContinue(result) {
+				notifyEarlyStop()
+				return false
+			}
+			return true
+		})
+		close(resultChannel)
+	}()
+	r.mu.Lock()
+	r.current = speedTester
+	r.mu.Unlock()
+	if r.voided.Load() {
+		// 队列已作废（Esc/退出全部）：停掉刚启动的测试，丢弃本轮。
+		r.stopCurrent()
+		return nil, true, nil
+	}
+
+	// Create and configure TUI for this round
+	model := tui.NewTUIModelWithEngine(effectiveMode, len(allProxies), resultChannel, speedTester, progressChannel, earlyStopSignal)
+	if r.escapeToParent {
+		model.SetEscapeToParent(true)
+	}
+	model.SetImageExport(r.execDir, !*noImage)
+	model.SetImageSpeedOnly(*imageSpeedOnly)
+	model.NoteFastImageSpeedIgnored()
+	model.SetImageSource(src.DisplayName)
+	model.SetRoundLabel(round.label)
+	model.SetAutoAdvance(round.hasMore)
+	model.SetImageNameBase(nameBase)
+	model.SetImageSeq(round.seq)
+	if hasOutput {
+		roundOutputPath := *outputPath
+		model.SetConfigSaver(func(done []*speedtester.Result) (string, error) {
+			sorted := output.SortResults(append([]*speedtester.Result(nil), done...), effectiveMode)
+			if err := saveConfig(roundOutputPath, sorted, resultFilter); err != nil {
+				return "", err
+			}
+			return roundOutputPath, nil
+		})
+	}
+	if uploadNeeded() {
+		uploadCtx, cancelUpload := context.WithCancel(context.Background())
+		uploadPath := *outputPath
+		model.SetUploader(func() string {
+			uploadConfig(uploadCtx, uploadPath)
+			if uploadCtx.Err() != nil {
+				return "上传已中断"
+			}
+			return "上传已结束"
+		}, cancelUpload)
+	}
+	return model, false, nil
+}
+
+// stopCurrent 停掉最近一轮还在跑的测试：正常结束时它是空操作，
+// Esc/退出全部后兜底掐掉在途 prepare 刚启动的测试 goroutine。
+func (r *queueRunner) stopCurrent() {
+	r.mu.Lock()
+	tester := r.current
+	r.current = nil
+	r.mu.Unlock()
+	if tester != nil {
+		tester.Stop()
+	}
+}
+
+// runQueueProgram 用一个 tea.Program 承载整个队列（ADR-0015）：每轮一个视图、
+// 全部保留在内存里，轮与轮自动推进，界面全程不重启。返回是否按 Esc 回选源界面。
+func runQueueProgram(sources []picker.SourceSpec, execDir, originalOutputPath string, escapeToParent bool) bool {
+	runner := &queueRunner{
+		sources:            sources,
+		execDir:            execDir,
+		originalOutputPath: originalOutputPath,
+		escapeToParent:     escapeToParent,
+		startSeq:           output.NextImageSequence(execDir),
+		voided:             &atomic.Bool{},
+	}
+	// 第一轮在程序启动前备好：致命错误仍在进界面之前暴露（与现状一致），
+	// 头几个 0 节点的源在这里跳过。
+	firstIndex := 0
+	var first tui.QueueRound
+	for ; firstIndex < len(sources); firstIndex++ {
+		view, skipped, err := runner.prepare(firstIndex)
+		if err != nil {
+			log.Fatalf("%s", err)
+		}
+		if !skipped {
+			first = view
+			break
+		}
+	}
+	if first == nil {
+		// 所有源都解析不出节点：逐源提示后直接结束（与现状一致）。
+		return false
+	}
+	// 离开队列时兜底停掉可能还在后台跑的测试（正常结束是空操作）。
+	defer runner.stopCurrent()
+
+	q := tui.NewQueueModel(first, firstIndex, runner.prepare, len(sources), runner.voided)
+	p := tea.NewProgram(
+		q,
+		tea.WithAltScreen(),
+		tea.WithMouseAllMotion(),
+	)
+	final, err := p.Run()
+	if err != nil {
+		log.Fatalf("界面运行失败: %s", err)
+	}
+	result := final.(tui.QueueModel).Result()
+	// 各轮离开 TUI 后补一行状态（已保存路径/失败原因），方便复制。
+	for _, status := range result.Statuses {
+		fmt.Fprintf(os.Stderr, "%s\n", status)
+	}
+	if result.SetupErr != nil {
+		log.Fatalf("%s", result.SetupErr)
+	}
+	if result.Escaped {
+		// 按过 Esc：本轮中断、剩余轮作废，回选源界面重排。
+		return true
+	}
+	if result.Failed {
+		os.Exit(1)
+	}
+	return false
 }
 
 func imageSpeedFilterEnabled(mode speedtester.SpeedMode) bool {
@@ -582,7 +687,7 @@ func writeNonInteractiveImage(ctx context.Context, execDir, imageSource, nameBas
 	fmt.Fprintf(os.Stderr, "%s\n", output.JoinStatus("已保存 "+path, warning))
 }
 
-func saveConfigInterruptible(results []*speedtester.Result, filter resultFilter) error {
+func saveConfigInterruptible(path string, results []*speedtester.Result, filter resultFilter) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errCh := make(chan error, 1)
@@ -591,7 +696,7 @@ func saveConfigInterruptible(results []*speedtester.Result, filter resultFilter)
 			errCh <- ctx.Err()
 			return
 		}
-		errCh <- saveConfig(results, filter)
+		errCh <- saveConfig(path, results, filter)
 	}()
 	select {
 	case err := <-errCh:
@@ -601,7 +706,9 @@ func saveConfigInterruptible(results []*speedtester.Result, filter resultFilter)
 	}
 }
 
-func saveConfig(results []*speedtester.Result, filter resultFilter) error {
+// saveConfig 把过筛后的节点写成合格配置。路径由调用方显式传入：队列壳下
+// 各轮并存，不读全局，避免与下一轮的全局改写竞争。
+func saveConfig(path string, results []*speedtester.Result, filter resultFilter) error {
 	proxies := make([]map[string]any, 0)
 	nameCount := make(map[string]int) // Track name usage to avoid duplicates
 
@@ -638,23 +745,25 @@ func saveConfig(results []*speedtester.Result, filter resultFilter) error {
 		return err
 	}
 
-	if err := os.WriteFile(*outputPath, yamlData, 0o644); err != nil {
+	if err := os.WriteFile(path, yamlData, 0o644); err != nil {
 		return err
 	}
 	return nil
 }
 
 // uploadConfig 把已写好的 yaml 同步到 Gist 或仓库。失败只记日志，不影响退出码。
-func uploadConfig(ctx context.Context) {
-	if *outputPath == "" {
+// path 是本轮的最终输出路径，由调用方显式传入：队列壳下各轮并存，
+// 不再读全局，避免与下一轮的全局改写竞争。
+func uploadConfig(ctx context.Context, path string) {
+	if path == "" {
 		return
 	}
-	data, err := os.ReadFile(*outputPath)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		log.Printf("读取待上传配置失败: %s", err)
 		return
 	}
-	outputFilename := filepath.Base(filepath.Clean(*outputPath))
+	outputFilename := filepath.Base(filepath.Clean(path))
 	uploader := gist.NewUploader(nil)
 	if *gistToken != "" && *gistAddress != "" {
 		if ctx.Err() != nil {
@@ -815,7 +924,7 @@ func waitForUpload() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		uploadConfig(ctx)
+		uploadConfig(ctx, *outputPath)
 	}()
 	select {
 	case <-done:
