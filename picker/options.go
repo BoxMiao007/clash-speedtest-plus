@@ -47,7 +47,39 @@ const (
 	kindMode optionKind = iota
 	kindBool
 	kindText
+	// kindOutput 是输出路径行专属：三态循环（左右键或点击）加打字编辑，
+	// 关闭/默认当前路径态显示 < > 符号，自定义态显示词干。
+	kindOutput
 )
+
+// OutputMode 是输出路径行的三态（见 CONTEXT.md「输出模式」词条）。
+type OutputMode int
+
+const (
+	// OutputModeClosed 关闭：不写输出配置。
+	OutputModeClosed OutputMode = iota
+	// OutputModeCustom 自定义：打字填路径，后缀补全与目录意图校验沿用，留空视同关闭。
+	OutputModeCustom
+	// OutputModeDefaultPath 默认当前路径：不填词干，按「基名-导出.yaml」
+	// 自动命名，订阅轮没有基名用「导出-时间戳」兜底。
+	OutputModeDefaultPath
+)
+
+// cycleOutputMode 在关闭 → 自定义 → 默认当前路径之间按 delta 方向循环。
+func cycleOutputMode(mode OutputMode, delta int) OutputMode {
+	modes := []OutputMode{OutputModeClosed, OutputModeCustom, OutputModeDefaultPath}
+	for i, m := range modes {
+		if m == mode {
+			return modes[(i+delta+len(modes))%len(modes)]
+		}
+	}
+	return OutputModeClosed
+}
+
+// changeOutputMode 循环输出模式三态，左右键、空格与点击 < > 共用。
+func (o *Options) changeOutputMode(delta int) {
+	o.OutputMode = cycleOutputMode(o.OutputMode, delta)
+}
 
 // optionRow 是选项在界面上的呈现：顺序即排列，kind 决定怎么编辑。
 type optionRow struct {
@@ -73,7 +105,7 @@ var optionOrder = []optionRow{
 	{OptionMinUpload, "最低上传速度", kindText},
 	{OptionImageSpeedOnly, "结果图只留有速度", kindBool},
 	{OptionNoImage, "关闭自动结果图", kindBool},
-	{OptionOutputPath, "输出路径", kindText},
+	{OptionOutputPath, "输出路径", kindOutput},
 	{OptionRename, "重命名", kindBool},
 	{OptionRenameTemplate, "重命名模板", kindText},
 	{OptionGistToken, "Gist token", kindText},
@@ -111,10 +143,25 @@ func (o *Options) changeMode(delta int) {
 	o.Rename = defaults.Rename
 }
 
-// OptionState 决定哪些项可用。Mode 为 fast、download 或 full。
+// OptionState 决定哪些项可用。Mode 为 fast、download 或 full；
+// OutputMode 与 OutputPath 一起决定输出设置会不会生效。
 type OptionState struct {
 	Mode       string
+	OutputMode OutputMode
 	OutputPath string
+}
+
+// OutputOpen 报告输出设置落定后会不会写输出配置：默认当前路径恒开
+// （自动命名不需要词干），自定义要有非空词干，关闭不开。
+func (s OptionState) OutputOpen() bool {
+	switch s.OutputMode {
+	case OutputModeDefaultPath:
+		return true
+	case OutputModeCustom:
+		return strings.TrimSpace(s.OutputPath) != ""
+	default:
+		return false
+	}
 }
 
 // Enabled 报告这一项当前能不能改。
@@ -127,7 +174,7 @@ func (s OptionState) Enabled(option Option) bool {
 		return mode == "full"
 	case OptionRename, OptionRenameTemplate, OptionGistToken, OptionGistAddress,
 		OptionRepoToken, OptionRepoAddress, OptionRepoFilePath, OptionRepoBranch:
-		return strings.TrimSpace(s.OutputPath) != ""
+		return s.OutputOpen()
 	default:
 		return true
 	}
@@ -420,7 +467,12 @@ func (m Model) validateEnabledRows() (optionRow, error) {
 		if !state.Enabled(row.option) {
 			continue
 		}
-		if row.kind != kindText {
+		if row.kind != kindText && row.kind != kindOutput {
+			continue
+		}
+		if row.option == OptionOutputPath && m.options.OutputMode != OutputModeCustom {
+			// 关闭与默认当前路径态不消费自定义词干：残留值不校验、
+			// 不拦回车（自定义态留空视同关闭，空值校验本身也不报错）。
 			continue
 		}
 		if err := validateText(row.option, m.options.value(row.option)); err != nil {
