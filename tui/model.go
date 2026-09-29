@@ -899,7 +899,7 @@ func (m *tuiModel) SetAutoAdvance(hasMore bool) {
 }
 
 // SetRoundSwitchHint 多轮队列里在帮助行标注 Ctrl+↑/↓ 轮间切换。由队列壳
-// 在第二个轮视图就位时对所有轮开启；单轮队列不标注。
+// 在轮视图就位时开启：首个视图在壳启动时、后续视图在就位时；单轮队列不标注。
 func (m *tuiModel) SetRoundSwitchHint(enabled bool) {
 	m.help.setRoundSwitch(enabled)
 }

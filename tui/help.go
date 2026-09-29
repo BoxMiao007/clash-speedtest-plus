@@ -77,8 +77,8 @@ func (h *helpState) setEarlyStopped(stopped bool) {
 	h.keyMap.TogglePause.SetEnabled(!stopped)
 }
 
-// setRoundSwitch 只有第二个轮视图就位后才有切换目标：多轮队列的帮助行
-// 亮出 Ctrl+↑/↓，单轮队列不标注。
+// setRoundSwitch 多轮队列的帮助行亮出 Ctrl+↑/↓：每个轮视图就位即启用，
+// 首个视图也不例外；单轮队列键位无效，不标注。
 func (h *helpState) setRoundSwitch(enabled bool) {
 	h.keyMap.SwitchRound.SetEnabled(enabled)
 }
