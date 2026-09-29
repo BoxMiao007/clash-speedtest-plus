@@ -1,6 +1,7 @@
 package picker
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -184,6 +185,12 @@ func validateText(option Option, value string) error {
 	case OptionTimeout, OptionMaxLatency:
 		if _, err := time.ParseDuration(value); err != nil {
 			return err
+		}
+	case OptionOutputPath:
+		// 以 / 或 \ 结尾是目录意图（见 CONTEXT.md「后缀补全」词条），
+		// 由回车校验拦下，报错文案由 validateEnabledRows 包装成「输出路径」不合法。
+		if strings.HasSuffix(value, "/") || strings.HasSuffix(value, `\`) {
+			return errors.New("以 / 或 \\ 结尾是目录意图，请写到具体文件名")
 		}
 	}
 	return nil

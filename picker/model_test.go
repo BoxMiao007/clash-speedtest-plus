@@ -125,6 +125,96 @@ func TestEnterWithBadTimeoutStaysOnThatRow(t *testing.T) {
 	}
 }
 
+// focusOutputPath 把焦点挪到输出路径行并打字，模拟用户上下键选中后输入。
+func focusOutputPath(t *testing.T, model Model, text string) Model {
+	t.Helper()
+	model.focus = focusOptions
+	model.optionIndex = optionIndexFor(OptionOutputPath)
+	if text == "" {
+		return model
+	}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
+	return updated.(Model)
+}
+
+func TestEnterFinalizesOutputPathSuffix(t *testing.T) {
+	cases := []struct{ name, input, want string }{
+		{"词干补 .yaml", "result", "result.yaml"},
+		{"自带 .yml 原样", "result.yml", "result.yml"},
+		{"留空仍是不输出", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := focusOutputPath(t, New(sessionFixture()), tc.input)
+			model.checked[0] = true
+			updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			got := updated.(Model)
+			if !got.started {
+				t.Fatal("回车确认后应开始测速")
+			}
+			if cmd == nil {
+				t.Fatal("回车确认后应返回 tea.Quit 结束选源界面")
+			}
+			if value := got.Options().OutputPath; value != tc.want {
+				t.Fatalf("OutputPath = %q, want %q", value, tc.want)
+			}
+			if tc.want != "" && !strings.Contains(stripANSI(got.View()), tc.want) {
+				t.Fatalf("落定后行内应显示补全后的值 %q:\n%s", tc.want, stripANSI(got.View()))
+			}
+		})
+	}
+}
+
+func TestEnterWithTrailingSeparatorStaysAndExplains(t *testing.T) {
+	for _, input := range []string{"abc/", `abc\`} {
+		t.Run(input, func(t *testing.T) {
+			model := focusOutputPath(t, New(sessionFixture()), input)
+			model.checked[0] = true
+			if view := stripANSI(model.View()); !strings.Contains(view, input) {
+				t.Fatalf("打字过程中行内应显示原样输入:\n%s", view)
+			}
+			updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			got := updated.(Model)
+			if got.started || got.fetching {
+				t.Fatalf("目录意图不该开始测速: started=%v fetching=%v", got.started, got.fetching)
+			}
+			if !strings.Contains(got.status, "输出路径") || !strings.Contains(got.status, "不合法") {
+				t.Fatalf("status = %q", got.status)
+			}
+			if value := got.Options().OutputPath; value != input {
+				t.Fatalf("报错不应改写已填的值: %q", value)
+			}
+		})
+	}
+}
+
+func TestEnterFetchesAfterFinalizingOutputPath(t *testing.T) {
+	model := focusOutputPath(t, New(sessionFixture()), "result")
+	model.address = "https://example.com/a"
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := updated.(Model)
+	if got.started || !got.fetching {
+		t.Fatalf("填了地址应先获取: started=%v fetching=%v", got.started, got.fetching)
+	}
+	if value := got.Options().OutputPath; value != "result.yaml" {
+		t.Fatalf("获取前就应落定输出路径: %q", value)
+	}
+}
+
+func TestModeChangeKeepsOutputPathUncompleted(t *testing.T) {
+	model := focusOutputPath(t, New(sessionFixture()), "result")
+	// 回到模式行切换测速模式：该行不重置，也不在此刻补全。
+	model.optionIndex = optionIndexFor(OptionSpeedMode)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	got := updated.(Model)
+	if got.Options().Mode != "full" {
+		t.Fatalf("应切到 full 模式: %q", got.Options().Mode)
+	}
+	if value := got.Options().OutputPath; value != "result" {
+		t.Fatalf("切模式不应重置或补全输出路径: %q", value)
+	}
+}
+
 func TestViewShowsCheckAndUnselectableReason(t *testing.T) {
 	model := New(sessionFixture())
 	model.checked[0] = true
