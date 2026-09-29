@@ -52,7 +52,7 @@ func TestOutputModeCyclesWithSpace(t *testing.T) {
 	}
 	updated, _ = updated.(Model).Update(tea.KeyMsg{Type: tea.KeySpace})
 	if got := updated.(Model).options.OutputMode; got != OutputModeDefaultPath {
-		t.Fatalf("自定义没打字，空格应继续切到默认当前路径: %v", got)
+		t.Fatalf("自定义没打字，空格应继续切到当前目录下: %v", got)
 	}
 }
 
@@ -92,7 +92,7 @@ func TestOutputModeClickCycles(t *testing.T) {
 	}
 }
 
-// 关闭态与默认当前路径态打字自动跳自定义并进入编辑：从空词干开始输入，
+// 关闭态与当前目录下态打字自动跳自定义并进入编辑：从空词干开始输入，
 // 不把切换前残留的词干接进新输入。
 func TestOutputModeTypingJumpsToCustom(t *testing.T) {
 	cases := []struct {
@@ -100,7 +100,7 @@ func TestOutputModeTypingJumpsToCustom(t *testing.T) {
 		mode OutputMode
 	}{
 		{"关闭态打字", OutputModeClosed},
-		{"默认当前路径态打字", OutputModeDefaultPath},
+		{"当前目录下态打字", OutputModeDefaultPath},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -199,7 +199,7 @@ func TestCustomOutputEmptyEnterTreatedAsClosed(t *testing.T) {
 	}
 }
 
-// 默认当前路径态不填词干，回车直接开始测速：输出模式原样带回，
+// 当前目录下态不填词干，回车直接开始测速：输出模式原样带回，
 // 输出视为开启（重命名与 Gist/仓库上传跟着可用）。
 func TestDefaultPathModeStartsWithoutStem(t *testing.T) {
 	model := outputModel(t)
@@ -208,13 +208,13 @@ func TestDefaultPathModeStartsWithoutStem(t *testing.T) {
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := updated.(Model)
 	if !got.started {
-		t.Fatalf("默认当前路径态应正常开始测速: status=%q", got.status)
+		t.Fatalf("当前目录下态应正常开始测速: status=%q", got.status)
 	}
 	if got.Options().OutputMode != OutputModeDefaultPath {
 		t.Fatalf("输出模式应原样带回: %v", got.Options().OutputMode)
 	}
 	if !got.optionState().OutputOpen() {
-		t.Fatal("默认当前路径态输出应视为开启")
+		t.Fatal("当前目录下态输出应视为开启")
 	}
 }
 
@@ -233,7 +233,7 @@ func TestSpeedModeChangeKeepsOutputMode(t *testing.T) {
 	}
 }
 
-// 三态的行内显示：关闭与默认当前路径带 < > 提示可循环，没打字的自定义态
+// 三态的行内显示：关闭与当前目录下带 < > 提示可循环，没打字的自定义态
 // 同样带 < >（可切）；已填词干显示纯词干（编辑锁定，无符号）。
 func TestViewShowsOutputModeStates(t *testing.T) {
 	cases := []struct {
@@ -243,7 +243,7 @@ func TestViewShowsOutputModeStates(t *testing.T) {
 		want string
 	}{
 		{"关闭", OutputModeClosed, "", "< 关闭 >"},
-		{"默认当前路径", OutputModeDefaultPath, "", "< 默认当前路径 >"},
+		{"当前目录下", OutputModeDefaultPath, "", "< 当前目录下 >"},
 		{"自定义未打字", OutputModeCustom, "", "< 自定义 >"},
 		{"自定义已填词干", OutputModeCustom, "result", "result"},
 	}

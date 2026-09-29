@@ -48,7 +48,7 @@ const (
 	kindBool
 	kindText
 	// kindOutput 是输出路径行专属：三态循环（左右键或点击）加打字编辑，
-	// 关闭/默认当前路径态显示 < > 符号，自定义态没打字时同样显示（可切），
+	// 关闭/当前目录下态显示 < > 符号，自定义态没打字时同样显示（可切），
 	// 有内容后退回纯词干（编辑锁定）。
 	kindOutput
 )
@@ -61,12 +61,12 @@ const (
 	OutputModeClosed OutputMode = iota
 	// OutputModeCustom 自定义：打字填路径，后缀补全与目录意图校验沿用，留空视同关闭。
 	OutputModeCustom
-	// OutputModeDefaultPath 默认当前路径：不填词干，按「基名-导出.yaml」
+	// OutputModeDefaultPath 当前目录下：不填词干，按「基名-导出.yaml」
 	// 自动命名，订阅轮没有基名用「导出-时间戳」兜底。
 	OutputModeDefaultPath
 )
 
-// cycleOutputMode 在关闭 → 自定义 → 默认当前路径之间按 delta 方向循环。
+// cycleOutputMode 在关闭 → 自定义 → 当前目录下之间按 delta 方向循环。
 func cycleOutputMode(mode OutputMode, delta int) OutputMode {
 	modes := []OutputMode{OutputModeClosed, OutputModeCustom, OutputModeDefaultPath}
 	for i, m := range modes {
@@ -159,7 +159,7 @@ type OptionState struct {
 	OutputPath string
 }
 
-// OutputOpen 报告输出设置落定后会不会写输出配置：默认当前路径恒开
+// OutputOpen 报告输出设置落定后会不会写输出配置：当前目录下恒开
 // （自动命名不需要词干），自定义要有非空词干，关闭不开。
 func (s OptionState) OutputOpen() bool {
 	switch s.OutputMode {
@@ -479,7 +479,7 @@ func (m Model) validateEnabledRows() (optionRow, error) {
 			continue
 		}
 		if row.option == OptionOutputPath && m.options.OutputMode != OutputModeCustom {
-			// 关闭与默认当前路径态不消费自定义词干：残留值不校验、
+			// 关闭与当前目录下态不消费自定义词干：残留值不校验、
 			// 不拦回车（自定义态留空视同关闭，空值校验本身也不报错）。
 			continue
 		}

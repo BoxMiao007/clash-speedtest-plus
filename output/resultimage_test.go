@@ -157,7 +157,7 @@ func TestFollowedConfigExportPath(t *testing.T) {
 	}
 }
 
-// AutoExportPath 是输出模式「默认当前路径」的自动产物名：本地源按
+// AutoExportPath 是输出模式「当前目录下」的自动产物名：本地源按
 // 「基名-导出.yaml」，订阅轮没有基名用「导出-时间戳」兜底；产物序号
 // 照常加在最前（见 CONTEXT.md「输出模式」词条）。
 func TestAutoExportPath(t *testing.T) {

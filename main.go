@@ -34,7 +34,7 @@ var (
 	commit  = "unknown"
 )
 
-// outputAuto 表示输出模式处于「默认当前路径」：每轮不填词干，按基名或
+// outputAuto 表示输出模式处于「当前目录下」：每轮不填词干，按基名或
 // 时间戳自动命名。命令行 -o 只有自定义语义、没有自动模式入口，该开关
 // 只来自选源界面（见 CONTEXT.md「输出模式」词条）。
 var outputAuto bool
@@ -191,7 +191,7 @@ func applyPickerOptions(o picker.Options) {
 	*imageSpeedOnly = o.ImageSpeedOnly
 	*noImage = o.NoImage
 	// 输出设置按三态解释（见 CONTEXT.md「输出模式」）：自定义写词干，
-	// 默认当前路径开自动命名，关闭清空——按 Esc 重跑时关掉输出必须真的
+	// 当前目录下开自动命名，关闭清空——按 Esc 重跑时关掉输出必须真的
 	// 关掉，不能沿用上一轮的值。
 	switch o.OutputMode {
 	case picker.OutputModeCustom:
@@ -298,7 +298,7 @@ func runSourceQueue(sources []picker.SourceSpec, execDir string, escapeToParent 
 	// 各轮会把全局改成自己的最终名，所以锚定值必须存局部变量。
 	*outputPath = picker.ResolveOutputPath(execDir, *outputPath)
 	originalOutputPath := *outputPath
-	// 输出模式非关闭：自定义词干（命令行 -o 或选源自定义态）或默认当前路径
+	// 输出模式非关闭：自定义词干（命令行 -o 或选源自定义态）或当前目录下
 	// （outputAuto）。「合并导出」以此为前提（CONTEXT.md「合并导出」词条）。
 	outputOpen := originalOutputPath != "" || outputAuto
 
@@ -454,7 +454,7 @@ func runSpeedTest(execDir string, round speedRound) (roundOutcome, []map[string]
 
 // roundOutputPath 算出一轮的最终产物路径，保存与上传都读它。自定义模式
 // 按「产物跟随文件名」叠基名与序号（订阅轮没有基名靠序号区分，序号停用
-// 才退回时间戳）；「默认当前路径」没有用户词干，本地源按「基名-导出.yaml」
+// 才退回时间戳）；「当前目录下」没有用户词干，本地源按「基名-导出.yaml」
 // 自动命名，订阅轮用「导出-时间戳」兜底（见 CONTEXT.md「输出模式」「产物
 // 序号」词条）。两种模式的产物序号与结果图同轮同号。
 func roundOutputPath(customPath string, auto bool, execDir, nameBase string, now time.Time, seq int) string {
