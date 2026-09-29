@@ -370,6 +370,11 @@ func (m Model) optionLine(lo layout, row int) string {
 	prefix := "  " + padDisplay(optionRow.label, optionLabelWidth())
 	plain := prefix + "  " + value
 	if focused {
+		if hint := m.outputSuffixHint(optionRow); hint != "" {
+			// 输出路径行聚焦时，缺的后缀段灰显在光标前（见 CONTEXT.md
+			// 「后缀补全」词条）。此时值非空，行尾必是 optionValue 补的光标。
+			return selectedSuffixLine(strings.TrimSuffix(plain, "▌"), hint, width)
+		}
 		shown := plain
 		if !enabled {
 			shown += "  不可用"
@@ -544,6 +549,51 @@ func (m Model) helpZones() (enter, quit [2]int) {
 
 func selectedLine(plain string, width int) string {
 	return selectedStyle.Render(padPlain(truncatePlain(plain, width), width))
+}
+
+// outputSuffixHint 是聚焦输出路径行时该灰显的缺省后缀段；留空（含纯
+// 空白，此时行内显示「不输出」）或后缀已写全时为空。只有输出路径一行
+// 有灰显提示，其余文本行原样。
+func (m Model) outputSuffixHint(row optionRow) string {
+	if row.option != OptionOutputPath {
+		return ""
+	}
+	value := m.options.OutputPath
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	return MissingYAMLSuffix(value)
+}
+
+// selectedSuffixLine 渲染带灰显提示的聚焦行：已打字部分与光标套选中
+// 高亮，提示段单独灰显。与 joinParts 相同先逐段截断后上色；补齐的
+// 行尾空格并入选中样式，整行高亮与 selectedLine 一致。
+func selectedSuffixLine(typed, hint string, width int) string {
+	segs := []part{
+		{typed, selectedStyle},
+		{hint, greyStyle},
+		{"▌", selectedStyle},
+	}
+	var b strings.Builder
+	total := 0
+	for _, seg := range segs {
+		if width > 0 && total >= width {
+			break
+		}
+		text := seg.text
+		if width > 0 {
+			text = truncatePlain(text, width-total)
+		}
+		if text == "" {
+			continue
+		}
+		b.WriteString(seg.style.Render(text))
+		total += lipgloss.Width(text)
+	}
+	if width > 0 && total < width {
+		b.WriteString(selectedStyle.Render(strings.Repeat(" ", width-total)))
+	}
+	return b.String()
 }
 
 // optionValue 给出该行显示的值。可调行带「< >」符号提示点击方向，
