@@ -334,12 +334,23 @@ func (m *Model) pressEnter() {
 		m.status = err.Error()
 		return
 	}
+	m.finalizeOutputPath()
 	if strings.TrimSpace(m.address) != "" {
 		m.fetching = true
 		m.status = "正在获取"
 		return
 	}
 	m.started = true
+}
+
+// finalizeOutputPath 在回车开始测速、校验通过后应用「后缀补全」：
+// 词干不带后缀时补 .yaml（result → result.yaml），自带 .yml 原样，
+// 留空仍表示不输出。此后（含 Esc 返回选源界面）行内显示补全后的值。
+func (m *Model) finalizeOutputPath() {
+	if strings.TrimSpace(m.options.OutputPath) == "" {
+		return
+	}
+	m.options.OutputPath = CompleteYAMLSuffix(m.options.OutputPath)
 }
 
 // adjustOption 用左右键调当前选项的值：模式循环、开关切换、数字按步长增减。
