@@ -76,7 +76,7 @@ clash-speedtest-plus -h
   -b string
         按关键字屏蔽节点，多个关键字用 | 分隔
   -o string
-        输出配置文件路径（也可写 -output）
+        输出配置文件路径，不带 .yaml/.yml 后缀时自动补 .yaml（也可写 -output）
   -p int
         同时测试的节点数（也可写 -parallel，默认 1）
   -concurrent int
@@ -173,6 +173,8 @@ clash-speedtest-plus -c "https://domain.com/api/v1/client/subscribe?token=secret
 ## 产物
 
 结果图，以及相对路径的 `-o`，写到**程序文件所在目录**，不是启动时的当前目录。绝对路径照写。`go run` 的程序目录是临时构建目录，产物不会落在仓库根。
+
+输出路径会做后缀补全：文件名段不以 `.yaml` / `.yml` 结尾（不分大小写）时自动补 `.yaml`——`-o result` 落定为 `result.yaml`，`result.txt` 落定为 `result.txt.yaml`；以点结尾的半截扩展名直接接 `yaml`（`result.` → `result.yaml`）；只打 `.yaml`、`.yml` 或裸点原样保留；目录段里的点不影响判定（`./v1.2/out` → `out.yaml`）。`.yml` 是唯一能原样保留的自定义后缀。以 `/` 或 `\` 结尾是目录意图，启动即报「输出路径」不合法。留空仍是不输出。补全发生在最前，最终文件名仍按下面的规则叠加基名与序号。
 
 ![结果表图](assets/result.png)
 
@@ -362,7 +364,7 @@ Usage of clash-speedtest:
   -concurrent int
         download concurrent size (default 4)
   -output string
-        output config file path (default "")
+        output config file path; .yaml is appended when the file name has no .yaml/.yml suffix (default "")
   -max-latency duration
         filter latency greater than this value (default 800ms)
   -max-packet-loss float

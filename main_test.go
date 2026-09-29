@@ -150,12 +150,56 @@ func TestOutputShortAndLongFlagsShareValue(t *testing.T) {
 	for _, tc := range cases {
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
 		flag.CommandLine = fs
-		p := stringFlag("o", "output", "", "输出配置文件路径")
+		p := stringFlag("o", "output", "", "输出配置文件路径，不带 .yaml/.yml 后缀时自动补 .yaml")
 		if err := fs.Parse(tc.args); err != nil {
 			t.Fatalf("%v: %v", tc.args, err)
 		}
 		if *p != tc.want {
 			t.Fatalf("%v 得到 %q，期望 %q", tc.args, *p, tc.want)
+		}
+	}
+}
+
+func TestNormalizeOutputFlagCompletesSuffix(t *testing.T) {
+	orig := outputPath
+	t.Cleanup(func() { outputPath = orig })
+
+	cases := []struct{ in, want string }{
+		{"result", "result.yaml"},
+		{"result.", "result.yaml"},
+		{"result.txt", "result.txt.yaml"},
+		{"result.yml", "result.yml"},
+		{"result.YAML", "result.YAML"},
+		{".yaml", ".yaml"},
+		{"dir/result", "dir/result.yaml"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		*outputPath = tc.in
+		if err := normalizeOutputFlag(); err != nil {
+			t.Fatalf("-o %q 不应报错: %v", tc.in, err)
+		}
+		if *outputPath != tc.want {
+			t.Fatalf("-o %q 落定为 %q，期望 %q", tc.in, *outputPath, tc.want)
+		}
+	}
+}
+
+func TestNormalizeOutputFlagRejectsTrailingSeparator(t *testing.T) {
+	orig := outputPath
+	t.Cleanup(func() { outputPath = orig })
+
+	for _, in := range []string{"out/", `out\`, "/tmp/"} {
+		*outputPath = in
+		err := normalizeOutputFlag()
+		if err == nil {
+			t.Fatalf("-o %q 应报目录意图错误", in)
+		}
+		if !strings.Contains(err.Error(), "输出路径不合法") {
+			t.Fatalf("-o %q 的错误文案应含「输出路径不合法」: %v", in, err)
+		}
+		if *outputPath != in {
+			t.Fatalf("报错时不应改写 -o 的值: %q 变成 %q", in, *outputPath)
 		}
 	}
 }
@@ -187,7 +231,7 @@ func TestHelpPutsCommonFlagsFirstAndUsesMegabytes(t *testing.T) {
 	_ = flag.String("c", "", "配置文件路径，也支持 http(s) 地址")
 	_ = flag.Int("download-size", 50, "下载测试大小（单位：MB）")
 	_ = flag.Int("upload-size", 20, "上传测试大小，仅完整模式（单位：MB）")
-	_ = stringFlag("o", "output", "", "输出配置文件路径")
+	_ = stringFlag("o", "output", "", "输出配置文件路径，不带 .yaml/.yml 后缀时自动补 .yaml")
 	_ = flag.String("gist-token", "", "用于更新 Gist 的 GitHub token")
 	printFlagDefaults(fs)
 	help := buf.String()
