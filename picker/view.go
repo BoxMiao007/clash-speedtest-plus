@@ -584,7 +584,8 @@ func (m Model) outputModeValue(focused bool) string {
 		value := m.options.OutputPath
 		if strings.TrimSpace(value) == "" {
 			// 没打字的自定义态与关闭/默认态一样可循环，带 < > 提示；
-			// 聚焦时光标留在值内示意等输入。
+			// 聚焦时光标留在值内示意等输入。判空口径与 options.go 的
+			// outputModeLocked 同源：有内容即编辑锁定、退回纯词干。
 			if focused {
 				return "< 自定义▌ >"
 			}
