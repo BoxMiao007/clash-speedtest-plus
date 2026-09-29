@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"flag"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/BoxMiao007/clash-speedtest-plus/output"
 	"github.com/BoxMiao007/clash-speedtest-plus/picker"
 )
 
@@ -173,6 +175,9 @@ func TestNormalizeOutputFlagCompletesSuffix(t *testing.T) {
 		{".yaml", ".yaml"},
 		{"dir/result", "dir/result.yaml"},
 		{"", ""},
+		{"  result  ", "result.yaml"},
+		{" ", ""},
+		{"\t", ""},
 	}
 	for _, tc := range cases {
 		*outputPath = tc.in
@@ -189,7 +194,7 @@ func TestNormalizeOutputFlagRejectsTrailingSeparator(t *testing.T) {
 	orig := outputPath
 	t.Cleanup(func() { outputPath = orig })
 
-	for _, in := range []string{"out/", `out\`, "/tmp/"} {
+	for _, in := range []string{"out/", `out\`, "/tmp/", "out/ "} {
 		*outputPath = in
 		err := normalizeOutputFlag()
 		if err == nil {
@@ -201,6 +206,24 @@ func TestNormalizeOutputFlagRejectsTrailingSeparator(t *testing.T) {
 		if *outputPath != in {
 			t.Fatalf("报错时不应改写 -o 的值: %q 变成 %q", in, *outputPath)
 		}
+	}
+}
+
+// 落定后的输出路径要按「产物跟随文件名」和「产物序号」参与最终产物名：
+// -o result 落定为 result.yaml，文件轮带基名、序号排最前（1.机场A-result.yaml）。
+func TestCompletedOutputPathFeedsExportName(t *testing.T) {
+	orig := outputPath
+	t.Cleanup(func() { outputPath = orig })
+
+	*outputPath = "result"
+	if err := normalizeOutputFlag(); err != nil {
+		t.Fatalf("-o result 不应报错: %v", err)
+	}
+	anchored := picker.ResolveOutputPath("/opt/clash-speedtest-plus", *outputPath)
+	final := output.FollowedConfigExportPath(anchored, "机场A", time.Now(), 1)
+	want := filepath.Join("/opt/clash-speedtest-plus", "1.机场A-result.yaml")
+	if final != want {
+		t.Fatalf("最终产物名 = %q，期望 %q", final, want)
 	}
 }
 

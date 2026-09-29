@@ -203,15 +203,14 @@ func applyPickerOptions(o picker.Options) {
 
 // normalizeOutputFlag 在 flag 解析后应用 -o 的「后缀补全」：
 // 不带 .yaml/.yml 后缀（不分大小写）时补 .yaml，写全时文件名一字不差。
-// 以 / 或 \ 结尾是目录意图，启动即报错，不进测速。留空仍表示不输出。
+// 以 / 或 \ 结尾是目录意图，启动即报错，不进测速。留空（含纯空白）仍
+// 表示不输出。校验口径与选源界面共用 picker.ValidateOutputPath。
 func normalizeOutputFlag() error {
-	if *outputPath == "" {
-		return nil
+	value, err := picker.ValidateOutputPath(*outputPath)
+	if err != nil {
+		return fmt.Errorf("输出路径不合法：%w", err)
 	}
-	if strings.HasSuffix(*outputPath, "/") || strings.HasSuffix(*outputPath, `\`) {
-		return fmt.Errorf("输出路径不合法：以 / 或 \\ 结尾是目录意图，请写到具体文件名")
-	}
-	*outputPath = picker.CompleteYAMLSuffix(*outputPath)
+	*outputPath = picker.CompleteYAMLSuffix(value)
 	return nil
 }
 
