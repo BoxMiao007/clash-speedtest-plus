@@ -38,6 +38,9 @@ type Options struct {
 	ImageSpeedOnly bool
 	NoImage        bool
 	OutputPath     string
+	// OutputMode 是输出路径行的三态（见 CONTEXT.md「输出模式」）。
+	// OutputPath 只在自定义态被消费；其他态保留已填值，切回自定义还能看到。
+	OutputMode     OutputMode
 	Rename         bool
 	RenameTemplate string
 	GistToken      string
@@ -156,7 +159,7 @@ func (m Model) Options() Options { return m.options }
 func (m Model) UsedFlagged() []string { return m.usedFlagged }
 
 func (m Model) optionState() OptionState {
-	return OptionState{Mode: m.options.Mode, OutputPath: m.options.OutputPath}
+	return OptionState{Mode: m.options.Mode, OutputMode: m.options.OutputMode, OutputPath: m.options.OutputPath}
 }
 
 func isQuit(msg tea.KeyMsg) bool {
@@ -343,22 +346,33 @@ func (m *Model) pressEnter() {
 	m.started = true
 }
 
-// finalizeOutputPath 在回车开始测速、校验通过后应用「后缀补全」：
-// 词干不带后缀时补 .yaml（result → result.yaml），自带 .yml 原样，
-// 纯空白视同留空。目录意图在 validateEnabledRows 一步已拦下。此后
-// （含 Esc 返回选源界面）行内显示落定后的值。
+// finalizeOutputPath 在回车开始测速、校验通过后按输出模式落定（见
+// CONTEXT.md「输出模式」词条）：自定义态沿用「后缀补全」，词干不带后缀
+// 时补 .yaml（result → result.yaml），自带 .yml 原样，纯空白视同关闭；
+// 关闭态与默认当前路径态不消费自定义词干——自动命名在测速端按源算，
+// 已填值原样保留，Esc 返回后切回自定义态还能看到。此后（含 Esc 返回
+// 选源界面）行内显示落定后的值。
 func (m *Model) finalizeOutputPath() {
+	if m.options.OutputMode != OutputModeCustom {
+		return
+	}
 	// 与命令行 -o 同一份校验口径，落定的都是去空白后的值。
 	value, err := ValidateOutputPath(m.options.OutputPath)
 	if err != nil {
 		// 校验通过才会走到这里，不该再见到目录意图；原样保留等用户改。
 		return
 	}
+	if value == "" {
+		// 自定义态留空回车视同关闭：落定空值，行内显示切回「关闭」。
+		m.options.OutputMode = OutputModeClosed
+		m.options.OutputPath = ""
+		return
+	}
 	m.options.OutputPath = CompleteYAMLSuffix(value)
 }
 
-// adjustOption 用左右键调当前选项的值：模式循环、开关切换、数字按步长增减。
-// 文本类选项靠打字，左右键对它们无操作。
+// adjustOption 用左右键调当前选项的值：模式循环、输出模式三态循环、
+// 开关切换、数字按步长增减。文本类选项靠打字，左右键对它们无操作。
 func (m *Model) adjustOption(delta int) {
 	if m.focus != focusOptions || m.optionIndex < 0 || m.optionIndex >= len(optionOrder) {
 		return
@@ -370,6 +384,13 @@ func (m *Model) adjustOption(delta int) {
 	switch row.kind {
 	case kindMode:
 		m.options.changeMode(delta)
+	case kindOutput:
+		if m.options.OutputMode == OutputModeCustom {
+			// 自定义态是编辑态：左右键留给路径输入，不循环三态——与点击
+			// 的豁免一致（arrowSymbolX 在自定义态不算热区）。
+			return
+		}
+		m.options.changeOutputMode(delta)
 	case kindBool:
 		m.options.toggle(row.option)
 	case kindText:
@@ -476,6 +497,10 @@ func (m *Model) clickOption(lo layout, y, x int) {
 // 行布局与 optionLine 渲染共用：2 格缩进 + 标签列 + 2 格间隔，随后是值。
 func (m Model) arrowSymbolX(lo layout, index int) (left, right int, ok bool) {
 	row := optionOrder[index]
+	if row.kind == kindOutput && m.options.OutputMode == OutputModeCustom {
+		// 自定义态是编辑态：就算词干里碰巧带 < 也不是循环符号。
+		return 0, 0, false
+	}
 	focused := m.focus == focusOptions && m.optionIndex == index
 	value := m.optionValue(row, focused)
 	if !strings.Contains(value, "<") {
@@ -506,6 +531,12 @@ func (m *Model) typeOption(text string) {
 			return
 		}
 	}
+	if option == OptionOutputPath && m.options.OutputMode != OutputModeCustom {
+		// 关闭/默认当前路径态打字：自动跳自定义并进入编辑，从空词干开始，
+		// 不把没显示出来的残留值接进新输入（见 CONTEXT.md「输出模式」词条）。
+		m.options.OutputMode = OutputModeCustom
+		m.options.OutputPath = ""
+	}
 	m.options.setText(option, m.options.value(option)+text)
 }
 
@@ -514,6 +545,10 @@ func (m *Model) backspaceOption() {
 		return
 	}
 	option := optionOrder[m.optionIndex].option
+	if option == OptionOutputPath && m.options.OutputMode != OutputModeCustom {
+		// 关闭/默认当前路径态行内没有可删的内容，退格不动（打字才跳自定义）。
+		return
+	}
 	value := m.options.value(option)
 	if value == "" {
 		return
@@ -534,6 +569,8 @@ func (m *Model) pressOption() {
 		m.options.toggle(row.option)
 	case kindMode:
 		m.options.changeMode(1)
+	case kindOutput:
+		m.options.changeOutputMode(1)
 	}
 }
 
@@ -546,7 +583,7 @@ func (m *Model) editableRow() bool {
 	if !m.optionState().Enabled(row.option) {
 		return false
 	}
-	return row.kind == kindText || row.kind == kindBool
+	return row.kind == kindText || row.kind == kindBool || row.kind == kindOutput
 }
 
 // move 沿环形次序「文件 → 地址 → 选项 → 文件」移动焦点或栏内光标。
