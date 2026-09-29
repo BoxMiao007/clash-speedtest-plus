@@ -17,6 +17,7 @@ type helpKeyMap struct {
 	CloseDetail key.Binding
 	TogglePause key.Binding
 	SaveImage   key.Binding
+	SwitchRound key.Binding
 	Table       table.KeyMap
 }
 
@@ -41,11 +42,16 @@ func newHelpState(tableKeys table.KeyMap) helpState {
 				key.WithKeys("s"),
 				key.WithHelp("s", "保存结果图"),
 			),
+			SwitchRound: key.NewBinding(
+				key.WithKeys("ctrl+up", "ctrl+down"),
+				key.WithHelp("ctrl+↑/↓", "轮间切换"),
+			),
 		},
 	}
 	state.setDetailVisible(false)
 	state.setPaused(false)
 	state.setEarlyStopped(false)
+	state.setRoundSwitch(false)
 	return state
 }
 
@@ -69,6 +75,12 @@ func (h *helpState) setPaused(paused bool) {
 // setEarlyStopped 提前结束后空格无效果，帮助条隐藏空格项。
 func (h *helpState) setEarlyStopped(stopped bool) {
 	h.keyMap.TogglePause.SetEnabled(!stopped)
+}
+
+// setRoundSwitch 只有第二个轮视图就位后才有切换目标：多轮队列的帮助行
+// 亮出 Ctrl+↑/↓，单轮队列不标注。
+func (h *helpState) setRoundSwitch(enabled bool) {
+	h.keyMap.SwitchRound.SetEnabled(enabled)
 }
 
 // setSaving 等待落盘时帮助条只留强制退出。
@@ -113,6 +125,7 @@ func (km helpKeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
 		km.Table.LineUp,
 		km.Table.LineDown,
+		km.SwitchRound,
 		km.TogglePause,
 		km.SaveImage,
 		km.Quit,
@@ -124,6 +137,6 @@ func (km helpKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{km.Table.LineUp, km.Table.LineDown, km.Table.GotoTop, km.Table.GotoBottom},
 		{km.Table.PageUp, km.Table.PageDown, km.Table.HalfPageUp, km.Table.HalfPageDown},
-		{km.TogglePause, km.SaveImage, km.CloseDetail, km.Quit},
+		{km.TogglePause, km.SwitchRound, km.SaveImage, km.CloseDetail, km.Quit},
 	}
 }
