@@ -378,9 +378,9 @@ func TestQueueCtrlCAfterSwitchExitsAll(t *testing.T) {
 	}
 }
 
-// 帮助行的轮间切换键位只在第二个轮视图就位后出现（单轮队列与首测轮
-// 都没有切换目标），出现后各轮视图都标注。
-func TestQueueHelpShowsRoundSwitchKeysOnlyWithMultipleRounds(t *testing.T) {
+// 多轮队列从第一个轮视图起就亮出轮间切换键位（不等第二个视图就位），
+// 后续各轮视图都标注；单轮队列不标注（见 TestQueueSingleRoundSwitchKeysInert）。
+func TestQueueHelpShowsRoundSwitchKeysFromFirstRound(t *testing.T) {
 	round1 := newQueueTestRound(t, true)
 	var round2 tuiModel
 	prepare := func(index int) (QueueRound, bool, error) {
@@ -388,8 +388,8 @@ func TestQueueHelpShowsRoundSwitchKeysOnlyWithMultipleRounds(t *testing.T) {
 		return round2, false, nil
 	}
 	q := NewQueueModel(round1, 0, prepare, 2, &atomic.Bool{})
-	if m := q.rounds[0].(tuiModel); m.help.keyMap.SwitchRound.Enabled() {
-		t.Fatal("还没有第二个视图时帮助行不应标注切换键位")
+	if m := q.rounds[0].(tuiModel); !m.help.keyMap.SwitchRound.Enabled() {
+		t.Fatal("多轮队列第一个轮视图就应标注切换键位")
 	}
 
 	q = advanceToNextRound(t, q)
