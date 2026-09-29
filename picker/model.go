@@ -385,9 +385,9 @@ func (m *Model) adjustOption(delta int) {
 	case kindMode:
 		m.options.changeMode(delta)
 	case kindOutput:
-		if m.options.OutputMode == OutputModeCustom {
-			// 自定义态是编辑态：左右键留给路径输入，不循环三态——与点击
-			// 的豁免一致（arrowSymbolX 在自定义态不算热区）。
+		if m.options.outputModeLocked() {
+			// 自定义态有内容是编辑锁定：左右键留给路径编辑，不循环三态——
+			// 与点击的豁免一致（arrowSymbolX 在有内容时不算热区）。
 			return
 		}
 		m.options.changeOutputMode(delta)
@@ -497,8 +497,9 @@ func (m *Model) clickOption(lo layout, y, x int) {
 // 行布局与 optionLine 渲染共用：2 格缩进 + 标签列 + 2 格间隔，随后是值。
 func (m Model) arrowSymbolX(lo layout, index int) (left, right int, ok bool) {
 	row := optionOrder[index]
-	if row.kind == kindOutput && m.options.OutputMode == OutputModeCustom {
-		// 自定义态是编辑态：就算词干里碰巧带 < 也不是循环符号。
+	if row.kind == kindOutput && m.options.outputModeLocked() {
+		// 自定义态有内容是编辑锁定：没有 < > 符号，就算词干里碰巧带 <
+		// 也不是循环符号。
 		return 0, 0, false
 	}
 	focused := m.focus == focusOptions && m.optionIndex == index
@@ -570,6 +571,9 @@ func (m *Model) pressOption() {
 	case kindMode:
 		m.options.changeMode(1)
 	case kindOutput:
+		if m.options.outputModeLocked() {
+			return
+		}
 		m.options.changeOutputMode(1)
 	}
 }
