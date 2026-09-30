@@ -47,3 +47,5 @@ Issues 放在本仓库的 GitHub Issues，通过 `gh` CLI 读写。详见 `docs/
 - Clash/Mihomo 配置用 `gopkg.in/yaml.v2` 解析。不要改成 yaml.v3。
 - 「产物跟随文件名」写死开启。`-name-from-config` 已删除，不要加回来（ADR-0013）。
 - `test/test.yaml`、`*.local.yaml`、`clash-speedtest-plus-sub-*.yaml` 含节点凭据，禁止入库。`picker/` 里已有的订阅 yaml 是本地拉取物，不是测试夹具。
+
+
