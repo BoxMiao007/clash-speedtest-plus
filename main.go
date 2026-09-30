@@ -34,6 +34,19 @@ var (
 	commit  = "unknown"
 )
 
+// versionBadge 是界面右下角版本角标文案（见 CONTEXT.md「版本角标」词条）：
+// 注入值补 v 前缀（已带不重复加），本地构建照实显示 dev，空串不显示。
+// 选源与测速两个界面共用这一份规则，传入的已是成品文案。
+func versionBadge(version string) string {
+	if version == "" || version == "dev" {
+		return version
+	}
+	if strings.HasPrefix(version, "v") {
+		return version
+	}
+	return "v" + version
+}
+
 // outputAuto 表示输出模式处于「当前目录下」：每轮不填词干，按基名或
 // 时间戳自动命名。命令行 -o 只有自定义语义、没有自动模式入口，该开关
 // 只来自选源界面（见 CONTEXT.md「输出模式」词条）。
@@ -259,7 +272,7 @@ func main() {
 		if err != nil {
 			log.Printf("读取程序目录失败: %s", err)
 		}
-		model := picker.New(picker.Session{Configs: configs, ExecDir: execDir})
+		model := picker.New(picker.Session{Configs: configs, ExecDir: execDir, Version: versionBadge(version)})
 		for {
 			finished, started := runPickerModel(model)
 			if !started {
@@ -610,6 +623,7 @@ func (r *queueRunner) prepare(index int) (tui.QueueRound, bool, error) {
 	model.NoteFastImageSpeedIgnored()
 	model.SetImageSource(src.DisplayName)
 	model.SetRoundLabel(round.label)
+	model.SetVersion(versionBadge(version))
 	model.SetAutoAdvance(round.hasMore)
 	model.SetImageNameBase(nameBase)
 	model.SetImageSeq(round.seq)

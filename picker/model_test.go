@@ -1438,3 +1438,45 @@ func sessionFixture() Session {
 		},
 	}
 }
+
+func TestViewShowsVersionBadgeAtHelpLineRight(t *testing.T) {
+	model := New(Session{
+		Configs: []ConfigEntry{{Name: "a.yaml", Path: "/opt/a.yaml", Selectable: true}},
+		Version: "v2.5.0",
+	})
+	model.width, model.height = 100, 30
+	lines := strings.Split(stripANSI(model.View()), "\n")
+	last := lines[len(lines)-1]
+	if want := "v2.5.0"; !strings.HasSuffix(strings.TrimRight(last, " "), want) {
+		t.Fatalf("帮助行右端应是 %s: %q", want, last)
+	}
+	if w := lipgloss.Width(last); w != 100 {
+		t.Fatalf("角标应贴内容右缘，行宽 = %d: %q", w, last)
+	}
+}
+
+func TestViewHidesVersionBadgeWhenTooNarrow(t *testing.T) {
+	model := New(Session{
+		Configs: []ConfigEntry{{Name: "a.yaml", Path: "/opt/a.yaml", Selectable: true}},
+		Version: "v2.5.0",
+	})
+	model.width, model.height = 40, 30
+	if view := stripANSI(model.View()); strings.Contains(view, "v2.5.0") {
+		t.Fatalf("窄终端应藏角标: %q", view)
+	}
+}
+
+func TestVersionBadgeKeepsHelpHotZones(t *testing.T) {
+	configs := []ConfigEntry{{Name: "a.yaml", Path: "/opt/a.yaml", Selectable: true}}
+	model := New(Session{Configs: configs, Version: "v2.5.0"})
+	model.width, model.height = 100, 30
+	enter, quit := model.helpZones()
+	badgeStart := 100 - lipgloss.Width("v2.5.0")
+	if gap := badgeStart - quit[1]; gap < 2 {
+		t.Fatalf("角标与热区之间应留至少两格，实际 %d：quit=%v 角标起点=%d", gap, quit, badgeStart)
+	}
+	plainEnter, plainQuit := New(Session{Configs: configs}).helpZones()
+	if enter != plainEnter || quit != plainQuit {
+		t.Fatalf("角标不应挪动热区：带角标 enter=%v quit=%v，不带 enter=%v quit=%v", enter, quit, plainEnter, plainQuit)
+	}
+}

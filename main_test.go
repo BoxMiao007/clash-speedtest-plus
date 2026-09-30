@@ -674,3 +674,17 @@ func TestWriteConfigFileAvoidsGroupNameCollision(t *testing.T) {
 		})
 	}
 }
+
+func TestVersionBadge(t *testing.T) {
+	cases := []struct{ version, want string }{
+		{"2.5.0", "v2.5.0"},
+		{"v3.0.0", "v3.0.0"},
+		{"dev", "dev"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := versionBadge(tc.version); got != tc.want {
+			t.Fatalf("versionBadge(%q) = %q，期望 %q", tc.version, got, tc.want)
+		}
+	}
+}

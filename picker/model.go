@@ -58,6 +58,9 @@ type Session struct {
 	Configs []ConfigEntry
 	// ExecDir 是程序文件所在目录。选源结果里的临时文件写到这里。
 	ExecDir string
+	// Version 是右下角版本角标文案（如 v2.5.0、dev），由调用方把 ldflags
+	// 注入值按角标规则整理好后传入；空串不显示。见 CONTEXT.md「版本角标」词条。
+	Version string
 	// Fetch 把订阅地址变成源（临时文件 + 原地址）。测试里注入假的，不访问网络。
 	Fetch func(urls []string) (sources []SourceSpec, used []string, err error)
 }
@@ -76,6 +79,7 @@ type Model struct {
 	focus       int
 	address     string
 	optionIndex int
+	version     string // 版本角标文案，来自 Session.Version
 
 	// 各区的滚动位置。
 	configScroll int
@@ -130,6 +134,7 @@ func New(session Session) Model {
 		checked: checked,
 		focus:   focus,
 		session: session,
+		version: session.Version,
 		options: defaultOptions(),
 	}
 }

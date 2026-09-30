@@ -530,6 +530,19 @@ func (m Model) helpLine(width int) string {
 		}
 		parts = append(parts, part{span.key, style}, part{span.label, labelStyle})
 	}
+	// 版本角标挂帮助行右端（见 CONTEXT.md「版本角标」词条）。判满规则与
+	// tui/help.go helpWithVersion 同一口径：帮助文字优先，完整帮助加两格
+	// 间隔放不下角标就藏。热区从左端起量，右端角标不挪动它们，helpZones
+	// 不用改。m.version 已是整理好的角标文案（v 前缀在调用方处理）。
+	if badge := m.version; badge != "" && width > 0 {
+		helpW := 0
+		for _, p := range parts {
+			helpW += lipgloss.Width(p.text)
+		}
+		if helpW+2+lipgloss.Width(badge) <= width {
+			return joinParts(width-lipgloss.Width(badge), lipgloss.Style{}, parts...) + greyStyle.Render(badge)
+		}
+	}
 	return joinParts(width, lipgloss.Style{}, parts...)
 }
 

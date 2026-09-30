@@ -147,6 +147,7 @@ type tuiModel struct {
 	//（不再自行退出，ADR-0015）。
 	roundLabel  string
 	autoAdvance bool
+	version     string // 右下角版本角标文案（CONTEXT.md「版本角标」词条）
 	// advanceRequested 表示本轮已完成且产物已保存、应推进下一轮，队列壳轮询。
 	advanceRequested bool
 	// exitAll 表示用户要求退出整个队列：未完成轮的 q/Ctrl+C，或已完成中途轮的
@@ -891,6 +892,12 @@ func (m *tuiModel) SetRoundLabel(label string) {
 	m.roundLabel = label
 }
 
+// SetVersion 设置右下角版本角标文案（如 v2.5.0、dev），由调用方按角标规则
+// 整理好传入；不设置则不显示（见 CONTEXT.md「版本角标」词条）。
+func (m *tuiModel) SetVersion(version string) {
+	m.version = version
+}
+
 // SetAutoAdvance 标记本轮之后还有下一轮：本轮测完、产物保存完后由队列壳
 // 自动推进到下一轮的视图（ADR-0015），视图自身不再退出。
 // 最后一轮不设，测完照旧停在界面等退出键。
@@ -1057,7 +1064,7 @@ func (m tuiModel) View() string {
 	}
 	helpView := m.help.view()
 	if helpView != "" {
-		sections = append(sections, "", helpView)
+		sections = append(sections, "", m.helpWithVersion(helpView))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }

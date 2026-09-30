@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/table"
@@ -105,6 +107,37 @@ func (h *helpState) setSaving(saving bool) {
 
 func (h helpState) view() string {
 	return h.model.View(h.keyMap)
+}
+
+// versionBadgeStyle 是右下角版本角标的灰显样式，与帮助条键位拉开一档。
+var versionBadgeStyle = lipgloss.NewStyle().Faint(true)
+
+// fullHelpWidth 量出帮助条完整（不截断）键位文案的显示宽度。bubbles 在
+// 窄屏会自行截断，直接量渲染结果会把「截断后的残行」当成放得下；这里借
+// bubbles 以不限宽再渲染一次。View 走值接收者，改的是副本宽度，不动真实模型。
+func (h helpState) fullHelpWidth() int {
+	width := h.model.Width
+	h.model.Width = 0 // bubbles 以 0 宽为不限宽
+	full := h.view()
+	h.model.Width = width
+	return lipgloss.Width(full)
+}
+
+// helpWithVersion 把版本角标挂到帮助条右端（见 CONTEXT.md「版本角标」词条）。
+// 判满规则与 picker/view.go helpLine 同一口径：完整帮助文案优先——bubbles
+// 截断剩下的空间不算数，完整文案加两格间隔放不下角标就藏。m.version 已是
+// 整理好的角标文案（v 前缀在调用方处理）。帮助条是一行，挂到行尾右对齐。
+func (m tuiModel) helpWithVersion(helpView string) string {
+	badge := m.version
+	if badge == "" || m.windowWidth <= 0 {
+		return helpView
+	}
+	badgeW := lipgloss.Width(badge)
+	if m.help.fullHelpWidth()+2+badgeW > m.windowWidth {
+		return helpView
+	}
+	gap := m.windowWidth - lipgloss.Width(helpView) - badgeW
+	return helpView + strings.Repeat(" ", gap) + versionBadgeStyle.Render(badge)
 }
 
 func (h helpState) height() int {
