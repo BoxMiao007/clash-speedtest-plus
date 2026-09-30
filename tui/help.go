@@ -114,13 +114,11 @@ var versionBadgeStyle = lipgloss.NewStyle().Faint(true)
 
 // fullHelpWidth 量出帮助条完整（不截断）键位文案的显示宽度。bubbles 在
 // 窄屏会自行截断，直接量渲染结果会把「截断后的残行」当成放得下；这里借
-// bubbles 以不限宽再渲染一次。View 走值接收者，改的是副本宽度，不动真实模型。
+// bubbles 以 0 宽（不限宽）再渲染一次。helpState 是值接收者，h 是副本，
+// 不动真实模型。
 func (h helpState) fullHelpWidth() int {
-	width := h.model.Width
-	h.model.Width = 0 // bubbles 以 0 宽为不限宽
-	full := h.view()
-	h.model.Width = width
-	return lipgloss.Width(full)
+	h.model.Width = 0
+	return lipgloss.Width(h.view())
 }
 
 // helpWithVersion 把版本角标挂到帮助条右端（见 CONTEXT.md「版本角标」词条）。
