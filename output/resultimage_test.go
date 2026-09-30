@@ -159,7 +159,7 @@ func TestFollowedConfigExportPath(t *testing.T) {
 
 // AutoExportPath 是输出模式「当前目录下」的自动产物名：本地源按
 // 「基名-导出.yaml」，订阅轮没有基名用「导出-时间戳」兜底；产物序号
-// 照常加在最前（见 CONTEXT.md「输出模式」词条）。
+// 照常加在最前（见 GLOSSARY.md「输出模式」词条）。
 func TestAutoExportPath(t *testing.T) {
 	now := time.Date(2026, 9, 27, 15, 30, 1, 0, time.Local)
 	cases := []struct {
@@ -185,7 +185,7 @@ func TestAutoExportPath(t *testing.T) {
 
 // MergedExportPath 是「合并导出」文件名：固定「导出-合并-时间戳」，时间戳
 // 格式与「导出-时间戳」兜底命名一致；不属于任何轮，永远不带产物序号（见
-// CONTEXT.md「合并导出」词条、ADR-0014）。
+// GLOSSARY.md「合并导出」词条、ADR-0014）。
 func TestMergedExportPath(t *testing.T) {
 	cases := []struct {
 		name string

@@ -38,7 +38,7 @@ type Options struct {
 	ImageSpeedOnly bool
 	NoImage        bool
 	OutputPath     string
-	// OutputMode 是输出路径行的三态（见 CONTEXT.md「输出模式」）。
+	// OutputMode 是输出路径行的三态（见 GLOSSARY.md「输出模式」）。
 	// OutputPath 只在自定义态被消费；其他态保留已填值，切回自定义还能看到。
 	OutputMode     OutputMode
 	Rename         bool
@@ -59,7 +59,7 @@ type Session struct {
 	// ExecDir 是程序文件所在目录。选源结果里的临时文件写到这里。
 	ExecDir string
 	// Version 是右下角版本角标文案（如 v2.5.0、dev），由调用方把 ldflags
-	// 注入值按角标规则整理好后传入；空串不显示。见 CONTEXT.md「版本角标」词条。
+	// 注入值按角标规则整理好后传入；空串不显示。见 GLOSSARY.md「版本角标」词条。
 	Version string
 	// Fetch 把订阅地址变成源（临时文件 + 原地址）。测试里注入假的，不访问网络。
 	Fetch func(urls []string) (sources []SourceSpec, used []string, err error)
@@ -352,7 +352,7 @@ func (m *Model) pressEnter() {
 }
 
 // finalizeOutputPath 在回车开始测速、校验通过后按输出模式落定（见
-// CONTEXT.md「输出模式」词条）：自定义态沿用「后缀补全」，词干不带后缀
+// GLOSSARY.md「输出模式」词条）：自定义态沿用「后缀补全」，词干不带后缀
 // 时补 .yaml（result → result.yaml），自带 .yml 原样，纯空白视同关闭；
 // 关闭态与当前目录下态不消费自定义词干——自动命名在测速端按源算，
 // 已填值原样保留，Esc 返回后切回自定义态还能看到。此后（含 Esc 返回
@@ -539,7 +539,7 @@ func (m *Model) typeOption(text string) {
 	}
 	if option == OptionOutputPath && m.options.OutputMode != OutputModeCustom {
 		// 关闭/当前目录下态打字：自动跳自定义并进入编辑，从空词干开始，
-		// 不把没显示出来的残留值接进新输入（见 CONTEXT.md「输出模式」词条）。
+		// 不把没显示出来的残留值接进新输入（见 GLOSSARY.md「输出模式」词条）。
 		m.options.OutputMode = OutputModeCustom
 		m.options.OutputPath = ""
 	}

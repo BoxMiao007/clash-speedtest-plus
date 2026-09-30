@@ -373,7 +373,7 @@ func (m Model) optionLine(lo layout, row int) string {
 	plain := prefix + "  " + value
 	if focused {
 		if hint := m.outputSuffixHint(optionRow); hint != "" {
-			// 输出路径行聚焦时，缺的后缀段灰显在光标前（见 CONTEXT.md
+			// 输出路径行聚焦时，缺的后缀段灰显在光标前（见 GLOSSARY.md
 			// 「后缀补全」词条）。此时值非空，行尾必是 optionValue 补的光标。
 			// 行尾补白传选中样式，整行高亮与 selectedLine 一致。
 			return joinParts(width, selectedStyle,
@@ -530,7 +530,7 @@ func (m Model) helpLine(width int) string {
 		}
 		parts = append(parts, part{span.key, style}, part{span.label, labelStyle})
 	}
-	// 版本角标挂帮助行右端（见 CONTEXT.md「版本角标」词条）。判满规则与
+	// 版本角标挂帮助行右端（见 GLOSSARY.md「版本角标」词条）。判满规则与
 	// tui/help.go helpWithVersion 同一口径：帮助文字优先，完整帮助加两格
 	// 间隔放不下角标就藏。热区从左端起量，右端角标不挪动它们，helpZones
 	// 不用改。m.version 已是整理好的角标文案（v 前缀在调用方处理）。
@@ -588,7 +588,7 @@ func (m Model) outputSuffixHint(row optionRow) string {
 	return MissingYAMLSuffix(value)
 }
 
-// outputModeValue 给出输出模式行的显示值（见 CONTEXT.md「输出模式」词条）：
+// outputModeValue 给出输出模式行的显示值（见 GLOSSARY.md「输出模式」词条）：
 // 关闭与当前目录下带 < > 提示左右键和点击可循环；自定义态显示词干，
 // 没打字时提示态名并可接着输入。
 func (m Model) outputModeValue(focused bool) string {

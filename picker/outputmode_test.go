@@ -18,7 +18,7 @@ func outputModel(t *testing.T) Model {
 }
 
 // 左右键循环输出模式，默认停在关闭。三态之间可自由循环——自定义态没打字时
-// 同样可切；有内容才进入编辑锁定（见 CONTEXT.md「输出模式」词条）。
+// 同样可切；有内容才进入编辑锁定（见 GLOSSARY.md「输出模式」词条）。
 func TestOutputModeCyclesWithArrowKeys(t *testing.T) {
 	model := outputModel(t)
 	if model.options.OutputMode != OutputModeClosed {
@@ -131,7 +131,7 @@ func TestCustomModeTypingAppends(t *testing.T) {
 }
 
 // 自定义态一旦有内容就进入编辑锁定：左右键、空格、点击都不切换（四路统一
-// 锁，见 CONTEXT.md「输出模式」词条），点击只选中该行。
+// 锁，见 GLOSSARY.md「输出模式」词条），点击只选中该行。
 func TestCustomModeWithContentDoesNotCycle(t *testing.T) {
 	model := outputModel(t)
 	model.options.OutputMode = OutputModeCustom
@@ -181,7 +181,7 @@ func TestCustomModeBackspaceToEmptyUnlocks(t *testing.T) {
 	}
 }
 
-// 自定义态留空回车视同关闭、正常开始测速（见 CONTEXT.md「输出模式」词条）。
+// 自定义态留空回车视同关闭、正常开始测速（见 GLOSSARY.md「输出模式」词条）。
 func TestCustomOutputEmptyEnterTreatedAsClosed(t *testing.T) {
 	for _, value := range []string{"", "  "} {
 		model := outputModel(t)
@@ -218,7 +218,7 @@ func TestDefaultPathModeStartsWithoutStem(t *testing.T) {
 	}
 }
 
-// 切换测速模式时输出模式三态与已填词干保留（见 CONTEXT.md「输出模式」词条）。
+// 切换测速模式时输出模式三态与已填词干保留（见 GLOSSARY.md「输出模式」词条）。
 func TestSpeedModeChangeKeepsOutputMode(t *testing.T) {
 	for _, mode := range []OutputMode{OutputModeClosed, OutputModeCustom, OutputModeDefaultPath} {
 		model := outputModel(t)

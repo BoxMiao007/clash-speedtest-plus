@@ -121,7 +121,7 @@ func (h helpState) fullHelpWidth() int {
 	return lipgloss.Width(h.view())
 }
 
-// helpWithVersion 把版本角标挂到帮助条右端（见 CONTEXT.md「版本角标」词条）。
+// helpWithVersion 把版本角标挂到帮助条右端（见 GLOSSARY.md「版本角标」词条）。
 // 判满规则与 picker/view.go helpLine 同一口径：完整帮助文案优先——bubbles
 // 截断剩下的空间不算数，完整文案加两格间隔放不下角标就藏。m.version 已是
 // 整理好的角标文案（v 前缀在调用方处理）。帮助条是一行，挂到行尾右对齐。

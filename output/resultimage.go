@@ -922,7 +922,7 @@ func FollowedConfigExportPath(path, nameBase string, now time.Time, seq int) str
 // 「基名-导出.yaml」自动命名（1.机场A-导出.yaml）；订阅轮没有基名可跟，
 // 用「导出-时间戳」兜底（2.导出-20260927-153001.yaml）。产物序号照常加在
 // 最前，与结果图同轮同号；重命名与 Gist/仓库上传对它一视同仁（都按最终
-// 路径走）。返回文件名本身，调用方负责锚到程序目录（见 CONTEXT.md
+// 路径走）。返回文件名本身，调用方负责锚到程序目录（见 GLOSSARY.md
 // 「输出模式」词条）。
 func AutoExportPath(nameBase string, now time.Time, seq int) string {
 	stem := "导出-" + now.Format("20060102-150405")
@@ -934,7 +934,7 @@ func AutoExportPath(nameBase string, now time.Time, seq int) string {
 
 // MergedExportPath 是「合并导出」文件的文件名：≥2 轮的队列全部正常测完后
 // 额外写的合并配置，固定「导出-合并-时间戳」。它不属于任何轮，不带产物
-// 序号（时间戳已唯一），也不参与 Gist/仓库上传（见 CONTEXT.md「合并导出」
+// 序号（时间戳已唯一），也不参与 Gist/仓库上传（见 GLOSSARY.md「合并导出」
 // 词条、ADR-0014）。返回文件名本身，调用方负责锚到程序目录（与 AutoExportPath
 // 一致）。
 func MergedExportPath(now time.Time) string {

@@ -280,7 +280,7 @@ func TestRoundOutputPathFollowsOutputMode(t *testing.T) {
 	}
 }
 
-// applyPickerOptions 按输出模式三态解释输出设置（见 CONTEXT.md「输出模式」）：
+// applyPickerOptions 按输出模式三态解释输出设置（见 GLOSSARY.md「输出模式」）：
 // 自定义写词干，当前目录下开自动命名，关闭清空——按 Esc 重跑时关掉输出
 // 必须真的关掉，不能沿用上一轮的值。
 func TestApplyPickerOptionsInterpretsOutputMode(t *testing.T) {
@@ -359,7 +359,7 @@ func TestHelpPutsCommonFlagsFirstAndUsesMegabytes(t *testing.T) {
 	}
 }
 
-// writeMergedExport 的触发条件（CONTEXT.md「合并导出」词条、ADR-0014）：
+// writeMergedExport 的触发条件（GLOSSARY.md「合并导出」词条、ADR-0014）：
 // 输出模式非关闭、队列正常测完（实际测完轮数等于期望轮数）、至少两轮。
 // 关闭态、单轮、Esc 中断、保存失败、准备错误都不写；中途 q/Ctrl+C 留下没
 // 测完的轮（轮数对不上期望）不写；全部测完后的 q/Ctrl+C 只是离开方式，照写。
@@ -549,7 +549,7 @@ func wantExportRules(selectName string) []string {
 	}, "MATCH,"+selectName)
 }
 
-// writeConfigFile 写出的应是完整可用 profile（CONTEXT.md「导出文件形态」、
+// writeConfigFile 写出的应是完整可用 profile（GLOSSARY.md「导出文件形态」、
 // ADR-0016）：mixed-port 7890、select/url-test 两组、国内直连与 MATCH 兜底，
 // 除骨架外不加任何字段，也不再有空 proxy-providers 噪音行。各轮导出、合并
 // 导出、命令行 -o 三处共用本函数，形态天然一致。

@@ -14,7 +14,7 @@ var ErrOutputPathDirectory = errors.New("以 / 或 \\ 结尾是目录意图，�
 // ValidateOutputPath 是输出路径落定前的统一校验口径，选源界面与命令行
 // -o 共用：先去首尾空白，剩下的为空视同留空（不输出、不补全），返回
 // 空值；以 / 或 \ 结尾是目录意图，报 ErrOutputPathDirectory（见
-// CONTEXT.md「后缀补全」词条）。其余原样返回，后缀补全由调用方接
+// GLOSSARY.md「后缀补全」词条）。其余原样返回，后缀补全由调用方接
 // CompleteYAMLSuffix 做。
 func ValidateOutputPath(path string) (string, error) {
 	value := strings.TrimSpace(path)
@@ -51,7 +51,7 @@ func CompleteYAMLSuffix(path string) string {
 
 // MissingYAMLSuffix 返回输出路径最后一段文件名还缺的后缀段：
 // result 缺 .yaml，result. 缺 yaml，已写全或词干为空（含空路径）返回空串。
-// 供选源界面把缺的段灰显在光标后（见 CONTEXT.md「后缀补全」词条）。
+// 供选源界面把缺的段灰显在光标后（见 GLOSSARY.md「后缀补全」词条）。
 func MissingYAMLSuffix(path string) string {
 	return missingYAMLSuffix(path)
 }

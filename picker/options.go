@@ -53,7 +53,7 @@ const (
 	kindOutput
 )
 
-// OutputMode 是输出路径行的三态（见 CONTEXT.md「输出模式」词条）。
+// OutputMode 是输出路径行的三态（见 GLOSSARY.md「输出模式」词条）。
 type OutputMode int
 
 const (
@@ -84,7 +84,7 @@ func (o *Options) changeOutputMode(delta int) {
 
 // outputModeLocked 报告自定义态是否进入编辑锁定：有内容（TrimSpace 判空，
 // 纯空白不算）时左右键、空格与点击都不切换，退格清空后恢复可切
-// （见 CONTEXT.md「输出模式」词条）。锁定判断在调用侧，本函数不做切换。
+// （见 GLOSSARY.md「输出模式」词条）。锁定判断在调用侧，本函数不做切换。
 func (o *Options) outputModeLocked() bool {
 	return o.OutputMode == OutputModeCustom && strings.TrimSpace(o.OutputPath) != ""
 }
@@ -243,7 +243,7 @@ func validateText(option Option, value string) error {
 		}
 	case OptionOutputPath:
 		// 目录意图校验与命令行 -o 共用同一份口径
-		// （paths.go ValidateOutputPath，见 CONTEXT.md「后缀补全」词条）。
+		// （paths.go ValidateOutputPath，见 GLOSSARY.md「后缀补全」词条）。
 		if _, err := ValidateOutputPath(value); err != nil {
 			return err
 		}

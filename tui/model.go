@@ -147,7 +147,7 @@ type tuiModel struct {
 	//（不再自行退出，ADR-0015）。
 	roundLabel  string
 	autoAdvance bool
-	version     string // 右下角版本角标文案（CONTEXT.md「版本角标」词条）
+	version     string // 右下角版本角标文案（GLOSSARY.md「版本角标」词条）
 	// advanceRequested 表示本轮已完成且产物已保存、应推进下一轮，队列壳轮询。
 	advanceRequested bool
 	// exitAll 表示用户要求退出整个队列：未完成轮的 q/Ctrl+C，或已完成中途轮的
@@ -893,7 +893,7 @@ func (m *tuiModel) SetRoundLabel(label string) {
 }
 
 // SetVersion 设置右下角版本角标文案（如 v2.5.0、dev），由调用方按角标规则
-// 整理好传入；不设置则不显示（见 CONTEXT.md「版本角标」词条）。
+// 整理好传入；不设置则不显示（见 GLOSSARY.md「版本角标」词条）。
 func (m *tuiModel) SetVersion(version string) {
 	m.version = version
 }

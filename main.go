@@ -34,7 +34,7 @@ var (
 	commit  = "unknown"
 )
 
-// versionBadge 是界面右下角版本角标文案（见 CONTEXT.md「版本角标」词条）：
+// versionBadge 是界面右下角版本角标文案（见 GLOSSARY.md「版本角标」词条）：
 // 注入值补 v 前缀（已带不重复加），本地构建照实显示 dev，空串不显示。
 // 选源与测速两个界面共用这一份规则，传入的已是成品文案。
 func versionBadge(version string) string {
@@ -49,7 +49,7 @@ func versionBadge(version string) string {
 
 // outputAuto 表示输出模式处于「当前目录下」：每轮不填词干，按基名或
 // 时间戳自动命名。命令行 -o 只有自定义语义、没有自动模式入口，该开关
-// 只来自选源界面（见 CONTEXT.md「输出模式」词条）。
+// 只来自选源界面（见 GLOSSARY.md「输出模式」词条）。
 var outputAuto bool
 
 var (
@@ -203,7 +203,7 @@ func applyPickerOptions(o picker.Options) {
 	}
 	*imageSpeedOnly = o.ImageSpeedOnly
 	*noImage = o.NoImage
-	// 输出设置按三态解释（见 CONTEXT.md「输出模式」）：自定义写词干，
+	// 输出设置按三态解释（见 GLOSSARY.md「输出模式」）：自定义写词干，
 	// 当前目录下开自动命名，关闭清空——按 Esc 重跑时关掉输出必须真的
 	// 关掉，不能沿用上一轮的值。
 	switch o.OutputMode {
@@ -312,7 +312,7 @@ func runSourceQueue(sources []picker.SourceSpec, execDir string, escapeToParent 
 	*outputPath = picker.ResolveOutputPath(execDir, *outputPath)
 	originalOutputPath := *outputPath
 	// 输出模式非关闭：自定义词干（命令行 -o 或选源自定义态）或当前目录下
-	// （outputAuto）。「合并导出」以此为前提（CONTEXT.md「合并导出」词条）。
+	// （outputAuto）。「合并导出」以此为前提（GLOSSARY.md「合并导出」词条）。
 	outputOpen := originalOutputPath != "" || outputAuto
 
 	var escaped bool
@@ -468,7 +468,7 @@ func runSpeedTest(execDir string, round speedRound) (roundOutcome, []map[string]
 // roundOutputPath 算出一轮的最终产物路径，保存与上传都读它。自定义模式
 // 按「产物跟随文件名」叠基名与序号（订阅轮没有基名靠序号区分，序号停用
 // 才退回时间戳）；「当前目录下」没有用户词干，本地源按「基名-导出.yaml」
-// 自动命名，订阅轮用「导出-时间戳」兜底（见 CONTEXT.md「输出模式」「产物
+// 自动命名，订阅轮用「导出-时间戳」兜底（见 GLOSSARY.md「输出模式」「产物
 // 序号」词条）。两种模式的产物序号与结果图同轮同号。
 func roundOutputPath(customPath string, auto bool, execDir, nameBase string, now time.Time, seq int) string {
 	switch {
@@ -720,7 +720,7 @@ func runQueueProgram(sources []picker.SourceSpec, execDir, originalOutputPath st
 	// 「合并导出」先于退出处理判断：Esc 回选源、保存失败、准备错误都算队列
 	// 未正常结束，不写；q/Ctrl+C 只是离开方式，不一票否决——全部轮测完后的
 	// 退出照写，中途退出留下没测完的轮，实际轮数对不上期望自然不写
-	//（CONTEXT.md「合并导出」、ADR-0014）。
+	//（GLOSSARY.md「合并导出」、ADR-0014）。
 	if path := writeMergedExport(result, runner.outputOpen, execDir, runner.collectedRounds(), runner.expectedRounds(), time.Now()); path != "" {
 		fmt.Fprintf(os.Stderr, "已保存合并配置: %s\n", path)
 	}
@@ -862,7 +862,7 @@ const (
 	autoGroupInterval = 300
 )
 
-// buildExportProfile 把过筛节点组装成完整可用 profile（CONTEXT.md「导出文件
+// buildExportProfile 把过筛节点组装成完整可用 profile（GLOSSARY.md「导出文件
 // 形态」、ADR-0016）：监听端口、select/url-test 两组、国内直连与 MATCH 兜底，
 // 除骨架外不加任何字段。各轮导出、合并导出、命令行 -o 共用 writeConfigFile
 // 走到这里，三处形态天然一致。0 节点退回纯清单：空组引用是无效配置，而
@@ -940,7 +940,7 @@ func writeConfigFile(path string, proxies []map[string]any) error {
 	return nil
 }
 
-// writeMergedExport 按「合并导出」写合并文件（CONTEXT.md「合并导出」词条、
+// writeMergedExport 按「合并导出」写合并文件（GLOSSARY.md「合并导出」词条、
 // ADR-0014）：输出模式非关闭、队列正常测完才写——无 Esc 回选源、无保存失败、
 // 无准备错误，且实际测完写盘的轮数恰好等于期望轮数（源总数减 0 节点跳过的
 // 源）。q/Ctrl+C 只是离开方式，不一票否决：全部轮测完后的退出照写，中途

@@ -10,7 +10,7 @@ Issues 放在本仓库的 GitHub Issues，通过 `gh` CLI 读写。详见 `docs/
 
 ### Domain docs
 
-单上下文：根目录 `CONTEXT.md` + `docs/adr/`。改行为前先读相关 ADR。术语以 `CONTEXT.md` 为准，不要换近义词。详见 `docs/agents/domain.md`。
+单上下文：根目录 `GLOSSARY.md` + `docs/adr/`。改行为前先读相关 ADR。术语以 `GLOSSARY.md` 为准，不要换近义词。详见 `docs/agents/domain.md`。
 
 ## 命令
 
