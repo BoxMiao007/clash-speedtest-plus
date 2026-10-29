@@ -1,0 +1,6 @@
+# 统一文本换行：Go 源码必须在各平台保持 LF，gofmt 才不会被 CRLF 干扰。
+*.go text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.sh text eol=lf
