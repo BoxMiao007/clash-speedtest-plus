@@ -1,0 +1,3 @@
+# 无节点夹具：只有规则，没有 proxies / proxy-providers。
+rules:
+  - MATCH,DIRECT

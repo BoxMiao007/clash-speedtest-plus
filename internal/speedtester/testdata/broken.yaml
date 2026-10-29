@@ -1,0 +1,2 @@
+# 坏 yaml 夹具：proxies 必须是列表，这里是标量。
+proxies: "not-a-list"

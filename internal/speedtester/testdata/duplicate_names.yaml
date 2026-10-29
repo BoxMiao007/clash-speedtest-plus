@@ -1,0 +1,13 @@
+# 同名节点夹具：与 mihomo 一致，proxies 内重名应报错。
+proxies:
+  - name: "香港-01"
+    type: ss
+    server: 127.0.0.1
+    port: 8388
+    cipher: aes-128-gcm
+    password: "fixture-password"
+  - name: "香港-01"
+    type: trojan
+    server: 127.0.0.1
+    port: 443
+    password: "fixture-password"

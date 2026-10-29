@@ -1,0 +1,13 @@
+== 构建 vivahead 二进制 ==
+构建完成：/tmp/tmp.hX4w3qpkCF/subscription-speedtest.exe
+== 持久化断言 ==
+PASS：headless 走查通过
+== 关键输出 ==
+ok ready 1180x800 scale=2
+x=762.5 y=227 w=144 h=32 size=14 "复制此节点信息"
+x=341 y=128.5 w=56.90039 h=19 size=12 "已完成 1/1"
+x=793 y=69 w=108 h=32 size=14 "只看HK"
+x=71 y=356.5 w=226 h=21 size=14 "机场 B"
+x=341 y=257.5 w=40.304688 h=21 size=14 "机场 B"
+x=20 y=776 w=758.78564 h=18 size=11 "已新建条目：机场 B"
+ok 0 problems

@@ -1,0 +1,839 @@
+package speedtester
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"math"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/metacubex/mihomo/constant"
+)
+
+type Config struct {
+	ConfigPaths      string
+	FilterRegex      string
+	BlockRegex       string
+	ServerURL        string
+	DownloadSize     int
+	UploadSize       int
+	Timeout          time.Duration
+	Concurrent       int
+	Parallel         int
+	MaxLatency       time.Duration
+	MaxPacketLoss    float64
+	MinDownloadSpeed float64
+	MinUploadSpeed   float64
+	Mode             SpeedMode
+	OutputPath       string
+	UserAgent        string // optional; empty means use default (mihomo kernel UA)
+}
+
+type serverMode int
+
+const (
+	serverModeDownloadServer serverMode = iota
+	serverModeDirectDownload
+)
+
+// defaultFetchConfigUA returns the default User-Agent (mihomo kernel format) when none is set.
+func defaultFetchConfigUA() string {
+	return constant.MihomoName + "/" + constant.Version
+}
+
+func (st *SpeedTester) fetchConfigUA() string {
+	if st.config.UserAgent != "" {
+		return st.config.UserAgent
+	}
+	return defaultFetchConfigUA()
+}
+
+func (st *SpeedTester) fetchHTTPConfig(targetURL string) ([]byte, error) {
+	return fetchConfigWithUA(targetURL, st.fetchConfigUA())
+}
+
+// fetchConfigWithUA 是 LoadProxies 与 LoadNodesFile 共用的配置拉取路径，
+// 只差 User-Agent：前者可用 -ua 覆盖，后者固定 mihomo 内核默认 UA。
+func fetchConfigWithUA(targetURL, userAgent string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", userAgent)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
+type serverTarget struct {
+	mode        serverMode
+	baseURL     string
+	downloadURL string
+}
+
+type SpeedTester struct {
+	config           *Config
+	blockedNodes     []string
+	blockedNodeCount int
+	serverMode       serverMode
+	serverBaseURL    string
+	downloadURL      string
+	mode             SpeedMode
+	pause            *PauseGate
+	ctx              context.Context
+	cancel           context.CancelFunc
+	onProgress       ProgressFunc
+}
+
+func New(config *Config) (*SpeedTester, error) {
+	if config.Concurrent <= 0 {
+		config.Concurrent = 1
+	}
+	if config.Parallel <= 0 {
+		config.Parallel = 1
+	}
+	if config.DownloadSize < 0 {
+		config.DownloadSize = 100 * 1024 * 1024
+	}
+	if config.UploadSize < 0 {
+		config.UploadSize = 10 * 1024 * 1024
+	}
+	mode := config.Mode
+	if mode == "" {
+		mode = SpeedModeDownload
+	}
+	target, err := resolveServerTarget(config.ServerURL)
+	if err != nil {
+		return nil, err
+	}
+	if mode == SpeedModeFull && config.UploadSize <= 0 {
+		return nil, fmt.Errorf("upload size must be positive when speed mode is %s", mode)
+	}
+	if target.mode == serverModeDirectDownload && mode == SpeedModeFull {
+		mode = SpeedModeDownload
+	}
+	config.Mode = mode
+	ctx, cancel := context.WithCancel(context.Background())
+	return &SpeedTester{
+		config:        config,
+		serverMode:    target.mode,
+		serverBaseURL: target.baseURL,
+		downloadURL:   target.downloadURL,
+		mode:          mode,
+		pause:         NewPauseGate(),
+		ctx:           ctx,
+		cancel:        cancel,
+	}, nil
+}
+
+func (st *SpeedTester) Pause() {
+	st.pause.Pause()
+}
+
+func (st *SpeedTester) Resume() {
+	st.pause.Resume()
+}
+
+func (st *SpeedTester) Stop() {
+	st.cancel()
+	st.pause.Resume()
+}
+
+func (st *SpeedTester) Mode() SpeedMode {
+	return st.mode
+}
+
+func resolveServerTarget(rawURL string) (*serverTarget, error) {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return nil, fmt.Errorf("server url is empty")
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("parse server url %q failed: %w", rawURL, err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("server url %q must include scheme and host", rawURL)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("server url %q must use http or https scheme, got %q", rawURL, parsed.Scheme)
+	}
+	path := strings.TrimSpace(parsed.Path)
+	hasPath := strings.Trim(path, "/") != ""
+	hasQuery := parsed.RawQuery != ""
+	hasFragment := parsed.Fragment != ""
+	if !hasPath && !hasQuery && !hasFragment {
+		return &serverTarget{
+			mode:    serverModeDownloadServer,
+			baseURL: strings.TrimRight(trimmed, "/"),
+		}, nil
+	}
+	return &serverTarget{
+		mode:        serverModeDirectDownload,
+		downloadURL: trimmed,
+	}, nil
+}
+
+type CProxy struct {
+	constant.Proxy
+	Config map[string]any
+}
+
+// ProxyGroup 是 proxy-groups 一项的形状，只覆盖导出骨架用到的字段；解析时
+// 其余字段忽略。
+type ProxyGroup struct {
+	Name     string   `yaml:"name"`
+	Type     string   `yaml:"type"`
+	Proxies  []string `yaml:"proxies"`
+	URL      string   `yaml:"url,omitempty"`
+	Interval int      `yaml:"interval,omitempty"`
+}
+
+// RawConfig 既当 Clash/Mihomo 配置的解析载体（LoadProxies），也是导出 profile
+// 的写盘载体（main 的 buildExportProfile 组装，ADR-0016）。Providers 带
+// omitempty：导出时 nil 不再渲染成空的 proxy-providers 噪音行；
+// mixed-port/proxy-groups/rules 仅导出时置值，解析侧只是多接住这几个字段。
+type RawConfig struct {
+	MixedPort   int                       `yaml:"mixed-port,omitempty"`
+	Providers   map[string]map[string]any `yaml:"proxy-providers,omitempty"`
+	Proxies     []map[string]any          `yaml:"proxies"`
+	ProxyGroups []ProxyGroup              `yaml:"proxy-groups,omitempty"`
+	Rules       []string                  `yaml:"rules,omitempty"`
+}
+
+func (st *SpeedTester) LoadProxies() (map[string]*CProxy, error) {
+	allProxies := make(map[string]*CProxy)
+	st.blockedNodes = make([]string, 0)
+	st.blockedNodeCount = 0
+
+	for configPath := range strings.SplitSeq(st.config.ConfigPaths, ",") {
+		var body []byte
+		var err error
+		if strings.HasPrefix(configPath, "http") {
+			normalized, used, normalizeErr := NormalizeSubscription(strings.TrimSpace(configPath), func(target string) (string, error) {
+				fetched, fetchErr := st.fetchHTTPConfig(target)
+				return string(fetched), fetchErr
+			})
+			if normalizeErr != nil {
+				if errors.Is(normalizeErr, ErrNotClashSubscription) {
+					return nil, fmt.Errorf("%s: %w", strings.TrimSpace(configPath), normalizeErr)
+				}
+				log.Printf("failed to fetch config: %s", normalizeErr)
+				continue
+			}
+			if used != strings.TrimSpace(configPath) {
+				log.Printf("已用补过参数的地址: %s", used)
+			}
+			body = []byte(normalized)
+		} else {
+			body, err = os.ReadFile(configPath)
+		}
+		if err != nil {
+			log.Printf("failed to read config: %s", err)
+			continue
+		}
+
+		// 解析段与 LoadNodesFile 共用：直接节点按文件顺序，provider 节点
+		// 按 provider 名、节点名排序，类型白名单与地址归一化也在里面。
+		nodes, err := parseProxyConfig(body, st.fetchHTTPConfig)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse config at path %s: %w", configPath, err)
+		}
+		for _, node := range nodes {
+			if _, ok := allProxies[node.name]; !ok {
+				allProxies[node.name] = node.proxy
+			}
+		}
+	}
+
+	filterRegexp := regexp.MustCompile(st.config.FilterRegex)
+	var blockKeywords []string
+	if st.config.BlockRegex != "" {
+		for _, keyword := range strings.Split(st.config.BlockRegex, "|") {
+			keyword = strings.TrimSpace(keyword)
+			if keyword != "" {
+				blockKeywords = append(blockKeywords, strings.ToLower(keyword))
+			}
+		}
+	}
+
+	filteredProxies := make(map[string]*CProxy)
+	for name := range allProxies {
+		shouldBlock := false
+		if len(blockKeywords) > 0 {
+			lowerName := strings.ToLower(name)
+			for _, keyword := range blockKeywords {
+				if strings.Contains(lowerName, keyword) {
+					shouldBlock = true
+					break
+				}
+			}
+		}
+
+		if shouldBlock {
+			continue
+		}
+		if filterRegexp.MatchString(name) {
+			filteredProxies[name] = allProxies[name]
+		}
+	}
+	return deduplicateProxiesByServerPort(filteredProxies), nil
+}
+
+func deduplicateProxiesByServerPort(proxies map[string]*CProxy) map[string]*CProxy {
+	if len(proxies) < 2 {
+		return proxies
+	}
+
+	deduplicated := make(map[string]*CProxy, len(proxies))
+	seen := make(map[string]struct{}, len(proxies))
+	for name, proxy := range proxies {
+		key, ok := buildProxyServerPortKey(proxy)
+		if ok {
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+		}
+		deduplicated[name] = proxy
+	}
+	return deduplicated
+}
+
+func buildProxyServerPortKey(proxy *CProxy) (string, bool) {
+	if proxy == nil || proxy.Config == nil {
+		return "", false
+	}
+	serverValue, serverOK := proxy.Config["server"]
+	portValue, portOK := proxy.Config["port"]
+	if !serverOK || !portOK {
+		return "", false
+	}
+	server := strings.TrimSpace(fmt.Sprintf("%v", serverValue))
+	if server == "" {
+		return "", false
+	}
+	port := strings.TrimSpace(fmt.Sprintf("%v", portValue))
+	if port == "" {
+		return "", false
+	}
+	return fmt.Sprintf("%s:%s", server, port), true
+}
+
+func (st *SpeedTester) TestProxies(proxies map[string]*CProxy, tester func(result *Result)) {
+	st.TestProxiesUntil(proxies, nil, func(result *Result) bool {
+		tester(result)
+		return true
+	})
+}
+
+func (st *SpeedTester) TestProxiesUntil(proxies map[string]*CProxy, onStart StartFunc, tester func(result *Result) bool) {
+	runProxyTests(st.ctx, st.config.Parallel, st.pause, sortedProxyTasks(proxies), st.testProxy, onStart, tester)
+}
+
+type Result struct {
+	ProxyName     string         `json:"proxy_name"`
+	ProxyType     string         `json:"proxy_type"`
+	ProxyConfig   map[string]any `json:"proxy_config"`
+	Latency       time.Duration  `json:"latency"`
+	Jitter        time.Duration  `json:"jitter"`
+	PacketLoss    float64        `json:"packet_loss"`
+	DownloadSize  float64        `json:"download_size"`
+	DownloadTime  time.Duration  `json:"download_time"`
+	DownloadSpeed float64        `json:"download_speed"`
+	DownloadError string         `json:"download_error"`
+	UploadSize    float64        `json:"upload_size"`
+	UploadTime    time.Duration  `json:"upload_time"`
+	UploadSpeed   float64        `json:"upload_speed"`
+	UploadError   string         `json:"upload_error"`
+}
+
+func (r *Result) FormatDownloadSpeed() string {
+	if r.DownloadError != "" {
+		return r.DownloadError
+	}
+	return formatSpeed(r.DownloadSpeed)
+}
+
+func (r *Result) FormatDownloadSpeedValue() string {
+	return formatSpeed(r.DownloadSpeed)
+}
+
+func (r *Result) FormatLatency() string {
+	if r.Latency == 0 {
+		return "N/A"
+	}
+	return fmt.Sprintf("%dms", r.Latency.Milliseconds())
+}
+
+func (r *Result) FormatJitter() string {
+	if r.Jitter == 0 {
+		return "N/A"
+	}
+	return fmt.Sprintf("%dms", r.Jitter.Milliseconds())
+}
+
+func (r *Result) FormatPacketLoss() string {
+	return fmt.Sprintf("%.1f%%", r.PacketLoss)
+}
+
+func (r *Result) FormatUploadSpeed() string {
+	if r.UploadError != "" {
+		return r.UploadError
+	}
+	return formatSpeed(r.UploadSpeed)
+}
+
+func (r *Result) FormatUploadSpeedValue() string {
+	return formatSpeed(r.UploadSpeed)
+}
+
+func (r *Result) FormatDownloadError() string {
+	if r.DownloadError == "" {
+		return "N/A"
+	}
+	return r.DownloadError
+}
+
+func (r *Result) FormatUploadError() string {
+	if r.UploadError == "" {
+		return "N/A"
+	}
+	return r.UploadError
+}
+
+// FormatSpeed 以人类可读格式（如 12.34MB/s）格式化字节每秒速度，供在测行展示瞬时速度。
+func FormatSpeed(bytesPerSecond float64) string {
+	return formatSpeed(bytesPerSecond)
+}
+
+func formatSpeed(bytesPerSecond float64) string {
+	if bytesPerSecond == 0 {
+		return "N/A"
+	}
+	units := []string{"B/s", "KB/s", "MB/s", "GB/s", "TB/s"}
+	unit := 0
+	speed := bytesPerSecond
+	for speed >= 1024 && unit < len(units)-1 {
+		speed /= 1024
+		unit++
+	}
+	return fmt.Sprintf("%.2f%s", speed, units[unit])
+}
+
+func (st *SpeedTester) testProxy(name string, proxy *CProxy) *Result {
+	if st.ctx.Err() != nil {
+		return nil
+	}
+	result := &Result{
+		ProxyName:   name,
+		ProxyType:   proxy.Type().String(),
+		ProxyConfig: proxy.Config,
+	}
+
+	latencyResult := st.testLatency(proxy, st.config.MaxLatency)
+	if st.ctx.Err() != nil {
+		return nil
+	}
+	result.Latency = latencyResult.avgLatency
+	result.Jitter = latencyResult.jitter
+	result.PacketLoss = latencyResult.packetLoss
+	st.emitProgress(Progress{
+		Name:       name,
+		Type:       result.ProxyType,
+		Phase:      PhaseLatency,
+		Latency:    result.Latency,
+		Jitter:     result.Jitter,
+		PacketLoss: result.PacketLoss,
+	})
+
+	if st.mode.IsFast() || result.PacketLoss == 100 {
+		return result
+	}
+	if st.config.OutputPath != "" && st.config.MaxPacketLoss < 100 && latencyResult.packetLoss > st.config.MaxPacketLoss {
+		return result
+	}
+	if st.config.OutputPath != "" && st.config.MaxLatency > 0 && latencyResult.avgLatency > st.config.MaxLatency {
+		return result
+	}
+
+	var wg sync.WaitGroup
+
+	downloadSummary := newTransferSummary()
+	var uploadSummary *transferSummary
+	if st.mode.UploadEnabled() {
+		uploadSummary = newTransferSummary()
+	}
+
+	downloadChunkSize := st.config.DownloadSize / st.config.Concurrent
+	if downloadChunkSize > 0 {
+		counter := &byteCounter{}
+		startedAt := time.Now()
+		stopWatch := st.watchProgress(func() {
+			speed := InstantSpeed(counter.load(), time.Since(startedAt))
+			st.emitProgress(Progress{
+				Name:          name,
+				Type:          result.ProxyType,
+				Phase:         PhaseDownload,
+				Latency:       result.Latency,
+				Jitter:        result.Jitter,
+				PacketLoss:    result.PacketLoss,
+				InstantSpeed:  speed,
+				DownloadSpeed: speed,
+			})
+		})
+		downloadResults := make(chan *downloadResult, st.config.Concurrent)
+
+		for i := 0; i < st.config.Concurrent; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				downloadResults <- st.testDownload(proxy, downloadChunkSize, st.config.Timeout, counter)
+			}()
+		}
+		wg.Wait()
+		stopWatch()
+
+		for range st.config.Concurrent {
+			if dr := <-downloadResults; dr != nil {
+				downloadSummary.add(dr)
+			}
+		}
+		close(downloadResults)
+		if st.ctx.Err() != nil {
+			return nil
+		}
+
+		result.DownloadSize, result.DownloadTime, result.DownloadSpeed, result.DownloadError = applyTransferSummary(downloadSummary)
+		st.emitProgress(Progress{
+			Name:          name,
+			Type:          result.ProxyType,
+			Phase:         PhaseDownload,
+			Latency:       result.Latency,
+			Jitter:        result.Jitter,
+			PacketLoss:    result.PacketLoss,
+			InstantSpeed:  result.DownloadSpeed,
+			DownloadSpeed: result.DownloadSpeed,
+		})
+
+		if st.config.OutputPath != "" && st.config.MinDownloadSpeed > 0 && result.DownloadSpeed < st.config.MinDownloadSpeed {
+			return result
+		}
+	}
+
+	if st.mode.UploadEnabled() {
+		uploadChunkSize := st.config.UploadSize / st.config.Concurrent
+		if uploadChunkSize > 0 {
+			counter := &byteCounter{}
+			startedAt := time.Now()
+			stopWatch := st.watchProgress(func() {
+				speed := InstantSpeed(counter.load(), time.Since(startedAt))
+				st.emitProgress(Progress{
+					Name:          name,
+					Type:          result.ProxyType,
+					Phase:         PhaseUpload,
+					Latency:       result.Latency,
+					Jitter:        result.Jitter,
+					PacketLoss:    result.PacketLoss,
+					InstantSpeed:  speed,
+					DownloadSpeed: result.DownloadSpeed,
+					UploadSpeed:   speed,
+				})
+			})
+			uploadResults := make(chan *downloadResult, st.config.Concurrent)
+
+			for i := 0; i < st.config.Concurrent; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					uploadResults <- st.testUpload(proxy, uploadChunkSize, st.config.Timeout, counter)
+				}()
+			}
+			wg.Wait()
+			stopWatch()
+
+			for i := 0; i < st.config.Concurrent; i++ {
+				if ur := <-uploadResults; ur != nil {
+					uploadSummary.add(ur)
+				}
+			}
+			close(uploadResults)
+			if st.ctx.Err() != nil {
+				return nil
+			}
+
+			result.UploadSize, result.UploadTime, result.UploadSpeed, result.UploadError = applyTransferSummary(uploadSummary)
+		}
+	}
+
+	return result
+}
+
+type latencyResult struct {
+	avgLatency time.Duration
+	jitter     time.Duration
+	packetLoss float64
+}
+
+func (st *SpeedTester) testLatency(proxy constant.Proxy, minLatency time.Duration) *latencyResult {
+	client := st.createClient(proxy, minLatency)
+	defer client.CloseIdleConnections()
+
+	latencies := make([]time.Duration, 0, 6)
+	failedPings := 0
+
+	for range 6 {
+		if st.ctx.Err() != nil {
+			return calculateLatencyStats(latencies, failedPings)
+		}
+		select {
+		case <-st.ctx.Done():
+			return calculateLatencyStats(latencies, failedPings)
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		start := time.Now()
+		req, err := http.NewRequestWithContext(st.ctx, http.MethodHead, st.downloadURL, nil)
+		if err != nil {
+			failedPings++
+			continue
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			failedPings++
+			continue
+		}
+		resp.Body.Close()
+		latencies = append(latencies, time.Since(start))
+	}
+
+	return calculateLatencyStats(latencies, failedPings)
+}
+
+type downloadResult struct {
+	error    string
+	bytes    int64
+	duration time.Duration
+}
+
+type transferSummary struct {
+	totalBytes    int64
+	totalDuration time.Duration
+	successCount  int
+	errors        []string
+	errorSeen     map[string]struct{}
+}
+
+func applyTransferSummary(summary *transferSummary) (float64, time.Duration, float64, string) {
+	if summary == nil {
+		return 0, 0, 0, ""
+	}
+	var size float64
+	var duration time.Duration
+	var speed float64
+	var errorMessage string
+	if summary.successCount > 0 {
+		size = float64(summary.totalBytes)
+		duration = summary.averageDuration()
+		if duration > 0 {
+			speed = float64(summary.totalBytes) / duration.Seconds()
+		}
+	}
+	if len(summary.errors) > 0 {
+		errorMessage = strings.Join(summary.errors, "; ")
+		// If any transfer error is reported, treat the speed as zero.
+		speed = 0
+	}
+	return size, duration, speed, errorMessage
+}
+
+func newTransferSummary() *transferSummary {
+	return &transferSummary{
+		errorSeen: make(map[string]struct{}),
+	}
+}
+
+func (s *transferSummary) add(result *downloadResult) {
+	if result == nil {
+		return
+	}
+	if result.error != "" {
+		s.appendError(result.error)
+		return
+	}
+	s.totalBytes += result.bytes
+	s.totalDuration += result.duration
+	s.successCount++
+}
+
+func (s *transferSummary) appendError(message string) {
+	if message == "" {
+		return
+	}
+	if s.errorSeen == nil {
+		s.errorSeen = make(map[string]struct{})
+	}
+	if _, exists := s.errorSeen[message]; exists {
+		return
+	}
+	s.errorSeen[message] = struct{}{}
+	s.errors = append(s.errors, message)
+}
+
+func (s *transferSummary) averageDuration() time.Duration {
+	if s.successCount == 0 {
+		return 0
+	}
+	return s.totalDuration / time.Duration(s.successCount)
+}
+
+func (st *SpeedTester) testDownload(proxy constant.Proxy, size int, timeout time.Duration, counter *byteCounter) *downloadResult {
+	client := st.createClient(proxy, timeout)
+	defer client.CloseIdleConnections()
+
+	start := time.Now()
+	var downloadURL string
+	if st.serverMode == serverModeDirectDownload {
+		downloadURL = st.downloadURL
+	} else {
+		downloadURL = fmt.Sprintf("%s/__down?bytes=%d", st.serverBaseURL, size)
+	}
+
+	req, err := http.NewRequestWithContext(st.ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return &downloadResult{
+			error: fmt.Sprintf("create download request for %s failed: %v", downloadURL, err),
+		}
+	}
+	if st.serverMode == serverModeDirectDownload && size > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", size-1))
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return &downloadResult{
+			error: fmt.Sprintf("download request to %s failed: %v, spent %s", downloadURL, err, time.Since(start)),
+		}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return &downloadResult{
+			error: fmt.Sprintf("download response from %s returned %s, spent %s", downloadURL, resp.Status, time.Since(start)),
+		}
+	}
+
+	downloadBytes, _ := io.Copy(io.Discard, &countingReader{r: resp.Body, c: counter})
+	return &downloadResult{
+		bytes:    downloadBytes,
+		duration: time.Since(start),
+	}
+}
+
+func (st *SpeedTester) testUpload(proxy constant.Proxy, size int, timeout time.Duration, counter *byteCounter) *downloadResult {
+	client := st.createClient(proxy, timeout)
+	defer client.CloseIdleConnections()
+
+	reader := NewZeroReader(size)
+	uploadURL := fmt.Sprintf("%s/__up", st.serverBaseURL)
+
+	start := time.Now()
+	req, err := http.NewRequestWithContext(st.ctx, http.MethodPost, uploadURL, &countingReader{r: reader, c: counter})
+	if err != nil {
+		return &downloadResult{
+			error: fmt.Sprintf("upload request to %s failed: %v, spent %s", uploadURL, err, time.Since(start)),
+		}
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	resp, err := client.Do(req)
+	if err != nil {
+		return &downloadResult{
+			error: fmt.Sprintf("upload request to %s failed: %v, spent %s", uploadURL, err, time.Since(start)),
+		}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return &downloadResult{
+			error: fmt.Sprintf("upload response from %s returned %s, spent %s", uploadURL, resp.Status, time.Since(start)),
+		}
+	}
+
+	return &downloadResult{
+		bytes:    reader.WrittenBytes(),
+		duration: time.Since(start),
+	}
+}
+
+func (st *SpeedTester) createClient(proxy constant.Proxy, timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				host, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				var u16Port uint16
+				if port, err := strconv.ParseUint(port, 10, 16); err == nil {
+					u16Port = uint16(port)
+				}
+				return proxy.DialContext(ctx, &constant.Metadata{
+					Host:    host,
+					DstPort: u16Port,
+				})
+			},
+		},
+	}
+}
+
+func calculateLatencyStats(latencies []time.Duration, failedPings int) *latencyResult {
+	result := &latencyResult{
+		packetLoss: float64(failedPings) / 6.0 * 100,
+	}
+
+	if len(latencies) == 0 {
+		return result
+	}
+
+	// 计算平均延迟
+	var total time.Duration
+	for _, l := range latencies {
+		total += l
+	}
+	result.avgLatency = total / time.Duration(len(latencies))
+
+	// 计算抖动
+	var variance float64
+	for _, l := range latencies {
+		diff := float64(l - result.avgLatency)
+		variance += diff * diff
+	}
+	variance /= float64(len(latencies))
+	result.jitter = time.Duration(math.Sqrt(variance))
+
+	return result
+}
+
+func convertMappedIPv6ToIPv4(server string) string {
+	ip := net.ParseIP(server)
+	if ip == nil {
+		return server
+	}
+	if ipv4 := ip.To4(); ipv4 != nil {
+		return ipv4.String()
+	}
+	return server
+}
