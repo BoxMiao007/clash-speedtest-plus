@@ -12,3 +12,6 @@ clash-speedtest-plus-sub-*.yaml
 # agent 技能安装产物，不入库
 .agents/
 skills-lock.json
+
+# GUI 运行时数据：条目、预设、结果（可能含节点凭据）
+data/

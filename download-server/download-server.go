@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/BoxMiao007/clash-speedtest-plus/speedtester"
+	"github.com/BoxMiao007/clash-speedtest-plus/internal/speedtester"
 )
 
 func main() {

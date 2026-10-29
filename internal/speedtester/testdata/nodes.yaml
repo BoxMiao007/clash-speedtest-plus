@@ -1,0 +1,22 @@
+# LoadNodesFile 夹具：全部为假地址/假凭据，禁止放真实节点。
+proxies:
+  - name: "香港-01"
+    type: ss
+    server: 127.0.0.1
+    port: 8388
+    cipher: aes-128-gcm
+    password: "fixture-password"
+  - name: "日本-01"
+    type: vmess
+    server: example.com
+    port: 443
+    uuid: 00000000-0000-0000-0000-000000000000
+    alterId: 0
+    cipher: auto
+    tls: true
+  - name: "美国-01"
+    type: trojan
+    server: 127.0.0.1
+    port: 8388
+    password: "fixture-password"
+    sni: example.com

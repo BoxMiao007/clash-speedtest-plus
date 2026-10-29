@@ -1,0 +1,299 @@
+package gui
+
+import (
+	"errors"
+
+	"github.com/BoxMiao007/clash-speedtest-plus/internal/filter"
+	"github.com/vivaui/viva/app"
+	"github.com/vivaui/viva/flex"
+	"github.com/vivaui/viva/ui"
+)
+
+var (
+	viewLabels    = []string{"节点选择", "下载速度"}
+	modeLabels    = []string{"简化", "正则"}
+	combineLabels = []string{"与", "或"}
+)
+
+// Options 是 GUI 的启动参数。生产代码只传程序目录与版本；测试注入临时目录
+// 与假引擎。
+type Options struct {
+	BaseDir string
+	DataDir string
+	Version string
+	Theme   ui.Theme
+	Runner  Runner
+}
+
+// App 是 Viva 应用外壳：拥有身份树、视图缓存和唯一的窗口配置。
+type App struct {
+	*state
+	version     string
+	view        flex.View
+	invalidator app.Invalidator
+	config      app.Config
+	paintRoot   func(*flex.Frame)
+	closed      bool
+}
+
+// New 装配应用：打开数据目录、读取条目、预计算首帧要显示的所有文案。
+func New(opts Options) (*App, error) {
+	if opts.BaseDir == "" {
+		return nil, errors.New("程序目录不能为空")
+	}
+	model, err := newState(opts)
+	if err != nil {
+		return nil, err
+	}
+	application := &App{
+		state:   model,
+		version: versionBadge(opts.Version),
+	}
+	// 页面的 build 回调只创建一次：每帧新建捕获变量的闭包会把分配带进绘制路径。
+	application.paintRoot = func(f *flex.Frame) { application.paintPage(f) }
+	application.config = app.Config{
+		Title:       "订阅测速",
+		Width:       1180,
+		Height:      800,
+		MinWidth:    1000,
+		MinHeight:   640,
+		Tree:        model.tree,
+		Paint:       application.paint,
+		OnWake:      model.applyPending,
+		Invalidator: &application.invalidator,
+		OnScroll:    application.onScroll,
+		TextInput:   flex.Fields(&model.filterField, &model.entryForm.name, &model.presetForm.name),
+		OnClosed:    model.close,
+		ClearColor:  appColor(model.theme.Background),
+	}
+	model.invalidator = &application.invalidator
+	return application, nil
+}
+
+// Config 返回窗口配置，测试把它交给 app.Driver。
+func (a *App) Config() app.Config { return a.config }
+
+// Close 停止后台测速并保存设置；重复调用无副作用。
+func (a *App) Close() {
+	if a.closed {
+		return
+	}
+	a.closed = true
+	a.state.close()
+}
+
+func (a *App) onScroll(event ui.ScrollEvent) ui.EventResult {
+	if a.presetOpen.Open {
+		return a.presetOpen.Wheel(event)
+	}
+	if a.menu.open {
+		return ui.EventResult{}
+	}
+	if a.active == viewResults {
+		if pointIn(a.resultViewport, event.X, event.Y) {
+			return scrollList(&a.resultOffset, a.resultContent, a.resultViewport.Height, event.DeltaY)
+		}
+		return a.view.Wheel(event)
+	}
+	if pointIn(a.nodeViewport, event.X, event.Y) {
+		return scrollList(&a.nodeOffset, a.nodeContent, a.nodeViewport.Height, event.DeltaY)
+	}
+	return a.view.Wheel(event)
+}
+
+func pointIn(rect ui.Rect, x, y float32) bool {
+	return x >= rect.X && x < rect.X+rect.Width && y >= rect.Y && y < rect.Y+rect.Height
+}
+
+func scrollList(offset *float32, content, viewport, delta float32) ui.EventResult {
+	maximum := content - viewport
+	if maximum < 0 {
+		maximum = 0
+	}
+	before := *offset
+	next := before + delta
+	if next < 0 {
+		next = 0
+	}
+	if next > maximum {
+		next = maximum
+	}
+	*offset = next
+	return ui.EventResult{Handled: true, Repaint: next != before}
+}
+
+func (a *App) paint(canvas *ui.Canvas, size ui.Size) {
+	a.window = size
+	a.nodeListValid = false
+	a.resultListValid = false
+	bounds := ui.Rect{X: 0, Y: 0, Width: size.Width, Height: size.Height}
+	canvas.Fill(bounds, a.theme.Background)
+	a.view.Draw(canvas, a.theme, bounds, a.paintRoot)
+	if a.nodeListValid {
+		a.nodeViewport = a.nodeListBox.Rect()
+		a.clampNodeOffset()
+	}
+	if a.resultListValid {
+		a.resultViewport = a.resultListBox.Rect()
+		a.clampResultOffset()
+	}
+}
+
+func (a *App) paintPage(f *flex.Frame) {
+	f.Column().Fill().Children(func() {
+		a.paintHeader(f)
+		a.paintFilterBar(f)
+		f.Row().Grow(1).FillWidth().Children(func() {
+			a.paintEntriesPanel(f)
+			f.Column().Width(1).FillHeight().Background(a.theme.Border)
+			a.paintContent(f)
+		})
+		a.paintFooter(f)
+		a.paintDialogs(f)
+		a.paintMenu(f)
+	})
+}
+
+func (a *App) paintHeader(f *flex.Frame) {
+	f.Row().Height(58).FillWidth().PadSides(0, 20, 0, 20).Items(flex.Center).Gap(12).Children(func() {
+		f.Text("订阅测速").FontSize(20).Bold()
+		if a.version != "" {
+			f.Text(a.version).FontSize(12).Muted()
+		}
+		f.Spacer()
+		if index, ok := f.Choice(a.ids.viewScope, viewLabels, a.ids.viewIndex(a.active)).ChosenIndex(); ok {
+			a.active = viewKind(index)
+		}
+	})
+	f.Column().Height(1).FillWidth().Background(a.theme.Border)
+}
+
+func (a *App) paintFilterBar(f *flex.Frame) {
+	f.Row().Height(52).FillWidth().PadX(20).Items(flex.Center).Gap(8).Children(func() {
+		f.Text("过滤").FontSize(12).Muted()
+		modeIndex := 0
+		if a.filterMode == filter.ModeAdvanced {
+			modeIndex = 1
+		}
+		if index, ok := f.Choice(a.ids.modeScope, modeLabels, modeIndex).ChosenIndex(); ok {
+			if index == 0 {
+				a.setFilterMode(filter.ModeSimple)
+			} else {
+				a.setFilterMode(filter.ModeAdvanced)
+			}
+		}
+		expression := f.Field(&a.filterField, a.ids.filterField, "过滤表达式", a.filterPlaceholder()).Grow(1)
+		if expression.Submitted() {
+			a.compileFilter()
+			a.persistSettings()
+		}
+		if a.filterMode == filter.ModeSimple {
+			combineIndex := 0
+			if a.filterCombine == filter.CombineOr {
+				combineIndex = 1
+			}
+			if index, ok := f.Choice(a.ids.combScope, combineLabels, combineIndex).ChosenIndex(); ok {
+				if index == 0 {
+					a.setFilterCombine(filter.CombineAnd)
+				} else {
+					a.setFilterCombine(filter.CombineOr)
+				}
+			}
+		} else {
+			f.Text("完整正则，区分大小写").FontSize(11).Muted()
+		}
+		if f.Button(a.ids.filterApply, "应用").XSmall().Outline().Clicked() {
+			a.compileFilter()
+			a.persistSettings()
+		}
+		selected := a.presetSel + 1
+		preset := f.Select(a.ids.preset, &a.presetOpen, a.presetLabels, selected).Width(150).Placeholder("预设")
+		if index, ok := preset.Picked(); ok {
+			if index == 0 {
+				a.presetSel = -1
+				a.status = "已取消预设选择"
+			} else {
+				a.applyPreset(index - 1)
+			}
+		}
+		if f.Button(a.ids.savePreset, "保存预设").XSmall().Outline().Clicked() {
+			a.openPresetSaveDialog()
+		}
+		if a.presetSel >= 0 && a.presetSel < len(a.presets) {
+			if f.Button(a.ids.renamePreset, "重命名预设").XSmall().Outline().Clicked() {
+				a.openPresetRenameDialog()
+			}
+			if f.Button(a.ids.deletePreset, "删除预设").XSmall().Outline().Destructive().Clicked() {
+				a.askDeletePreset()
+			}
+		}
+	})
+	if a.filterErr != "" {
+		f.Row().Height(24).FillWidth().PadX(20).Items(flex.Center).Children(func() {
+			f.Text(a.filterErr).FontSize(11).Color(a.theme.Danger).Ellipsis()
+		})
+	}
+	f.Column().Height(1).FillWidth().Background(a.theme.Border)
+}
+
+func (a *App) filterPlaceholder() string {
+	if a.filterMode == filter.ModeAdvanced {
+		return "正则表达式，例如 ^HK-.*$"
+	}
+	return "关键词，空格分隔；! 排除；支持 * 和 ?"
+}
+
+func (a *App) paintFooter(f *flex.Frame) {
+	f.Column().Height(1).FillWidth().Background(a.theme.Border)
+	f.Row().Height(30).FillWidth().PadX(20).Items(flex.Center).Gap(12).Children(func() {
+		f.Text(a.status).FontSize(11).Color(a.theme.MutedForeground).Ellipsis().Grow(1)
+		dataColor := a.theme.MutedForeground
+		if a.storeErr != "" {
+			dataColor = a.theme.Danger
+		}
+		f.Text(a.dataText).FontSize(11).Color(dataColor).Ellipsis().MaxWidthPercent(45)
+	})
+}
+
+func (a *App) paintContent(f *flex.Frame) {
+	f.Column().Grow(1).FillHeight().Children(func() {
+		if a.active == viewResults {
+			a.paintResults(f)
+			return
+		}
+		a.paintNodes(f)
+	})
+}
+
+func appOpenFiles() ([]string, error) {
+	return app.OpenFiles(app.OpenFileOptions{
+		Title:   "选择 Clash/Mihomo 配置文件",
+		Filters: []app.FileFilter{{Name: "YAML 配置", Pattern: "*.yaml"}, {Name: "所有文件", Pattern: "*"}},
+	})
+}
+
+func isCanceled(err error) bool { return errors.Is(err, app.ErrCanceled) }
+
+func appColor(color ui.Color) app.Color {
+	return app.Color{
+		Red:   float64(color.Red),
+		Green: float64(color.Green),
+		Blue:  float64(color.Blue),
+		Alpha: float64(color.Alpha),
+	}
+}
+
+// 对话框里的字段与按钮共享这些辅助判断，避免在绘制路径里拼字符串。
+func (a *App) entryDialogTitle() string {
+	if a.entryForm.editing {
+		return "编辑条目"
+	}
+	return "新建条目"
+}
+
+func (a *App) presetDialogTitle() string {
+	if a.presetForm.rename {
+		return "重命名预设"
+	}
+	return "保存预设"
+}

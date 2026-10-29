@@ -11,18 +11,14 @@ builds:
     goos:
       - linux
       - windows
-      - darwin
     goarch:
       - amd64
-      - 386
       - arm64
-      - arm
-    goarm:
-      - 7
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
+      - '{{ if eq .Os "windows" }}-H=windowsgui{{ end }}'
 
 archives:
   - formats:
@@ -31,9 +27,7 @@ archives:
       {{ .ProjectName }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
       {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
     format_overrides:
       - goos: windows
         formats:
