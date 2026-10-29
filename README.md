@@ -45,6 +45,7 @@ CGO_ENABLED=0 go build -trimpath \
   entries.json    测试文件条目
   presets.json    过滤预设
   results.json    按条目与节点身份保存的测速结果
+  mihomo/         proxy-providers 的内核缓存（使用 provider 时产生）
 ```
 
 不写用户主目录、AppData 或注册表；拷贝整个程序目录即可迁移。程序目录不可写时窗口内会明确报错，并禁用持久化，不会改存别处。
@@ -90,9 +91,11 @@ scripts/headless-walkthrough.sh
 
 ## 设计文档
 
-- 需求基线：`docs/specs/0001-viva-gui.md`
-- 架构决策：`docs/adr/0017-viva-gui.md`
-- 术语：`GLOSSARY.md`
+- 需求基线：[docs/specs/0001-viva-gui.md](docs/specs/0001-viva-gui.md)
+- 架构决策：[docs/adr/0017-viva-gui.md](docs/adr/0017-viva-gui.md)
+- 术语：[GLOSSARY.md](GLOSSARY.md)
+- 无窗口验证记录：[docs/validation/2026-10-29-viva-gui.md](docs/validation/2026-10-29-viva-gui.md)
+- 交付文件变更：[docs/validation/2026-10-29-file-changes.md](docs/validation/2026-10-29-file-changes.md)
 
 ## License
 

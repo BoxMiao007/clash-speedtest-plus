@@ -1,5 +1,7 @@
 # 订阅拉取按 User-Agent 分流，默认 clash.meta
 
+> 状态：GUI 不再有选源界面/命令行 `-c`（ADR-0017）；UA 分流仍用于 `internal/speedtester` 的订阅与 `proxy-providers` 拉取。
+
 很多机场订阅不看地址参数，看请求的 User-Agent：clash 系标识返回 Clash/Mihomo yaml，别的（包括 Go http 默认标识）返回分享链接。只补 `flag=meta` 救不了这类订阅，必须在请求头里表明客户端身份。
 
 选源界面拉订阅默认带 `clash.meta`；「拉取订阅 UA」填了就用填的，改完重试立即生效。命令行 `-c` 走 mihomo 内核拉取，用内核自己的 UA。解不出节点报错时提示可以换 UA 重试，不猜。

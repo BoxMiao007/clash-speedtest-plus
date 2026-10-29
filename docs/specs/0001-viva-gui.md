@@ -1,8 +1,8 @@
 # 订阅测速工具 Viva GUI 重构规格
 
-> 状态：已确认（本分支实施中）
-> 分支：`feat/viva-speedtest-gui`
-> 关联：本文件同时发布到 GitHub Issues（标签 `ready-for-agent`）。
+> 状态：已实现并合入 `main`（2026-10-29）。验收记录见 [docs/validation/2026-10-29-viva-gui.md](../validation/2026-10-29-viva-gui.md)。
+> 分支：`feat/viva-speedtest-gui`（已合回 main）。
+> 关联：本文件同时发布到 GitHub Issues #26（标签 `ready-for-agent`）。
 > 本文是该分支的**唯一需求基线**。上下文被压缩后，先读本文件再动代码。
 
 ## 1. Problem Statement
@@ -52,6 +52,7 @@
   entries.json    # 测试文件条目
   presets.json    # 过滤预设
   results.json    # 按条目 ID + 节点身份保存的测速结果
+  mihomo/         # proxy-providers 的内核缓存（使用 provider 时产生）
 ```
 
 每个 JSON 带 `"version": 1`；加载时版本大于 1 视为错误（禁用持久化）。写入用「同目录临时文件 + rename」原子替换。
@@ -82,7 +83,7 @@ type Entry struct {
 「重新获取节点」：
 
 - 每个条目卡片有 `重新获取` 按钮，重新读取该文件。
-- 节点身份 = `sha256(协议 + 0 + 名称 + 0 + server + 0 + port + 0 + 规范化参数 JSON)` 前 16 位 hex；参数 JSON 用 `encoding/json.Marshal(proxy.Config)`（键排序稳定）。同一文件内身份完全相同的节点按出现顺序追加 `#2`、`#3`。
+- 节点身份 = `sha256(协议 + 0 + 名称 + 0 + server + 0 + port + 0 + 规范化参数序列化)` 前 16 位 hex；参数用 `yaml.v2` 序列化（排序键，且能处理 `map[interface{}]interface{}` 嵌套参数）。同一文件内身份完全相同的节点按出现顺序追加 `#2`、`#3`。
 - 身份不依赖列表顺序、不依赖临时 ID。
 - 与新列表身份匹配的已测节点：保留原测试结果与上次测速时间；新节点为「未测试」；消失的节点从列表移除。持久化结果不删除（节点以后重新出现仍可恢复）。
 - 已有节点保留上次的勾选状态；新节点默认选中。
@@ -182,16 +183,16 @@ type Entry struct {
 main.go                          # GUI 入口（版本 ldflags 保留）
 main_headless.go                 # //go:build vivahead；空白导入 headless/auto
 internal/gui/                    # Viva 应用（唯一界面层）
-  app.go                         # Options / App / Config / Paint 外壳
-  state.go                       # 模型、状态迁移、节点身份、视图数据预计算
+  app.go                         # Options / App / Config / Paint 外壳、过滤条、页脚、AfterPaint
+  state.go                       # 模型、状态迁移、节点身份、虚拟列表数据
+  actions.go                     # 条目/预设 CRUD、选择、测速编排、pending 事件
   engine.go                      # 生产测速 Runner（包装 internal/speedtester）
   ids.go                         # ui.Tree 声明与动态身份注册
   view_nodes.go                  # 节点选择视图（条目面板 + 分组列表）
   view_results.go                # 下载速度视图
-  filterbar.go                   # 过滤条 + 预设
   contextmenu.go                 # 右键菜单
   dialogs.go                     # 条目/预设/确认/错误对话框
-  format.go                      # 预计算显示文案、时间/速度格式
+  format.go                      # 预计算显示文案、节点身份、时间/速度格式
   *_test.go                      # app.Driver 测试 + 假引擎
 internal/store/                  # 数据目录、条目/预设/结果、软硬路径
 internal/filter/                 # 简化 + 正则匹配器
@@ -199,6 +200,8 @@ internal/speedtester/            # 原 speedtester/ 包迁移；新增 LoadNodes
   nodes.go                       # 读单文件节点列表（不去重、不过滤、保持文件顺序）
 docs/adr/0017-viva-gui.md        # 架构决策记录
 docs/specs/0001-viva-gui.md      # 本文件
+docs/validation/                 # 无窗口验证记录、headless 日志、文件变更清单
+scripts/headless-walkthrough.sh  # vivahead 线协议走查
 ```
 
 删除：`picker/`、`tui/`、`output/`、`gist/`、`ip/`、根目录旧 `main.go` 内容、`main_test.go`、`result_filter.go`、`result_filter_test.go`；`go.mod` 里仅被 TUI/CLI 使用的依赖。`download-server/` 保留（独立程序），改导入 `internal/speedtester`。
@@ -259,17 +262,17 @@ go test ./... -count=1
 
 ## 12. 验收清单
 
-- [ ] 分支 `feat/viva-speedtest-gui`，完成验证后合回 `main`。
-- [ ] 仅 GUI 可执行文件；TUI/CLI 入口、构建目标、仅其使用的依赖删除。
-- [ ] 数据目录 `./data/` 四项 JSON；不可写有明确提示且不落别处。
-- [ ] 条目 CRUD + 系统文件对话框；软/硬路径解析与显示；失效提示。
-- [ ] 重新获取节点保留身份匹配结果与上次测速时间。
-- [ ] 简化 + 正则双模式、与/或、排除、通配；预设 CRUD 持久化。
-- [ ] 自动/手动读取；按条目分组；全选/全不选；排除上次失败；复选框选中态。
-- [ ] 双视图；下载速度按钮启动并切换；实时按速度排序；行 ID 帧间稳定。
-- [ ] 右键菜单单/多选文案区分、单层平铺。
-- [ ] 无空闲 goroutine/timer；绘制路径无反射/map[string]any/per-paint 分配（有 benchmark 数据）。
-- [ ] gofmt / go vet / go test 全绿；Driver 用例与 headless 走查记录；未测项列出。
-- [ ] 新增依赖 stripped 体积、启动、空闲内存测量记录。
-- [ ] 文件新增/修改/删除清单、关键设计决策说明。
-- [ ] README / AGENTS.md / GLOSSARY.md / ADR 同步。
+- [x] 分支 `feat/viva-speedtest-gui`，完成验证后合回 `main`。
+- [x] 仅 GUI 可执行文件；TUI/CLI 入口、构建目标、仅其使用的依赖删除。
+- [x] 数据目录 `./data/` 四项 JSON；不可写有明确提示且不落别处。
+- [x] 条目 CRUD + 系统文件对话框；软/硬路径解析与显示；失效提示。
+- [x] 重新获取节点保留身份匹配结果与上次测速时间。
+- [x] 简化 + 正则双模式、与/或、排除、通配；预设 CRUD 持久化。
+- [x] 自动/手动读取；按条目分组；全选/全不选；排除上次失败；复选框选中态。
+- [x] 双视图；下载速度按钮启动并切换；实时按速度排序；行 ID 帧间稳定。
+- [x] 右键菜单单/多选文案区分、单层平铺。
+- [x] 无空闲 goroutine/timer；绘制路径无反射/map[string]any/per-paint 分配（有 benchmark 数据）。
+- [x] gofmt / go vet / go test 全绿；Driver 用例与 headless 走查记录；未测项列出。
+- [x] 新增依赖 stripped 体积、启动、空闲内存测量记录。
+- [x] 文件新增/修改/删除清单、关键设计决策说明（见 ADR-0017 与本目录文件变更记录）。
+- [x] README / AGENTS.md / GLOSSARY.md / ADR 同步。
