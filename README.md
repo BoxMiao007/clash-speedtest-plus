@@ -8,6 +8,24 @@ Windows / Linux（amd64、arm64）二进制在 [Releases](https://github.com/Box
 
 > **Windows 首次运行**：exe 没有代码签名，SmartScreen 可能提示「发布者未知」。点「仍要运行」即可。同一文件放行过一次后不再提示；重新下载的新版本第一次仍会提示。
 
+## 直接试用本次构建
+
+仓库根目录的 `clash-speedtest-plus.exe` 是本次 Viva 重构的本地测试构建（Windows GUI 子系统，未入库）：
+
+- 版本：`v2.6.0-viva-test`，对应提交 `710c44e`
+- 大小：49,884,672 字节；SHA-256：`c794d1e5c9aa986d9c39a1f2f0cc3b000a4c133b90d0695d21bcf1d8a7264173`
+- 直接双击运行；数据写在 exe 同目录的 `data/`，第一次打开为空
+- 点「新建条目」→ 命名 →「选择文件…」选一份本地 Clash/Mihomo yaml → 保存
+- 试用完可删除 exe 与 `data/`，不会影响源码仓库
+
+构建命令：
+
+```bash
+CGO_ENABLED=0 go build -trimpath \
+  -ldflags "-s -w -H=windowsgui -X main.version=v2.6.0-viva-test -X main.commit=710c44e" \
+  -o clash-speedtest-plus.exe .
+```
+
 ## 界面
 
 - **测试文件**：左侧面板管理条目（自定义名称 + 本地 Clash/Mihomo 配置路径）。新建/重命名/改路径/删除；路径通过系统文件对话框选择。
