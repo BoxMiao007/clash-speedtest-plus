@@ -532,14 +532,12 @@ func (s *state) applyFetched(event runEvent) {
 		s.rebuild()
 		return
 	}
-	path, err := s.store.WriteSubscription(entry.entry.ID, event.body)
-	if err != nil {
+	if _, err := s.store.WriteSubscription(entry.entry.ID, event.body); err != nil {
 		entry.loadErr = err.Error()
 		s.status = "写入订阅缓存失败：" + err.Error()
 		s.rebuild()
 		return
 	}
-	entry.absText = "缓存 · " + path
 	proxies, err := speedtester.ParseSubscriptionNodes(event.body, s.settings.UserAgent)
 	if err != nil {
 		entry.loadErr = err.Error()

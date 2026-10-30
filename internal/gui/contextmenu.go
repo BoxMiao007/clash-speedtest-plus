@@ -37,6 +37,9 @@ func (a *App) openNodeMenu(canvas *ui.Canvas, node *nodeState, x, y float32) {
 		entries = append(entries, menuEntry{item: components.ContextMenuItem{
 			ID: a.ids.menuTestMulti, Label: "立即测试所选节点", Disabled: a.running(),
 		}})
+		entries = append(entries, menuEntry{item: components.ContextMenuItem{
+			ID: a.ids.menuTestOne, Label: "单独测试此节点", Disabled: a.running(),
+		}})
 		entries = append(entries, menuEntry{separator: true})
 		selectID, selectLabel := a.ids.menuSelect, "选中所选节点"
 		if allSelected {
@@ -90,6 +93,7 @@ func (a *App) openNodeMenu(canvas *ui.Canvas, node *nodeState, x, y float32) {
 		x:      x,
 		y:      y,
 		nodes:  targets,
+		node:   node,
 		multi:  multi,
 		clip:   clip,
 		items:  entries,
@@ -142,6 +146,9 @@ func (a *App) activateMenu(id ui.ID) {
 		}
 	case a.ids.menuTest, a.ids.menuTestMulti:
 		a.startNodesTest(nodes)
+	case a.ids.menuTestOne:
+		// 多选语境下只测右键指向的那一个节点，不改动其它勾选。
+		a.startNodesTest([]*nodeState{a.menu.node})
 	case a.ids.menuSelect, a.ids.menuUnselect:
 		selected := id == a.ids.menuSelect
 		for _, node := range nodes {

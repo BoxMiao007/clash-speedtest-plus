@@ -198,7 +198,7 @@ type entryState struct {
 	checkLabel string
 
 	pathText   string
-	absText    string
+	pathBadge  string
 	statusText string
 	readLabel  string
 	fetchLabel string
@@ -251,7 +251,6 @@ type nodeState struct {
 	liveSpeed float64
 
 	serverText   string
-	subtitle     string
 	rowLabel     string
 	checkLabel   string
 	lastTestText string
@@ -299,9 +298,11 @@ type alertState struct {
 }
 
 type menuState struct {
-	open   bool
-	x, y   float32
-	nodes  []*nodeState
+	open  bool
+	x, y  float32
+	nodes []*nodeState
+	// node 是右键指向的那个节点；多选语境下用于「单独测试此节点」。
+	node   *nodeState
 	multi  bool
 	clip   string
 	items  []menuEntry
@@ -549,18 +550,21 @@ func (s *state) decorateEntry(entry *entryState) {
 	entry.readLabel, entry.fetchLabel = "读取", "重新获取"
 	if entry.entry.IsSubscription() {
 		entry.readLabel, entry.fetchLabel = "读取缓存", "重新获取"
-		entry.pathText = "订阅 · " + entry.entry.URL
-		entry.absText = ""
+		entry.pathBadge = "订阅"
+		entry.pathText = entry.entry.URL
 		entry.missing = false
-		if path, err := s.subscriptionPath(entry); err == nil {
-			entry.absText = "缓存 · " + path
-			if _, statErr := os.Stat(path); statErr != nil {
-				entry.statusText = "尚未拉取订阅"
-				return
-			}
-		} else {
-			entry.absText = "（数据目录不可用，无法缓存订阅）"
+		if entry.entry.URL == "" {
+			entry.pathText = "未设置订阅地址"
+			entry.statusText = "未设置订阅地址"
+			return
+		}
+		path, err := s.subscriptionPath(entry)
+		if err != nil {
 			entry.statusText = "数据目录不可用"
+			return
+		}
+		if _, statErr := os.Stat(path); statErr != nil {
+			entry.statusText = "尚未拉取订阅"
 			return
 		}
 		if entry.loaded {
@@ -570,14 +574,15 @@ func (s *state) decorateEntry(entry *entryState) {
 		}
 		return
 	}
-	entry.pathText = formatPathKind(entry.entry.Path)
-	absolute, _ := s.resolvePath(entry.entry.Path)
-	entry.absText = absolute
+	entry.pathBadge = pathFormBadge(entry.entry.Path)
 	entry.missing = false
 	if entry.entry.Path == "" {
+		entry.pathText = "未设置路径"
 		entry.statusText = "未设置路径"
 		return
 	}
+	absolute, _ := s.resolvePath(entry.entry.Path)
+	entry.pathText = absolute
 	if _, err := os.Stat(absolute); err != nil {
 		entry.missing = true
 		entry.statusText = "文件不存在或已移动"
@@ -647,7 +652,7 @@ func (s *state) readEntry(entry *entryState) {
 		return
 	}
 	absolute, _ := s.resolvePath(entry.entry.Path)
-	entry.absText = absolute
+	entry.pathText = absolute
 	proxies, err := speedtester.LoadNodesFile(absolute)
 	if err != nil {
 		entry.loadErr = err.Error()
@@ -1111,12 +1116,10 @@ func (s *state) running() bool { return s.run != nil && s.run.running }
 
 func (s *state) refreshNodeDisplay(node *nodeState) {
 	node.serverText = formatServer(node.proxy)
-	node.subtitle = node.serverText + " · " + node.typ
 	node.rowLabel = "节点 " + node.entry.entry.Name + " / " + node.name
 	node.checkLabel = "选择节点 " + node.entry.entry.Name + " / " + node.name
 	if node.typ == "" && node.proxy != nil {
 		node.typ = node.proxy.Type().String()
-		node.subtitle = node.serverText + " · " + node.typ
 	}
 	node.lastTestText = formatTested(node.result.TestedAt)
 	node.latencyText = formatLatency(durationMillis(node.result.LatencyMS))

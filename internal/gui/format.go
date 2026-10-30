@@ -74,14 +74,15 @@ func formatServer(proxy *speedtester.CProxy) string {
 	return server + ":" + port
 }
 
-func formatPathKind(stored string) string {
+// pathFormBadge 只返回路径形态，留给条目卡片当徽标用；完整路径单独一行。
+func pathFormBadge(stored string) string {
 	if stored == "" {
-		return "未设置路径"
+		return "未设置"
 	}
 	if filepath.IsAbs(stored) {
-		return "硬路径 · " + stored
+		return "硬路径"
 	}
-	return "软路径 · " + stored
+	return "软路径"
 }
 
 // clipboardText 预计算节点信息，复制动作只读字段，不在输入路径拼字符串。

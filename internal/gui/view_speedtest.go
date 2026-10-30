@@ -1,6 +1,8 @@
 package gui
 
 import (
+	"unicode/utf8"
+
 	"github.com/vivaui/viva/flex"
 	"github.com/vivaui/viva/ui"
 )
@@ -34,17 +36,16 @@ func (a *App) paintTest(f *flex.Frame) {
 		a.paintNodeEmpty(f)
 		return
 	}
+	// nodeViewport 是上一帧列表（Stack）的实际高度，已经扣掉详情面板；只有
+	// 首帧没有记录时才用窗口高度估算，并手动减去可能存在的详情面板。
 	viewport := a.nodeViewport.Height
 	if viewport <= 0 {
 		viewport = a.window.Height - 236
+		if a.detailNode != nil {
+			viewport -= detailPanelHeight
+		}
 		if viewport < 200 {
 			viewport = 200
-		}
-	}
-	if a.detailNode != nil {
-		viewport -= detailPanelHeight
-		if viewport < 120 {
-			viewport = 120
 		}
 	}
 	list := f.Stack().Grow(1).FillWidth().Clip()
@@ -223,7 +224,13 @@ func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 		}
 		f.Column().Gap(0).Grow(1).Children(func() {
 			f.Text(node.name).Ellipsis()
-			f.Text(node.subtitle).FontSize(10).Muted().Ellipsis()
+			f.Row().Gap(4).Items(flex.Center).Children(func() {
+				f.Text(node.serverText).FontSize(10).Muted().Ellipsis().MaxWidth(180)
+				if node.typ != "" {
+					a.paintPill(f, node.typ, 9)
+				}
+				f.Spacer()
+			})
 		})
 		statusColor := a.theme.MutedForeground
 		switch {
@@ -360,6 +367,20 @@ func (a *App) paintEntriesRail(f *flex.Frame) {
 	})
 }
 
+// paintPill 画小徽标（路径形态、协议类型）：主题 Muted 底 + 圆角，字号比
+// 正文小一号。纯展示，不注册命中。
+//
+// 中文字符在 Viva 的参考字宽（布局检查用）里按约 1.35em 估，而平台排版引擎
+// 按 1em；自动宽度的中文徽标会被判定为截断。给含非 ASCII 的徽标一个按
+// 1.45em 估算的最小宽度，两种度量都放得下。
+func (a *App) paintPill(f *flex.Frame, label string, size float32) {
+	text := f.Text(label).FontSize(size).Muted().
+		Background(a.theme.Muted).Radius(4).PadSides(1, 5, 1, 5)
+	if runes := utf8.RuneCountInString(label); runes != len(label) {
+		text.MinWidth(float32(runes)*size*1.45 + 10)
+	}
+}
+
 func (a *App) paintEntryCard(f *flex.Frame, entry *entryState) {
 	f.Column().FillWidth().Pad(10).Gap(5).Background(a.theme.Card).Border(1, a.theme.Border).Radius(a.theme.Metrics.RadiusSurface).Children(func() {
 		f.Row().Items(flex.Center).Gap(8).Children(func() {
@@ -371,10 +392,13 @@ func (a *App) paintEntryCard(f *flex.Frame, entry *entryState) {
 			}
 			f.Text(entry.entry.Name).Bold().Ellipsis().Grow(1)
 		})
-		f.Text(entry.pathText).FontSize(11).Muted().Ellipsis()
-		if entry.absText != "" {
-			f.Text(entry.absText).FontSize(11).Muted().Ellipsis()
-		}
+		// 路径只显示一次；软/硬路径与订阅用徽标区分，不再「软路径 · xxx」+ xxx 两行。
+		f.Row().Items(flex.Center).Gap(6).Children(func() {
+			if entry.pathBadge != "" {
+				a.paintPill(f, entry.pathBadge, 10)
+			}
+			f.Text(entry.pathText).FontSize(11).Muted().Ellipsis().Grow(1)
+		})
 		statusColor := a.theme.MutedForeground
 		if entry.loadErr != "" || entry.missing {
 			statusColor = a.theme.Danger

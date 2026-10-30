@@ -109,6 +109,7 @@ type ids struct {
 	menuExclude    ui.ID
 	menuCopyMulti  ui.ID
 	menuTestMulti  ui.ID
+	menuTestOne    ui.ID
 	menuUnselMulti ui.ID
 	menuExclMulti  ui.ID
 }
@@ -216,6 +217,7 @@ func newIDs(tree *ui.Tree) ids {
 	value.menuExclude = tree.ID(value.menu, "exclude-one")
 	value.menuCopyMulti = tree.ID(value.menu, "copy-many")
 	value.menuTestMulti = tree.ID(value.menu, "test-many")
+	value.menuTestOne = tree.ID(value.menu, "test-pointed")
 	value.menuUnselMulti = tree.ID(value.menu, "unselect-many")
 	value.menuExclMulti = tree.ID(value.menu, "exclude-many")
 	return value
