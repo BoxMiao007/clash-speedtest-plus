@@ -58,7 +58,7 @@ Issues 放在本仓库的 GitHub Issues，通过 `gh` CLI 读写。详见 `docs/
 - 手动单测会设置 `pinNode/pinIndex`：组内排序时取出该行、排完其余再原位插回，行用主题色高亮；点表头或开始新一轮测速时清空。开测不要主动 `scrollToRound`，只有换轮才滚动定位。
 - 组标题可折叠（`▾`/`▸` 箭头，状态在 `entryState.collapsed`，只影响展示），并固定在列表顶部跟随滚动切换：固定标题存在时，被它盖住的行必须按 `groupBarHeight`（33px）裁剪后再画，命中区随裁剪收窄；不要用整条 Block 或覆盖可点击区域，否则 `layout` 会报重叠/穿透。折叠箭头与无障碍文案在 `rebuild`/`toggleGroup` 预计算，绘制里不拼串。
 - 条目卡片整卡有 `Hit`（点空白切换勾选），但视觉保持默认白底（不要给整卡上主题色）；卡片上的按钮/复选框命中优先；`fetching` 时卡片不能接管点击，否则禁用的「读取缓存」会被当成取消勾选。卡片文案（含 `cardLabel`）预计算。
-- 节点行的选中态用 `activeNode`：单击打开详情、右键打开菜单时设置，关闭详情清除，节点被过滤/删除时由 `pruneTransientAnchors` 清；绘制优先级 `pinNode`（20%）> `activeNode`（14%）。
+- 节点行的选中态用 `activeNode`：单击打开详情、右键打开菜单时设置，关闭详情清除，节点被过滤/删除时由 `pruneTransientAnchors` 清；绘制优先级 `pinNode`（20%）> `activeNode`（14%）。`HoverBackground` 必须按当前底色加深（pinned 28% / active 22% / 勾选 10% 灰），不能固定用 `Muted` 覆盖，否则鼠标一指上去选中态就像消失。
 - 面板最小宽度 260px；动作按钮分两行（读取/重新获取、编辑/删除）。名字列表头与行都必须 `Basis(0)+Grow(1)`，否则窄窗口下数值列错位。
 - 完成/提前结束/推进只认 `run.round`（`runRound()`），`switchRound` 只改 `roundIndex`；手动导出结束要消费 `pendingExport`，导出失败时不要清掉它；停止时把 `phaseTesting` 复位。右键测试（`startNodesTest`）必须按当前过滤 `match`。手动导出的产物序号用 `output.NextImageSequence(目标目录)` 现取，不能复用 `exportSeq`（会与同轮自动产物同名）。
 - 折叠窄栏是 44px：`»` 点击区（Text+Hit）加逐字竖排「节点来源」，不要再用贴边按钮。徽标用显式宽高的胶囊（文字居中、`MutedForeground` 16% 底），不要只给 Text 加底色。

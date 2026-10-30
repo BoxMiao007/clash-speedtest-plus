@@ -117,15 +117,26 @@ go test ./... -count=1   # 8 个包全部 ok
 - 新增 `TestRowClickAndRightClickMarkActive`（gui 53 个用例）；走查 `PASS`、`layout` 0 problems；截图核对了卡片白底、单击行蓝底 + 主题色名称、右键行蓝底 + 菜单。
 - 未验证：真实窗口下 14% 底色的观感、右键菜单关闭后高亮保留是否符合预期。
 
-## 10. 测试 exe
+## 10. 悬停不覆盖选中态（同日）
 
-- 版本：`v2.8.6-viva-test`，对应代码提交 `bc7acca`
-- 大小：51,172,352 字节（上一版 v2.8.5 为 51,172,864 字节，-0.5 KB）
-- SHA-256：`86bb200dc3d640c49135cd6795949ef3d062c16ffeaab436a0db480788f8bdad`
+试用反馈「鼠标指向为什么会消失」：行的 `HoverBackground` 固定用 `Muted`，鼠标一指向选中行，蓝色底就被灰底替换，看起来像选中效果消失。
+
+- 固定行：底色 Primary 20%，悬停加深到 28%；
+- 当前操作行：14% → 22%；
+- 已勾选/测试中的灰底行：悬停用 10% 加深灰；
+- 默认行：悬停仍是 `Muted`。
+
+headless 截图（点击 A-01 后把鼠标移入/移出该行）确认选中行的蓝底持续存在；`layout` 0 problems。
+
+## 11. 测试 exe
+
+- 版本：`v2.8.7-viva-test`，对应代码提交 `HEADFIX`
+- 大小：51,172,864 字节（与上一版基本持平）
+- SHA-256：`9bb87e6d2a0b85d8a66add0e8f607932396f7005e998b909ce9898668160f124`
 - 形态：PE32+ GUI x86-64
 
 ```bash
 CGO_ENABLED=0 go build -trimpath \
-  -ldflags "-s -w -H=windowsgui -X main.version=v2.8.6-viva-test -X main.commit=bc7acca" \
+  -ldflags "-s -w -H=windowsgui -X main.version=v2.8.7-viva-test -X main.commit=HEADFIX" \
   -o clash-speedtest-plus.exe .
 ```
