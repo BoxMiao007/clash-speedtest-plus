@@ -178,6 +178,10 @@ type state struct {
 	pinNode  *nodeState
 	pinIndex int
 
+	// activeNode 是当前正在操作的那一行：单击打开详情、右键打开菜单都会
+	// 把它标成选中态，用户能看清操作的是哪个节点。
+	activeNode *nodeState
+
 	// 导出：后台任务只写 pending 事件，窗口线程更新状态。
 	// exporting 是进行中的导出任务数（允许上一轮导出未完成时下一轮继续测）；
 	// pendingExport 是一轮测完但还没轮到写盘时挂起的轮次。
@@ -945,6 +949,9 @@ func (s *state) pruneTransientAnchors() {
 	}
 	if s.pinNode != nil && !s.nodeInGroups(s.pinNode) {
 		s.pinNode, s.pinIndex = nil, 0
+	}
+	if s.activeNode != nil && !s.nodeInGroups(s.activeNode) {
+		s.activeNode = nil
 	}
 }
 

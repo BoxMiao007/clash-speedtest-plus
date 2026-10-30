@@ -88,6 +88,7 @@ func (a *App) openNodeMenu(canvas *ui.Canvas, node *nodeState, x, y float32) {
 	}
 	x = minFloat(maxFloat(x, 8), maxFloat(a.window.Width-width-8, 8))
 	y = minFloat(maxFloat(y, 8), maxFloat(a.window.Height-height-8, 8))
+	a.activeNode = node
 	a.menu = menuState{
 		open:   true,
 		x:      x,

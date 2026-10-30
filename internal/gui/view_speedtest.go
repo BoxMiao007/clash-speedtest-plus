@@ -271,14 +271,15 @@ func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 		Hit(node.ids.row, node.rowLabel)
 	// 手动单测的节点用主题色浅浅标出，并在结果到达后保持原位（不参与重排）。
 	pinned := node == a.pinNode
+	active := node == a.activeNode
 	switch {
 	case pinned:
 		tint := a.theme.Primary
-		tint.Alpha *= 0.14
+		tint.Alpha *= 0.20
 		row = row.Background(tint)
-	case a.detailKey == node.key:
-		// 点开详情的行用加深的灰底，和主题色固定行、普通悬停都区分开。
-		tint := a.theme.MutedForeground
+	case active:
+		// 单击或右键的那一行：主题色淡底 + 主题色节点名，位置一眼可见。
+		tint := a.theme.Primary
 		tint.Alpha *= 0.14
 		row = row.Background(tint)
 	case node.selected || node.phase == phaseTesting:
@@ -292,7 +293,7 @@ func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 		}
 		f.Column().Gap(0).Grow(1).Basis(0).Children(func() {
 			nameColor := a.theme.Foreground
-			if pinned {
+			if pinned || active {
 				nameColor = a.theme.Primary
 			}
 			f.Text(node.name).Color(nameColor).Ellipsis()
@@ -354,10 +355,14 @@ func (a *App) toggleDetail(node *nodeState) {
 	if a.detailKey == node.key {
 		a.detailKey = ""
 		a.detailNode = nil
+		if a.activeNode == node {
+			a.activeNode = nil
+		}
 		return
 	}
 	a.detailKey = node.key
 	a.detailNode = node
+	a.activeNode = node
 	a.detailText = detailText(node)
 }
 
@@ -374,6 +379,7 @@ func (a *App) paintDetailPanel(f *flex.Frame) {
 				if f.Button(a.ids.closeDetail, "关闭详情").XSmall().Ghost().Clicked() {
 					a.detailKey = ""
 					a.detailNode = nil
+					a.activeNode = nil
 				}
 			})
 			f.Paragraph(a.detailText, 6).FontSize(11).Muted()
@@ -476,22 +482,12 @@ func (a *App) paintPill(f *flex.Frame, label string, size float32) {
 }
 
 func (a *App) paintEntryCard(f *flex.Frame, entry *entryState) {
-	// 整张卡片可点：点空白处也能切换条目勾选，选中时用主题色淡底 + 主题色
-	// 边框标出，不再只靠左上角的小复选框。
-	background, border := a.theme.Card, a.theme.Border
-	hover := a.theme.Muted
-	if entry.selected {
-		background = a.theme.Primary
-		background.Alpha *= 0.06
-		border = a.theme.Primary
-		border.Alpha *= 0.45
-		hover = a.theme.Primary
-		hover.Alpha *= 0.10
-	}
+	// 整张卡片可点（点空白处切换勾选），视觉保持默认白底：选中与否由
+	// 复选框表达，不再给整卡上主题色。
 	card := f.Column().FillWidth().Pad(10).Gap(5).
-		Background(background).Border(1, border).
+		Background(a.theme.Card).Border(1, a.theme.Border).
 		Radius(a.theme.Metrics.RadiusSurface).
-		HoverBackground(hover).
+		HoverBackground(a.theme.Muted).
 		Hit(entry.ids.card, entry.cardLabel)
 	if card.Clicked() && !a.running() && !entry.fetching {
 		f.Canvas().AfterPaint(func() { a.toggleEntry(entry) })

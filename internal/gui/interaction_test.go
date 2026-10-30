@@ -482,3 +482,30 @@ func TestRowHitsStopBeforeScrollBar(t *testing.T) {
 		t.Fatalf("行命中右缘 %v 不应盖住滚动条轨道（左缘 %v）", row.X+row.Width, bar.X)
 	}
 }
+
+// 节点行的选中态：单击打开详情、右键打开菜单，都会把该行标成当前操作行。
+func TestRowClickAndRightClickMarkActive(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "A-01", "A-02")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+	first := application.nodes[0]
+	second := application.nodes[1]
+
+	clickID(t, driver, first.ids.row)
+	if application.activeNode != first || application.detailNode != first {
+		t.Fatal("单击行应把该行标为选中并打开详情")
+	}
+	clickID(t, driver, application.ids.closeDetail)
+	if application.activeNode != nil {
+		t.Fatal("关闭详情后选中态应清除")
+	}
+
+	rightClickID(t, driver, second.ids.row)
+	if application.activeNode != second {
+		t.Fatal("右键行应把该行标为选中")
+	}
+	if !application.menu.open {
+		t.Fatal("右键后菜单应打开")
+	}
+}
