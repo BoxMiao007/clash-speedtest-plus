@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 日期：2026-10-30
-- 关联：[ADR-0017](0017-data-dir-persistence.md)、[ADR-0024](0024-audit-fixes.md)、[规格 0001](../specs/0001-viva-gui.md)
+- 关联：[ADR-0017](0017-viva-gui.md)、[ADR-0024](0024-audit-fixes.md)、[规格 0001](../specs/0001-viva-gui.md)
 
 ## 背景
 
