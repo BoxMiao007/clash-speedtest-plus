@@ -197,6 +197,7 @@ func (s *state) startRound(index int) {
 	round.err = ""
 	s.earlyStopped = false
 	s.paused = false
+	s.refreshModeFlags()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	run := &runState{
@@ -456,7 +457,12 @@ func (s *state) afterRoundFinished() {
 		return
 	}
 	if s.needsExport() {
-		s.startRoundExport(s.roundIndex)
+		if s.exporting > 0 {
+			// 上一轮还在写盘：挂起本轮，等那次导出结束后接着写，避免并发写同名产物。
+			s.pendingExport = round
+			return
+		}
+		s.startRoundExport(round)
 		return
 	}
 	s.advanceRound()
@@ -529,36 +535,69 @@ func (s *state) applyFetched(event runEvent) {
 }
 
 // applyExported 处理一次导出结束：记录状态；轮次导出完成后推进下一轮，
-// 手动导出只更新状态。
+// 手动导出只更新状态。导出的轮次用指针记录，队列被新一轮替换后旧事件
+// 只更新状态，不碰轮次与推进。
 func (s *state) applyExported(event runEvent) {
-	s.exporting = false
-	round := s.currentRound()
-	if event.err != nil {
-		s.status = "导出失败：" + event.err.Error()
-		if round != nil && event.round >= 0 {
-			round.err = event.err.Error()
-		}
+	if s.exporting > 0 {
+		s.exporting--
+	}
+	ref := event.roundRef
+	if ref == nil {
+		s.setExportStatus(event)
 		s.rebuild()
 		return
 	}
-	if event.round >= 0 && event.round < len(s.rounds) {
-		exported := s.rounds[event.round]
-		exported.exported = true
-		exported.proxies = event.proxies
-		round = exported
-		s.roundIndex = event.round
+	if event.err == nil {
+		ref.exported = true
+		ref.proxies = event.proxies
 	}
+	s.setExportStatus(event)
+	// 新一轮已经开始，或这一轮已不在当前队列里：只更新状态。
+	if s.running() || s.roundPosition(ref) < 0 {
+		s.pendingExport = nil
+		s.rebuild()
+		return
+	}
+	if event.err != nil {
+		ref.err = event.err.Error()
+		s.pendingExport = nil
+		s.rebuild()
+		return
+	}
+	if s.pendingExport != nil {
+		pending := s.pendingExport
+		s.pendingExport = nil
+		s.startRoundExport(pending)
+		s.rebuild()
+		return
+	}
+	if ref != s.currentRound() {
+		s.rebuild()
+		return
+	}
+	s.advanceRound()
+}
+
+// setExportStatus 把一次导出的结果写进状态栏。
+func (s *state) setExportStatus(event runEvent) {
 	switch {
+	case event.err != nil:
+		s.status = "导出失败：" + event.err.Error()
 	case event.warning != "":
 		s.status = "已导出：" + event.path + "（" + event.warning + "）"
 	case event.path != "":
 		s.status = "已导出：" + event.path
 	}
-	s.rebuild()
-	if event.round < 0 || round == nil || round.stopped {
-		return
+}
+
+// roundPosition 返回轮次在队列里的位置；不在当前队列返回 -1。
+func (s *state) roundPosition(round *roundState) int {
+	for index, candidate := range s.rounds {
+		if candidate == round {
+			return index
+		}
 	}
-	s.advanceRound()
+	return -1
 }
 
 func (s *state) openEntryDialog(entry *entryState) {

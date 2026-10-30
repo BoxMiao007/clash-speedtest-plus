@@ -150,10 +150,12 @@ func runRoundExport(job roundExport) (path string, warning string, proxies []map
 	if job.Settings.ImageEnabled {
 		imagePath, imageWarning, imageErr := writeResultImage(job, mode)
 		if imageErr != nil {
-			return path, warning, proxies, fmt.Errorf("保存结果图失败：%w", imageErr)
+			// 结果图是附加产物：失败只提示，不拖住后续轮次；配置写入失败才算错误。
+			warning = output.JoinStatus(warning, "保存结果图失败："+imageErr.Error())
+		} else {
+			path = output.JoinStatus(path, imagePath)
+			warning = output.JoinStatus(warning, imageWarning)
 		}
-		path = output.JoinStatus(path, imagePath)
-		warning = output.JoinStatus(warning, imageWarning)
 	}
 	if job.Settings.UploadEnabled() && job.Path != "" {
 		if uploadErr := uploadConfig(job.Settings, job.Path); uploadErr != nil {
@@ -247,11 +249,15 @@ func uploadConfig(settings store.Settings, path string) error {
 }
 
 // startRoundExport 在后台写一轮的产物，完成后用 eventExported 回到窗口线程。
-func (s *state) startRoundExport(index int) {
-	if index < 0 || index >= len(s.rounds) || s.exporting {
+// 允许上一轮导出未完成时继续（任务用轮次指针回填状态），但同一轮不会重复启动。
+func (s *state) startRoundExport(round *roundState) {
+	if round == nil {
 		return
 	}
-	round := s.rounds[index]
+	index := s.roundPosition(round)
+	if index < 0 {
+		return
+	}
 	now := time.Now()
 	nameBase := s.roundNameBase(round)
 	seq := s.exportSeq + index
@@ -267,13 +273,13 @@ func (s *state) startRoundExport(index int) {
 		Now:      now,
 		Early:    round.early,
 	}
-	s.exporting = true
+	s.exporting++
 	s.exportRound = index
 	s.exportText = "正在导出…"
 	s.refreshRunText()
 	go func() {
 		path, warning, proxies, err := runRoundExport(job)
-		s.enqueue(runEvent{kind: eventExported, round: index, path: path, warning: warning, err: err, proxies: proxies})
+		s.enqueue(runEvent{kind: eventExported, round: index, roundRef: round, path: path, warning: warning, err: err, proxies: proxies})
 	}()
 }
 
@@ -328,7 +334,7 @@ func (s *state) currentResults() []*speedtester.Result {
 
 // startManualExport 启动一次手动导出（配置 / 结果图 / 结果表）。
 func (s *state) startManualExport(kind manualExportKind) {
-	if s.exporting {
+	if s.exporting > 0 {
 		s.status = "正在导出，请稍候"
 		return
 	}
@@ -348,7 +354,7 @@ func (s *state) startManualExport(kind manualExportKind) {
 		source = entrySourceLabel(round.entry)
 	}
 	seq := s.exportSeq
-	s.exporting = true
+	s.exporting++
 	s.exportText = "正在导出…"
 	s.refreshRunText()
 	s.status = "正在导出…"

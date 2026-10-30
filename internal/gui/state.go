@@ -157,10 +157,13 @@ type state struct {
 	earlyStopped bool
 
 	// 导出：后台任务只写 pending 事件，窗口线程更新状态。
-	exporting   bool
-	exportRound int
-	exportText  string
-	exportSeq   int
+	// exporting 是进行中的导出任务数（允许上一轮导出未完成时下一轮继续测）；
+	// pendingExport 是一轮测完但还没轮到写盘时挂起的轮次。
+	exporting     int
+	exportRound   int
+	exportText    string
+	exportSeq     int
+	pendingExport *roundState
 
 	settingsForm settingsForm
 }
@@ -334,6 +337,7 @@ type runEvent struct {
 	result   *speedtester.Result
 	err      error
 	round    int
+	roundRef *roundState
 	path     string
 	warning  string
 	body     []byte
@@ -1079,7 +1083,7 @@ func (s *state) refreshRunText() {
 				}
 			}
 		}
-		if s.exporting {
+		if s.exporting > 0 {
 			s.resultText += " · " + s.exportText
 		}
 		return
@@ -1089,7 +1093,7 @@ func (s *state) refreshRunText() {
 		s.run.text += " · 已暂停"
 	}
 	s.resultText = s.run.text
-	if s.exporting {
+	if s.exporting > 0 {
 		s.resultText += " · " + s.exportText
 	}
 }

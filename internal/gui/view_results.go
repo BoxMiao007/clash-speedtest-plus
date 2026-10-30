@@ -36,13 +36,13 @@ func (a *App) paintResults(f *flex.Frame) {
 				a.stopTest()
 			}
 		}
-		if f.Button(a.ids.exportYAML, "导出配置").Small().Outline().Disabled(a.exporting).Clicked() {
+		if f.Button(a.ids.exportYAML, "导出配置").Small().Outline().Disabled(a.exporting > 0).Clicked() {
 			f.Canvas().AfterPaint(func() { a.startManualExport(manualYAML) })
 		}
-		if f.Button(a.ids.exportImage, "结果图").Small().Outline().Disabled(a.exporting).Clicked() {
+		if f.Button(a.ids.exportImage, "结果图").Small().Outline().Disabled(a.exporting > 0).Clicked() {
 			f.Canvas().AfterPaint(func() { a.startManualExport(manualImage) })
 		}
-		if f.Button(a.ids.exportTSV, "结果表").Small().Outline().Disabled(a.exporting).Clicked() {
+		if f.Button(a.ids.exportTSV, "结果表").Small().Outline().Disabled(a.exporting > 0).Clicked() {
 			f.Canvas().AfterPaint(func() { a.startManualExport(manualTSV) })
 		}
 		if f.Button(a.ids.backToSelect, "返回选择").Small().Outline().Clicked() {
