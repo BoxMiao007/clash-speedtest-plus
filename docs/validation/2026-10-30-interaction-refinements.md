@@ -22,6 +22,10 @@
 - 详情弹窗用 `flex.Popup().Below(锚点, 6, flex.End)`：从图标下方展开、放不下自动向上、右缘对齐向左伸。
 - dismiss 点击的同一事件 pass 里关闭弹窗后必须 `return`，不能再声明弹窗内容（空指针）。
 
+## 测试包
+
+`clash-speedtest-plus.exe`：`v2.9.0-viva-test`，对应提交 `a0e43d1`，51,383,808 字节，SHA-256 `c59688732b531a4fbe368785bb1c1f7395abb62c1140c45e25e0bdca05751fc9`。
+
 ## 未覆盖（待真机确认）
 
 - ⋮ 图标在高 DPI 下的字形渲染与点击热区手感。
