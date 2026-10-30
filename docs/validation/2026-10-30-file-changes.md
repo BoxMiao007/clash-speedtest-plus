@@ -1,14 +1,15 @@
 # 文件变更清单：GUI 补齐 TUI 能力（2026-10-30）
 
-> 范围：`550ebab..9161bcc`（第一版 GUI 文档收尾 → 本次功能补齐与文档更新）。
-> 由 `git diff --name-status 550ebab 9161bcc` 生成；本记录文件自身与之后的提交不在清单内。
+> 范围：`550ebab..d270045`（第一版 GUI 文档收尾 → 本次功能补齐、修复与文档更新）。
+> 由 `git diff --name-status 550ebab d270045` 生成；本记录文件自身也列在清单内。
 > 测试用 exe 用 `*.exe` 忽略，不随仓库分发。
 
-统计：新增 34 个、修改 37 个、删除 0 个、重命名 0 个。
+统计：新增 35 个、修改 38 个、删除 0 个、重命名 0 个。
 
 ## 新增（A）
 
 - `docs/adr/0018-tui-parity.md`
+- `docs/validation/2026-10-30-file-changes.md`
 - `docs/validation/2026-10-30-tui-parity.md`
 - `internal/export/export.go`
 - `internal/export/export_test.go`
@@ -66,6 +67,7 @@
 - `docs/adr/0016-export-full-profile.md`
 - `docs/adr/0017-viva-gui.md`
 - `docs/specs/0001-viva-gui.md`
+- `docs/validation/2026-10-29-viva-gui.md`
 - `docs/validation/headless-walkthrough.log`
 - `go.mod`
 - `go.sum`
