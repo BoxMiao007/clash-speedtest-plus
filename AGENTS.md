@@ -27,7 +27,7 @@ Issues 放在本仓库的 GitHub Issues，通过 `gh` CLI 读写。详见 `docs/
 
 单模块，不是 monorepo。入口是根目录 `main.go`（Viva GUI），`download-server/` 是另一个 `package main`。
 
-- `internal/gui/`：Viva 应用与全部界面（节点选择 / 测速结果 / 设置三视图、过滤条、预设、右键菜单、对话框）。`Runner` 接口是 GUI 与引擎的唯一接缝；`export.go` 编排每轮导出，`view_settings.go` 是设置表单，`scrollbar.go` 是四条可见滚动条（绘制、命中与拖动）。
+- `internal/gui/`：Viva 应用与全部界面（`测速` / `设置` 两视图、过滤条、预设、右键菜单、对话框）。`测速` 视图把节点选择与结果合并成一张表（`view_speedtest.go`）；`Runner` 接口是 GUI 与引擎的唯一接缝；`export.go` 编排每轮导出，`view_settings.go` 是设置表单，`scrollbar.go` 是三条可见滚动条（绘制、命中与拖动）。
 - `internal/speedtester/`：测速、订阅规范化与拉取（`FetchSubscriptionBody` / `ParseSubscriptionNodes`）、调度、`LoadNodesFile`。
 - `internal/store/`：数据目录探测、设置/条目/预设/结果 JSON、订阅缓存、软硬路径互转。
 - `internal/filter/`：简化关键词过滤与高级正则。
@@ -35,7 +35,7 @@ Issues 放在本仓库的 GitHub Issues，通过 `gh` CLI 读写。详见 `docs/
 - `internal/export/`：导出 profile 骨架与阈值过滤（导出与提前结束共用）。
 - `internal/ip/`：IP 归属地查询与节点重命名模板。
 - `internal/gist/`：Gist / GitHub 仓库上传。
-- `docs/specs/0001-viva-gui.md`：需求基线；ADR-0017（GUI 架构）、ADR-0018（TUI 能力补齐）、ADR-0019（折叠/调宽/滚动条与文案）。
+- `docs/specs/0001-viva-gui.md`：需求基线；ADR-0017（GUI 架构）、ADR-0018（TUI 能力补齐）、ADR-0019（折叠/调宽/滚动条与文案）、ADR-0020（合并节点选择与结果视图）。
 
 界面代码遵守 Viva 规则：空闲不绘制；绘制/布局路径无反射、无 `map[string]any`、无常驻分配；命中身份一律 `ui.Tree` 的名字，行身份用节点稳定身份而非列表位置；点击在控件声明处用 `Clicked()` / `PointerOn` 处理。
 
@@ -49,7 +49,8 @@ Issues 放在本仓库的 GitHub Issues，通过 `gh` CLI 读写。详见 `docs/
 - 条目有两类：本地文件（软路径 `/` 分隔或硬路径）与订阅地址（`http(s)`）。订阅正文缓存到 `data/subscriptions/<条目 ID>.yaml`；启动只读缓存不联网，`重新获取`/地址变更才拉取。
 - **节点身份** = 协议 + 名称 + 服务器 + 端口 + 规范化参数序列化的 sha256 前缀（yaml.v2 排序键，能处理嵌套 map）；同一文件里的完全相同节点追加 `#2`、`#3`。重新获取节点时按身份保留结果与上次测速时间，不依赖列表顺序。
 - 测速按条目分轮：每个选中条目一轮，轮内节点 = 选中 ∩ 过滤命中，测完导出再推进；事件带轮次号，迟到事件按轮次丢弃。
-- 结果视图默认 fast 按延迟升序、其余按下载速度降序；点表头切换列、再点反转；行命中身份来自节点身份，重排不换 ID。
+- 节点选择与测速结果共用 `测速` 视图的一张表：复选框负责勾选，点行只打开详情，不要再让点行切勾选；分组保留，排序只在组内进行（`nodeState.order` 兜底未测速顺序）。多轮时 `上一轮`/`下一轮` 只把对应分组滚到顶部，不隐藏其它节点（ADR-0020）。
+- 测速表默认 fast 按延迟升序、其余按下载速度降序；点表头切换列、再点反转；行命中身份来自节点身份，重排不换 ID。表头文案与无障碍名称在状态变化时预计算，绘制里不拼字符串。
 - 过滤简化模式：空格分词、`!` 排除、`*`/`?` 通配、大小写不敏感、正向词可选「全部命中 / 任一命中」（界面上不是「与/或」）；高级模式是完整 Go 正则（区分大小写）。预设保存模式 + 表达式 + 组合方式，跨条目通用。过滤结果同时决定测速与导出范围。
 - 节点来源面板用 `flex.Splitter` 调宽（`SplitterState.Pos` 是面板宽度，方向键也走它），折叠时只画 56px 窄栏、不再声明 Splitter；折叠状态与宽度是纯界面状态，不落盘。
 - 滚动条归应用侧：`flex.ScrollArea` 只做裁剪与偏移，轨道/滑块/拖动在 `scrollbar.go`（几何与绘制复用 `components.ScrollArea`，拖动改 `ScrollState.Offset` 或列表偏移）。不要给滚动条手写数值命中区。
