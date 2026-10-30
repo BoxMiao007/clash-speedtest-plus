@@ -12,8 +12,8 @@ Windows / Linux（amd64、arm64）二进制在 [Releases](https://github.com/Box
 
 仓库根目录的 `clash-speedtest-plus.exe` 是本次 Viva 重构的本地测试构建（Windows GUI 子系统，未入库）：
 
-- 版本：`v2.8.3-viva-test`，对应提交 `26a4503`
-- 大小：51,157,504 字节；SHA-256：`5f8d7616ccc6864a88c60b946f037ce4d14244744c8218435acbe91f829df1da`
+- 版本：`v2.8.4-viva-test`，对应提交 `1451afe`
+- 大小：51,168,256 字节；SHA-256：`43bb3bcf6c54743db153e9a5c4721628ac37db8a98a8a76351b1921599c553b6`
 - 直接双击运行；数据写在 exe 同目录的 `data/`，第一次打开为空
 - 点「新建条目」→ 命名 → 选「本地文件」用文件对话框挑一份 Clash/Mihomo yaml，或选「订阅地址」填 http(s) 链接 → 保存
 - 要导出配置：先到「设置」把输出模式改成「当前目录下」或「自定义」，再点「下载速度」；每轮测完自动写 yaml 与结果图
@@ -23,7 +23,7 @@ Windows / Linux（amd64、arm64）二进制在 [Releases](https://github.com/Box
 
 ```bash
 CGO_ENABLED=0 go build -trimpath \
-  -ldflags "-s -w -H=windowsgui -X main.version=v2.8.3-viva-test -X main.commit=26a4503" \
+  -ldflags "-s -w -H=windowsgui -X main.version=v2.8.4-viva-test -X main.commit=1451afe" \
   -o clash-speedtest-plus.exe .
 ```
 

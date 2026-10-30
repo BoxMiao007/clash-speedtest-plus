@@ -94,3 +94,16 @@ go test ./... -count=1   # 8 个包全部 ok
 - `internal/speedtester/speedtester.go`：拉取客户端 60s 超时。
 - `internal/gui/interaction_test.go`、`app_test.go`、`parity_test.go`：5 个新用例与 `gateRunner`。
 - 文档：`docs/specs/0001-viva-gui.md`、`GLOSSARY.md`、`README.md`、`AGENTS.md`、新增 [ADR-0024](../adr/0024-audit-fixes.md)、本文件、`headless-walkthrough.log`。
+
+## 8. 测试 exe
+
+- 版本：`v2.8.4-viva-test`，对应代码提交 `1451afe`
+- 大小：51,168,256 字节（上一版 v2.8.3 为 51,157,504 字节，+10.5 KB）
+- SHA-256：`43bb3bcf6c54743db153e9a5c4721628ac37db8a98a8a76351b1921599c553b6`
+- 形态：PE32+ GUI x86-64
+
+```bash
+CGO_ENABLED=0 go build -trimpath \
+  -ldflags "-s -w -H=windowsgui -X main.version=v2.8.4-viva-test -X main.commit=1451afe" \
+  -o clash-speedtest-plus.exe .
+```
