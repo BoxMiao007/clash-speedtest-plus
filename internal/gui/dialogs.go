@@ -1,6 +1,8 @@
 package gui
 
 import (
+	"strings"
+
 	"github.com/vivaui/viva/flex"
 )
 
@@ -14,7 +16,98 @@ func (a *App) paintDialogs(f *flex.Frame) {
 		a.paintConfirmDialog(f)
 	case dialogAlert:
 		a.paintAlertDialog(f)
+	case dialogAbout:
+		a.paintAboutDialog(f)
+	case dialogPreview:
+		a.paintPreviewDialog(f)
 	}
+}
+
+// openAbout 打开「关于与帮助」：版本、构建提交、数据目录和全部快捷键。
+// 正文在打开时拼一次，绘制只读字符串。
+func (a *App) openAbout() {
+	var builder strings.Builder
+	builder.WriteString("订阅测速")
+	if a.version != "" {
+		builder.WriteString(" · ")
+		builder.WriteString(a.version)
+	}
+	builder.WriteString("\n")
+	commit := a.commit
+	if commit == "" {
+		commit = "未注入"
+	}
+	builder.WriteString("构建提交：")
+	builder.WriteString(commit)
+	builder.WriteString("\n数据目录：")
+	builder.WriteString(a.dataDir)
+	builder.WriteString("\n\n快捷键\n")
+	builder.WriteString("F1            关于与帮助\n")
+	builder.WriteString("Ctrl+A        全选所有节点\n")
+	builder.WriteString("Ctrl+Shift+A  全不选\n")
+	builder.WriteString("Ctrl+R        重新获取全部订阅\n")
+	builder.WriteString("Ctrl+Enter    开始测速\n")
+	builder.WriteString("Esc           关闭详情或对话框\n\n")
+	builder.WriteString("测速模式：快速只测延迟；下载测延迟与下载速度；完整再加测上传。\n")
+	builder.WriteString("全部数据都写在程序目录的 data/ 下，拷贝整个程序目录即可迁移。")
+	a.aboutText = builder.String()
+	a.dialog = dialogAbout
+}
+
+func (a *App) paintAboutDialog(f *flex.Frame) {
+	dialog := f.Dialog(flex.DialogSpec{
+		Title:     "关于与帮助",
+		Width:     580,
+		Scope:     a.ids.aboutScope,
+		DismissID: a.ids.aboutClose,
+		CloseID:   a.ids.aboutClose,
+	})
+	dialog.Body(func() {
+		f.Paragraph(a.aboutText, 24).FontSize(12)
+	})
+	dialog.Footer(func() {
+		f.Spacer()
+		if f.Button(a.ids.aboutClose, "关闭").Clicked() {
+			a.dialog = dialogNone
+		}
+	})
+	if dialog.Dismissed() {
+		a.dialog = dialogNone
+	}
+}
+
+func (a *App) paintPreviewDialog(f *flex.Frame) {
+	dialog := f.Dialog(flex.DialogSpec{
+		Title:     "结果图预览",
+		Width:     960,
+		Scope:     a.ids.previewScope,
+		DismissID: a.ids.previewClose,
+		CloseID:   a.ids.previewClose,
+	})
+	dialog.Body(func() {
+		// 位图在 view.Draw 之后按这个区域绘制；区域几何来自上一帧布局。
+		a.previewArea = f.Stack().Height(480).FillWidth().Clip()
+	})
+	dialog.Footer(func() {
+		f.Text(a.preview.text).FontSize(11).Muted().Ellipsis().Grow(1)
+		if a.preview.bitmap.Width > 0 {
+			if f.Button(a.ids.previewZoom, a.previewZoomLabel()).Outline().Clicked() {
+				f.Canvas().AfterPaint(func() { a.togglePreviewZoom() })
+			}
+		}
+		if f.Button(a.ids.previewClose, "关闭").Clicked() {
+			a.closePreview()
+		}
+	})
+	if dialog.Dismissed() {
+		a.closePreview()
+	}
+}
+
+// closePreview 关闭预览对话框并丢掉位图引用，下一次预览重新解码。
+func (a *App) closePreview() {
+	a.preview.open = false
+	a.dialog = dialogNone
 }
 
 func (a *App) paintEntryDialog(f *flex.Frame) {

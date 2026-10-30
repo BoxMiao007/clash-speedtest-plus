@@ -29,7 +29,7 @@ func main() {
 		log.Printf("数据目录不可写，内核缓存将尝试写入 %s：%v", mihomoHome, mkdirErr)
 	}
 	constant.SetHomeDir(mihomoHome)
-	application, err := gui.New(gui.Options{BaseDir: baseDir, Version: version})
+	application, err := gui.New(gui.Options{BaseDir: baseDir, Version: version, Commit: commit})
 	if err != nil {
 		log.Fatalf("启动失败：%v", err)
 	}

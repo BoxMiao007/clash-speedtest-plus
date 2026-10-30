@@ -29,7 +29,11 @@ func (a *App) openNodeMenu(canvas *ui.Canvas, node *nodeState, x, y float32) {
 		}
 	}
 
-	entries := make([]menuEntry, 0, 6)
+	entries := make([]menuEntry, 0, 7)
+	dirLabel := "打开配置文件所在目录"
+	if node.entry != nil && node.entry.entry.IsSubscription() {
+		dirLabel = "打开订阅缓存目录"
+	}
 	if multi {
 		entries = append(entries, menuEntry{item: components.ContextMenuItem{
 			ID: a.ids.menuCopyMulti, Label: "复制所选节点信息",
@@ -47,6 +51,8 @@ func (a *App) openNodeMenu(canvas *ui.Canvas, node *nodeState, x, y float32) {
 		}
 		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: selectID, Label: selectLabel}})
 		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: a.ids.menuExclMulti, Label: "排除所选节点"}})
+		entries = append(entries, menuEntry{separator: true})
+		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: a.ids.menuOpenDir, Label: dirLabel}})
 	} else {
 		entries = append(entries, menuEntry{item: components.ContextMenuItem{
 			ID: a.ids.menuCopy, Label: "复制此节点信息",
@@ -61,6 +67,8 @@ func (a *App) openNodeMenu(canvas *ui.Canvas, node *nodeState, x, y float32) {
 		}
 		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: selectID, Label: selectLabel}})
 		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: a.ids.menuExclude, Label: "排除此节点"}})
+		entries = append(entries, menuEntry{separator: true})
+		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: a.ids.menuOpenDir, Label: dirLabel}})
 	}
 
 	clip := ""
@@ -148,6 +156,10 @@ func (a *App) activateMenu(id ui.ID) {
 		a.status = "节点已不在列表里"
 		return
 	}
+	if id == a.ids.menuOpenDir && single == nil {
+		a.status = "节点已不在列表里"
+		return
+	}
 	if (id == a.ids.menuTest || id == a.ids.menuTestMulti) && len(nodes) == 0 {
 		a.status = "节点已不在列表里"
 		return
@@ -184,6 +196,8 @@ func (a *App) activateMenu(id ui.ID) {
 		} else {
 			a.status = "已排除此节点"
 		}
+	case a.ids.menuOpenDir:
+		a.openEntryDirectory(single)
 	}
 }
 

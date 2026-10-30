@@ -115,6 +115,100 @@ func (s *state) excludeFailed() {
 	s.status = "已排除 " + itoa(count) + " 个上次失败的节点"
 }
 
+// setAllNodesSelected 全选或全不选所有条目的所有节点。它不受过滤条件影响：
+// 工具条上的「已选 x / 共 y」统计的也是全部节点，两者口径保持一致。
+func (s *state) setAllNodesSelected(selected bool) {
+	if s.running() {
+		s.status = "测速进行中，先停止再改勾选"
+		return
+	}
+	changed := 0
+	for _, entry := range s.entries {
+		for _, node := range entry.nodes {
+			if node.selected == selected {
+				continue
+			}
+			node.selected = selected
+			changed++
+		}
+	}
+	s.rebuild()
+	if selected {
+		s.status = "已全选 " + itoa(s.selectedCount) + " 个节点"
+		return
+	}
+	s.status = "已取消全部节点勾选（" + itoa(changed) + " 个）"
+}
+
+// refetchAllSubscriptions 重新拉取所有订阅条目；本地文件条目不动。
+func (s *state) refetchAllSubscriptions() {
+	if s.running() {
+		s.status = "测速进行中，先停止再重新获取"
+		return
+	}
+	count := 0
+	for _, entry := range s.entries {
+		if !entry.entry.IsSubscription() || entry.entry.URL == "" {
+			continue
+		}
+		s.readSubscription(entry, true)
+		count++
+	}
+	if count == 0 {
+		s.status = "没有可重新获取的订阅条目"
+		return
+	}
+	s.status = "正在重新获取 " + itoa(count) + " 个订阅"
+}
+
+// askClearResults 让用户确认清空全部测速结果。只清结果，不动条目、节点与
+// 订阅缓存；测速或导出进行中不允许清空，避免后台结果写回已清空的记录。
+func (s *state) askClearResults() {
+	if s.running() || s.exporting > 0 {
+		s.status = "测速或导出进行中，先停止再清空结果"
+		return
+	}
+	if len(s.results) == 0 {
+		s.status = "还没有可清空的测速结果"
+		return
+	}
+	s.dialog = dialogConfirm
+	s.confirm = confirmState{
+		kind:  confirmClearResults,
+		title: "清空测速结果",
+		body:  "清空所有节点的测速结果与「上次测速」时间？条目、节点与订阅缓存都会保留，此操作无法撤销。",
+	}
+}
+
+// clearResults 清空内存与磁盘上的测速结果，把列表恢复成「未测试」。
+func (s *state) clearResults() {
+	if s.savable() {
+		if err := s.store.ClearResults(); err != nil {
+			s.status = "清空结果失败：" + err.Error()
+			return
+		}
+	}
+	for _, entry := range s.entries {
+		for _, node := range entry.nodes {
+			node.hasResult = false
+			node.result = nodeResult{}
+			node.phase = phaseIdle
+			node.liveSpeed = 0
+			s.refreshNodeDisplay(node)
+		}
+	}
+	// 轮次是这次结果的账本，结果清空后不再保留；导出队列一并复位。
+	s.rounds = s.rounds[:0]
+	s.roundIndex = 0
+	s.pendingExport = nil
+	s.exportText = ""
+	if s.detailNode != nil {
+		s.detailText = detailText(s.detailNode)
+	}
+	s.rebuild()
+	s.noteSaved("已清空测速结果")
+}
+
 func (s *state) selectedNodes() []*nodeState {
 	nodes := make([]*nodeState, 0, s.selectedCount)
 	for _, entry := range s.entries {
@@ -493,6 +587,8 @@ func (s *state) applyEvent(event runEvent) {
 		s.applyFetched(event)
 	case eventExported:
 		s.applyExported(event)
+	case eventPreview:
+		s.applyPreview(event)
 	}
 }
 
@@ -694,6 +790,10 @@ func (s *state) applyExported(event runEvent) {
 
 // setExportStatus 把一次导出的结果写进状态栏。
 func (s *state) setExportStatus(event runEvent) {
+	if event.err == nil && strings.HasSuffix(strings.ToLower(event.path), ".png") {
+		// 记下最近一次写出的结果图，结果条上的「预览结果图」用它。
+		s.lastImage = event.path
+	}
 	switch {
 	case event.err != nil:
 		s.status = "导出失败：" + event.err.Error()
@@ -924,6 +1024,8 @@ func (s *state) confirmDelete() {
 		s.loadPresets()
 		s.presetSel = -1
 		s.status = "已删除预设"
+	case confirmClearResults:
+		s.clearResults()
 	}
 	s.dialog = dialogNone
 }
@@ -1016,6 +1118,35 @@ func (s *state) applyPreset(index int) {
 	s.compileFilter()
 	s.persistSettings()
 	s.noteSaved("已应用预设：" + preset.Name)
+}
+
+// openEntryDirectory 打开条目对应的本地目录：本地文件打开配置文件所在目录，
+// 订阅条目打开缓存目录，排查「文件被移动」「缓存损坏」时不用手动找路径。
+func (s *state) openEntryDirectory(node *nodeState) {
+	if node == nil || node.entry == nil {
+		return
+	}
+	entry := node.entry
+	var target string
+	if entry.entry.IsSubscription() {
+		target = filepath.Join(s.dataDir, "subscriptions")
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			s.status = "打开目录失败：" + err.Error()
+			return
+		}
+	} else {
+		absolute, _ := s.resolvePath(entry.entry.Path)
+		if absolute == "" {
+			s.status = "条目没有配置文件路径"
+			return
+		}
+		target = filepath.Dir(absolute)
+	}
+	if err := openDirectory(target); err != nil {
+		s.status = "打开目录失败：" + err.Error()
+		return
+	}
+	s.status = "已打开目录：" + target
 }
 
 func itoa(value int) string {

@@ -49,6 +49,8 @@ const (
 	dialogPreset
 	dialogConfirm
 	dialogAlert
+	dialogAbout
+	dialogPreview
 )
 
 type confirmKind uint8
@@ -56,6 +58,7 @@ type confirmKind uint8
 const (
 	confirmDeleteEntry confirmKind = iota
 	confirmDeletePreset
+	confirmClearResults
 )
 
 var errNoStore = errors.New("数据目录不可用")
@@ -87,6 +90,8 @@ type state struct {
 	countText     string
 	resultText    string
 	dataText      string
+	// hasSubscription 决定节点来源面板要不要显示「全部重新获取」。
+	hasSubscription bool
 
 	filterMode    filter.Mode
 	filterField   flex.Field
@@ -192,6 +197,33 @@ type state struct {
 	pendingExport *roundState
 
 	settingsForm settingsForm
+
+	// 关于对话框与窗口几何记忆。windowFrame 由窗口线程的 OnFrameChange
+	// 更新，只在退出前写回设置，拖动窗口时不做磁盘写入。
+	commit       string
+	windowFrame  ui.Rect
+	windowPlaced bool
+	// lastImage 是最近一次成功写出的结果图路径，用于「预览结果图」。
+	lastImage string
+	preview   previewState
+	// dropActive 表示正有文件拖进窗口；dropText 是预览文案。
+	dropActive bool
+	dropText   string
+	// aboutText 是关于对话框的正文：打开时拼一次，绘制只读。
+	aboutText string
+}
+
+// previewState 是结果图预览：位图在后台解码，窗口线程只读。
+type previewState struct {
+	open    bool
+	loading bool
+	path    string
+	bitmap  ui.Bitmap
+	version uint32
+	err     string
+	zoom    float32
+	// text 是对话框底部的状态行，加载/成功/失败时算好，绘制不拼串。
+	text string
 }
 
 type entryState struct {
@@ -365,6 +397,8 @@ const (
 	eventExported
 	// eventFetched 是订阅拉取结束，body 是规范化后的配置正文。
 	eventFetched
+	// eventPreview 是结果图解码结束，bitmap 可直接交给 ImageView 绘制。
+	eventPreview
 )
 
 type runEvent struct {
@@ -381,6 +415,10 @@ type runEvent struct {
 	proxies  []map[string]any
 	// seq 是订阅拉取的代次：拉取途中地址被改过时，旧请求的结果直接丢弃。
 	seq int
+	// bitmap 是结果图预览解码出的位图（预乘 BGRA）。
+	bitmap ui.Bitmap
+	// version 是位图代次：连续点预览时只接受最后一次解码结果。
+	version uint32
 }
 
 type runState struct {
@@ -892,7 +930,11 @@ func (s *state) rebuild() {
 	visible := s.visible[:0]
 	groups := s.groups[:0]
 	selectedCount, total := 0, 0
+	s.hasSubscription = false
 	for _, entry := range s.entries {
+		if entry.entry.IsSubscription() && entry.entry.URL != "" {
+			s.hasSubscription = true
+		}
 		entry.group = nil
 		if !entry.selected {
 			continue
@@ -1335,6 +1377,8 @@ func (s *state) close() {
 	if s.run != nil && s.run.running {
 		s.stopTest()
 	}
+	// 退出前把窗口的位置与尺寸写回设置：下次启动按这个几何打开。
+	s.captureWindowFrame()
 	s.persistSettings()
 }
 

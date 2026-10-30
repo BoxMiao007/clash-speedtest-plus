@@ -3,6 +3,7 @@ package gui
 import (
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/template"
@@ -218,6 +219,13 @@ func (s *state) collectSettings() (store.Settings, string) {
 		RepoFilePath: strings.TrimSpace(form.repoFilePath.Text()),
 		RepoBranch:   strings.TrimSpace(form.repoBranch.Text()),
 	}
+	// 窗口几何不在表单里，但必须跟着设置一起写回：保存设置不能把上次退出
+	// 时记下的窗口尺寸/位置清掉。
+	settings.WindowWidth = s.settings.WindowWidth
+	settings.WindowHeight = s.settings.WindowHeight
+	settings.WindowX = s.settings.WindowX
+	settings.WindowY = s.settings.WindowY
+	settings.WindowSet = s.settings.WindowSet
 	return settings.Normalize(), ""
 }
 
@@ -261,8 +269,35 @@ func (s *state) resetSettingsForm() {
 	s.status = "已填入默认参数，点「保存设置」生效"
 }
 
+// chooseOutputDirectory 用系统目录选择器填「输出路径」：保留原文件名（没有
+// 就用「导出.yaml」），只替换目录部分，省去手输路径。
+func (a *App) chooseOutputDirectory() {
+	dir, err := appOpenDirectory()
+	if err != nil {
+		if isCanceled(err) {
+			return
+		}
+		a.settingsForm.err = "选择目录失败：" + err.Error()
+		return
+	}
+	if dir == "" {
+		return
+	}
+	name := "导出.yaml"
+	current := strings.TrimSpace(a.settingsForm.outputPath.Text())
+	if current != "" {
+		if base := filepath.Base(filepath.FromSlash(current)); base != "." && base != string(filepath.Separator) {
+			name = base
+		}
+	}
+	a.settingsForm.outputPath.SetText(filepath.Join(dir, name))
+	a.settingsForm.err = ""
+}
+
 // saveSettingsForm 校验并保存设置；保存后下一轮测速与导出用新参数。
 func (s *state) saveSettingsForm() {
+	// 先记下当前窗口几何，再收集表单：窗口状态不归表单管，但不能丢。
+	s.captureWindowFrame()
 	settings, message := s.collectSettings()
 	if message != "" {
 		s.settingsForm.err = message
@@ -340,8 +375,16 @@ func (a *App) paintSettings(f *flex.Frame) {
 			}
 			f.Text("每轮测完是否自动写配置文件：关闭 = 不写；其余见下方开关").FontSize(10).Muted().Ellipsis().Grow(1)
 		})
-		a.settingsFieldRow(f, "输出路径", "自定义模式的词干；自动补 .yaml", &a.settingsForm.outputPath, a.ids.setOutputPath, "例如 D:/订阅/导出.yaml")
-		// 三个开关各自控制一种产物，逐行给标签与说明，避免只看名字猜作用。
+		f.Row().Height(46).FillWidth().Gap(12).Items(flex.Center).Children(func() {
+			f.Column().Width(150).Gap(1).Children(func() {
+				f.Text("输出路径").FontSize(12)
+				f.Text("自定义模式的词干；自动补 .yaml").FontSize(10).Muted().Ellipsis()
+			})
+			f.Field(&a.settingsForm.outputPath, a.ids.setOutputPath, "输出路径", "例如 D:/订阅/导出.yaml").Grow(1)
+			if f.Button(a.ids.setOutputBrowse, "浏览…").Small().Outline().Clicked() {
+				f.Canvas().AfterPaint(func() { a.chooseOutputDirectory() })
+			}
+		}) // 三个开关各自控制一种产物，逐行给标签与说明，避免只看名字猜作用。
 		if a.settingsToggleRow(f, a.ids.setImage, a.settingsForm.imageEnabled,
 			"每轮自动保存结果图（PNG）", "测完在输出目录生成结果图；关闭后仍可在「测速」页点「结果图」手动保存") {
 			a.settingsForm.imageEnabled = !a.settingsForm.imageEnabled

@@ -16,12 +16,13 @@ var (
 	entryKindLabels = []string{"本地文件", "订阅地址"}
 )
 
-// Options 是 GUI 的启动参数。生产代码只传程序目录与版本；测试注入临时目录
-// 与假引擎。
+// Options 是 GUI 的启动参数。生产代码只传程序目录、版本与构建提交；测试注入
+// 临时目录与假引擎。
 type Options struct {
 	BaseDir string
 	DataDir string
 	Version string
+	Commit  string
 	Theme   ui.Theme
 	Runner  Runner
 }
@@ -34,6 +35,9 @@ type App struct {
 	invalidator app.Invalidator
 	config      app.Config
 	paintRoot   func(*flex.Frame)
+	// previewArea 是预览对话框内容区上一帧的几何：位图在 view.Draw 之后
+	// 画上去，避免遮住对话框自己的标题与按钮。
+	previewArea flex.Box
 	closed      bool
 }
 
@@ -50,26 +54,38 @@ func New(opts Options) (*App, error) {
 		state:   model,
 		version: versionBadge(opts.Version),
 	}
+	model.commit = opts.Commit
 	// 页面与输入框集合都只装配一次：每帧新建捕获变量的闭包或切片会把分配
 	// 带进绘制路径。
 	application.paintRoot = func(f *flex.Frame) { application.paintPage(f) }
 	inputs := []*flex.Field{&model.filterField, &model.entryForm.name, &model.entryForm.url, &model.presetForm.name}
 	inputs = append(inputs, model.settingsForm.fields()...)
+	width, height := 1180, 800
+	var origin *ui.Point
+	if model.settings.WindowSet {
+		width, height = model.settings.WindowWidth, model.settings.WindowHeight
+		origin = &ui.Point{X: float32(model.settings.WindowX), Y: float32(model.settings.WindowY)}
+	}
 	application.config = app.Config{
 		Title:       "订阅测速",
-		Width:       1180,
-		Height:      800,
+		Width:       width,
+		Height:      height,
 		MinWidth:    1000,
 		MinHeight:   640,
+		Origin:      origin,
 		Tree:        model.tree,
 		Paint:       application.paint,
 		OnWake:      model.applyPending,
 		Invalidator: &application.invalidator,
 		OnScroll:    application.onScroll,
 		OnKey:       application.onKey,
-		TextInput:   flex.Fields(inputs...),
-		OnClosed:    model.close,
-		ClearColor:  appColor(model.theme.Background),
+		OnShortcut:  application.onShortcut,
+		OnFileDrop:  application.onFileDrop,
+		// 记下窗口的当前位置与尺寸，退出前写回设置；拖动过程中不落盘。
+		OnFrameChange: application.onFrameChange,
+		TextInput:     flex.Fields(inputs...),
+		OnClosed:      model.close,
+		ClearColor:    appColor(model.theme.Background),
 	}
 	model.invalidator = &application.invalidator
 	return application, nil
@@ -108,15 +124,6 @@ func pointIn(rect ui.Rect, x, y float32) bool {
 	return x >= rect.X && x < rect.X+rect.Width && y >= rect.Y && y < rect.Y+rect.Height
 }
 
-// onKey 只转交聚焦中的分隔条：方向键微调「节点来源」宽度。折叠时没有
-// 分隔条，按键原样放行。
-func (a *App) onKey(event ui.KeyEvent) ui.EventResult {
-	if a.entriesCollapsed {
-		return ui.EventResult{}
-	}
-	return a.entriesSplit.Key(event)
-}
-
 func scrollList(offset *float32, content, viewport, delta float32) ui.EventResult {
 	maximum := content - viewport
 	if maximum < 0 {
@@ -142,6 +149,13 @@ func (a *App) paint(canvas *ui.Canvas, size ui.Size) {
 	bounds := ui.Rect{X: 0, Y: 0, Width: size.Width, Height: size.Height}
 	canvas.Fill(bounds, a.theme.Background)
 	a.view.Draw(canvas, a.theme, bounds, a.paintRoot)
+	// 结果图预览的位图最后画：它只覆盖对话框内容区（上一帧记录的几何），
+	// 标题与按钮已经在 flex 里画好了。
+	a.paintPreviewImage(canvas)
+	// 拖入文件时整窗覆盖一层提示，说明松开后会发生什么。
+	if a.dropActive {
+		a.paintDropHint(canvas)
+	}
 	if a.nodeListValid {
 		a.nodeViewport = a.nodeListBox.Rect()
 		a.clampNodeOffset()
@@ -284,6 +298,9 @@ func (a *App) paintFooter(f *flex.Frame) {
 			dataColor = a.theme.Danger
 		}
 		f.Text(a.dataText).FontSize(11).Color(dataColor).Ellipsis().MaxWidthPercent(45)
+		if f.Button(a.ids.about, "关于").XSmall().Ghost().Clicked() {
+			a.openAbout()
+		}
 	})
 }
 
@@ -302,6 +319,10 @@ func appOpenFiles() ([]string, error) {
 		Title:   "选择 Clash/Mihomo 配置文件",
 		Filters: []app.FileFilter{{Name: "YAML 配置", Pattern: "*.yaml"}, {Name: "所有文件", Pattern: "*"}},
 	})
+}
+
+func appOpenDirectory() (string, error) {
+	return app.OpenDirectory(app.OpenDirectoryOptions{Title: "选择输出目录"})
 }
 
 func isCanceled(err error) bool { return errors.Is(err, app.ErrCanceled) }

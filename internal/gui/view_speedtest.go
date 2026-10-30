@@ -137,6 +137,12 @@ func (a *App) showResultBar() bool {
 func (a *App) paintTestToolbar(f *flex.Frame) {
 	f.Row().Height(52).FillWidth().PadX(20).Items(flex.Center).Gap(8).Children(func() {
 		f.Text(a.countText).FontSize(12).Muted().Ellipsis()
+		if f.Button(a.ids.selectAll, "全选").XSmall().Ghost().Disabled(a.running() || a.selectedCount == a.totalCount).Clicked() {
+			a.setAllNodesSelected(true)
+		}
+		if f.Button(a.ids.selectNone, "全不选").XSmall().Ghost().Disabled(a.running() || a.selectedCount == 0).Clicked() {
+			a.setAllNodesSelected(false)
+		}
 		f.Spacer()
 		if f.Button(a.ids.excludeFailed, "排除上次失败").Small().Outline().Disabled(a.running()).Clicked() {
 			a.excludeFailed()
@@ -173,6 +179,16 @@ func (a *App) paintTestToolbar(f *flex.Frame) {
 		if a.roundIndex >= 0 && a.roundIndex < len(a.rounds) && a.rounds[a.roundIndex].err != "" {
 			if f.Button(a.ids.retryExport, "重试导出").XSmall().Outline().Destructive().Disabled(a.exporting > 0).Clicked() {
 				f.Canvas().AfterPaint(a.retryExportRound)
+			}
+		}
+		if a.lastImage != "" {
+			if f.Button(a.ids.previewImage, "预览结果图").XSmall().Outline().Disabled(a.exporting > 0).Clicked() {
+				f.Canvas().AfterPaint(func() { a.startImagePreview(a.lastImage) })
+			}
+		}
+		if len(a.results) > 0 {
+			if f.Button(a.ids.clearResults, "清空结果").XSmall().Ghost().Destructive().Disabled(a.running() || a.exporting > 0).Clicked() {
+				f.Canvas().AfterPaint(func() { a.askClearResults() })
 			}
 		}
 		disabled := a.exporting > 0 || len(a.results) == 0
@@ -367,17 +383,21 @@ func (a *App) handleNodePointer(canvas *ui.Canvas, id ui.ID, node *nodeState) {
 // toggleDetail 展开/收起某个节点的详情面板；文案在切换时算好，Paint 只读。
 func (a *App) toggleDetail(node *nodeState) {
 	if a.detailKey == node.key {
-		a.detailKey = ""
-		a.detailNode = nil
-		if a.activeNode == node {
-			a.activeNode = nil
-		}
+		a.closeDetail()
 		return
 	}
 	a.detailKey = node.key
 	a.detailNode = node
 	a.activeNode = node
 	a.detailText = detailText(node)
+}
+
+// closeDetail 关闭详情面板并清掉行选中态。
+func (a *App) closeDetail() {
+	a.detailKey = ""
+	a.detailNode = nil
+	a.activeNode = nil
+	a.detailText = ""
 }
 
 // detailPanelHeight 是详情面板的固定高度（含标题行）。
@@ -391,9 +411,7 @@ func (a *App) paintDetailPanel(f *flex.Frame) {
 			f.Row().FillWidth().Items(flex.Center).Gap(8).Children(func() {
 				f.Text(a.detailNode.name).Bold().Ellipsis().Grow(1)
 				if f.Button(a.ids.closeDetail, "关闭详情").XSmall().Ghost().Clicked() {
-					a.detailKey = ""
-					a.detailNode = nil
-					a.activeNode = nil
+					a.closeDetail()
 				}
 			})
 			f.Paragraph(a.detailText, 6).FontSize(11).Muted()
@@ -436,6 +454,14 @@ func (a *App) paintEntriesPanel(f *flex.Frame) {
 				a.openEntryDialog(nil)
 			}
 		})
+		if a.hasSubscription {
+			f.Row().Height(28).PadSides(0, 16, 0, 12).Items(flex.Center).Gap(8).Children(func() {
+				f.Text("订阅").FontSize(11).Muted()
+				if f.Button(a.ids.refetchAll, "全部重新获取").XSmall().Outline().Disabled(a.running()).Clicked() {
+					f.Canvas().AfterPaint(func() { a.refetchAllSubscriptions() })
+				}
+			})
+		}
 		scroll := f.ScrollArea(a.ids.entryScroll).Grow(1).FillWidth().PadSides(12, 12, 12, 12).Gap(10)
 		a.entryScrollBox, a.entryScrollValid = scroll, true
 		scroll.Children(func() {

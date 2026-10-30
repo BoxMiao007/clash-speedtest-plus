@@ -139,6 +139,15 @@ type Settings struct {
 	RepoAddress  string `json:"repo_address"`
 	RepoFilePath string `json:"repo_file_path"`
 	RepoBranch   string `json:"repo_branch"`
+
+	// 窗口几何：上次退出时的内容区尺寸与屏幕位置。WindowSet 为 false 时
+	// 用默认尺寸并交给系统摆放（首次启动、旧版本数据）。位置允许为负：
+	// 多显示器时副屏原点可能在主屏左侧或上方。
+	WindowWidth  int  `json:"window_width,omitempty"`
+	WindowHeight int  `json:"window_height,omitempty"`
+	WindowX      int  `json:"window_x,omitempty"`
+	WindowY      int  `json:"window_y,omitempty"`
+	WindowSet    bool `json:"window_set,omitempty"`
 }
 
 // DefaultSettings 返回旧 TUI 的默认参数组合。
@@ -216,6 +225,18 @@ func (s Settings) Normalize() Settings {
 		}
 	default:
 		s.OutputMode = defaults.OutputMode
+	}
+	// 窗口几何：尺寸过小/过大按默认处理，避免一启动就得到一条看不见的窗口。
+	// 位置允许负值（副屏在主屏左侧或上方），只看尺寸是否合理。
+	if s.WindowSet {
+		if s.WindowWidth < 800 || s.WindowHeight < 560 || s.WindowWidth > 10000 || s.WindowHeight > 10000 {
+			s.WindowWidth, s.WindowHeight = 0, 0
+			s.WindowX, s.WindowY = 0, 0
+			s.WindowSet = false
+		}
+	} else {
+		s.WindowWidth, s.WindowHeight = 0, 0
+		s.WindowX, s.WindowY = 0, 0
 	}
 	return s
 }
@@ -701,6 +722,17 @@ func (s *Store) DeleteResults(entryID string) error {
 		return nil
 	}
 	delete(s.results, entryID)
+	return s.writeFile(resultsFileName, resultsFile{Version: currentVersion, Results: s.results})
+}
+
+// ClearResults 清空全部条目的测速结果并立即落盘。只清结果，不动条目与订阅缓存。
+func (s *Store) ClearResults() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.results) == 0 {
+		return nil
+	}
+	s.results = map[string]map[string]NodeResult{}
 	return s.writeFile(resultsFileName, resultsFile{Version: currentVersion, Results: s.results})
 }
 

@@ -36,6 +36,14 @@ type ids struct {
 	stopTest      ui.ID
 	pauseTest     ui.ID
 
+	// 节点来源面板与全局选择：全选/全不选、订阅批量重新获取。
+	selectAll    ui.ID
+	selectNone   ui.ID
+	refetchAll   ui.ID
+	about        ui.ID
+	clearResults ui.ID
+	previewImage ui.ID
+
 	// 测速视图：轮次切换、导出、详情。
 	roundPrev   ui.ID
 	roundNext   ui.ID
@@ -52,34 +60,35 @@ type ids struct {
 	sortTested  ui.ID
 
 	// 设置视图。
-	settingsScroll ui.ID
-	settingsSave   ui.ID
-	settingsReset  ui.ID
-	settingsMode   ui.Scope
-	settingsOutput ui.Scope
-	setDownload    ui.ID
-	setUpload      ui.ID
-	setTimeout     ui.ID
-	setConcurrent  ui.ID
-	setParallel    ui.ID
-	setServer      ui.ID
-	setUA          ui.ID
-	setEarlyStop   ui.ID
-	setMaxLatency  ui.ID
-	setMaxLoss     ui.ID
-	setMinDownload ui.ID
-	setMinUpload   ui.ID
-	setOutputPath  ui.ID
-	setImage       ui.ID
-	setSpeedOnly   ui.ID
-	setRename      ui.ID
-	setRenameTmpl  ui.ID
-	setGistToken   ui.ID
-	setGistAddress ui.ID
-	setRepoToken   ui.ID
-	setRepoAddress ui.ID
-	setRepoFile    ui.ID
-	setRepoBranch  ui.ID
+	settingsScroll  ui.ID
+	settingsSave    ui.ID
+	settingsReset   ui.ID
+	settingsMode    ui.Scope
+	settingsOutput  ui.Scope
+	setDownload     ui.ID
+	setUpload       ui.ID
+	setTimeout      ui.ID
+	setConcurrent   ui.ID
+	setParallel     ui.ID
+	setServer       ui.ID
+	setUA           ui.ID
+	setEarlyStop    ui.ID
+	setMaxLatency   ui.ID
+	setMaxLoss      ui.ID
+	setMinDownload  ui.ID
+	setMinUpload    ui.ID
+	setOutputPath   ui.ID
+	setOutputBrowse ui.ID
+	setImage        ui.ID
+	setSpeedOnly    ui.ID
+	setRename       ui.ID
+	setRenameTmpl   ui.ID
+	setGistToken    ui.ID
+	setGistAddress  ui.ID
+	setRepoToken    ui.ID
+	setRepoAddress  ui.ID
+	setRepoFile     ui.ID
+	setRepoBranch   ui.ID
 
 	entryDialogScope ui.ID
 	entryName        ui.ID
@@ -101,6 +110,13 @@ type ids struct {
 	alertScope ui.ID
 	alertOK    ui.ID
 
+	aboutScope ui.ID
+	aboutClose ui.ID
+
+	previewScope ui.ID
+	previewClose ui.ID
+	previewZoom  ui.ID
+
 	menuDismiss    ui.ID
 	menuRoot       ui.ID
 	menuCopy       ui.ID
@@ -113,6 +129,7 @@ type ids struct {
 	menuTestOne    ui.ID
 	menuUnselMulti ui.ID
 	menuExclMulti  ui.ID
+	menuOpenDir    ui.ID
 }
 
 func newIDs(tree *ui.Tree) ids {
@@ -146,6 +163,12 @@ func newIDs(tree *ui.Tree) ids {
 	value.startTest = tree.ID(page, "start-test")
 	value.stopTest = tree.ID(page, "stop-test")
 	value.pauseTest = tree.ID(page, "pause-test")
+	value.selectAll = tree.ID(page, "select-all-nodes")
+	value.selectNone = tree.ID(page, "select-none-nodes")
+	value.refetchAll = tree.ID(page, "refetch-all-subscriptions")
+	value.about = tree.ID(page, "about")
+	value.clearResults = tree.ID(page, "clear-results")
+	value.previewImage = tree.ID(page, "preview-image")
 
 	value.roundPrev = tree.ID(page, "round-prev")
 	value.roundNext = tree.ID(page, "round-next")
@@ -179,6 +202,7 @@ func newIDs(tree *ui.Tree) ids {
 	value.setMinDownload = tree.ID(page, "set-min-download")
 	value.setMinUpload = tree.ID(page, "set-min-upload")
 	value.setOutputPath = tree.ID(page, "set-output-path")
+	value.setOutputBrowse = tree.ID(page, "set-output-browse")
 	value.setImage = tree.ID(page, "set-image")
 	value.setSpeedOnly = tree.ID(page, "set-speed-only")
 	value.setRename = tree.ID(page, "set-rename")
@@ -210,6 +234,12 @@ func newIDs(tree *ui.Tree) ids {
 	value.alertScope = tree.ID(value.dialogs, "alert-scope")
 	value.alertOK = tree.ID(value.dialogs, "alert-ok")
 
+	value.aboutScope = tree.ID(value.dialogs, "about-scope")
+	value.aboutClose = tree.ID(value.dialogs, "about-close")
+	value.previewScope = tree.ID(value.dialogs, "preview-scope")
+	value.previewClose = tree.ID(value.dialogs, "preview-close")
+	value.previewZoom = tree.ID(value.dialogs, "preview-zoom")
+
 	value.menuDismiss = tree.ID(value.menu, "dismiss")
 	value.menuRoot = tree.ID(value.menu, "root")
 	value.menuCopy = tree.ID(value.menu, "copy-one")
@@ -222,6 +252,7 @@ func newIDs(tree *ui.Tree) ids {
 	value.menuTestOne = tree.ID(value.menu, "test-pointed")
 	value.menuUnselMulti = tree.ID(value.menu, "unselect-many")
 	value.menuExclMulti = tree.ID(value.menu, "exclude-many")
+	value.menuOpenDir = tree.ID(value.menu, "open-entry-directory")
 	return value
 }
 
