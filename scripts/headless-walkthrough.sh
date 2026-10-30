@@ -101,6 +101,9 @@ fi
   echo 'waitfor "已完成 1/1" 30000'
   echo 'waitfor "已导出" 30000'
   echo 'texts'
+  echo 'click "折叠 机场 A 的节点"'
+  echo 'texts'
+  echo 'click "展开 机场 A 的节点"'
   echo 'click "过滤表达式"'
   echo 'type HK !02'
   echo 'key enter'
@@ -154,6 +157,8 @@ expect 'label="节点 机场 A / HK-01"'
 expect '只看HK'
 # 条目路径用徽标显示形态，右键多选菜单带「单独测试此节点」。
 expect '软路径'
+# 组标题可折叠：折叠后出现「已折叠」，展开后节点行回来。
+expect '已折叠'
 expect '单独测试此节点'
 expect '机场 B'
 expect '测速与输出设置'

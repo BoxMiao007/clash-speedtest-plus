@@ -262,3 +262,108 @@ func TestOutputSwitchesExplainEachProduct(t *testing.T) {
 		t.Fatal("点开关后应关闭结果图")
 	}
 }
+
+func countHitID(snapshot app.Snapshot, id ui.ID) int {
+	count := 0
+	for _, hit := range snapshot.Hits {
+		if hit.ID == id {
+			count++
+		}
+	}
+	return count
+}
+
+// 组标题的折叠按钮只隐藏节点行，不改变勾选与测速范围。
+func TestGroupHeaderCollapsesRows(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "A-01", "A-02", "A-03")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+	entry := application.entries[0]
+	node := application.nodes[0]
+
+	if !hasHitID(driver.Snapshot(), node.ids.row) {
+		t.Fatal("折叠前应有节点行")
+	}
+	clickID(t, driver, entry.ids.groupToggle)
+	if !entry.collapsed {
+		t.Fatal("点组标题箭头后应进入折叠状态")
+	}
+	snapshot := driver.Snapshot()
+	if hasHitID(snapshot, node.ids.row) {
+		t.Fatal("折叠后不应再绘制节点行")
+	}
+	if !hasText(snapshot, "已折叠") {
+		t.Fatalf("折叠后组标题应标明已折叠；文本=%v", snapshot.Labels)
+	}
+	if !hasHitID(snapshot, entry.ids.groupToggle) {
+		t.Fatal("折叠后仍应能从组标题展开")
+	}
+	if application.selectedCount != 3 {
+		t.Fatalf("折叠不应改变勾选，实际已选 %d", application.selectedCount)
+	}
+	clickID(t, driver, entry.ids.groupToggle)
+	if entry.collapsed {
+		t.Fatal("再点一次应展开")
+	}
+	if !hasHitID(driver.Snapshot(), node.ids.row) {
+		t.Fatal("展开后节点行应回来")
+	}
+}
+
+// 组标题滚出视口后固定在列表顶部，滚到下一个条目时自动换成下一组的标题。
+func TestStickyGroupHeaderTracksScroll(t *testing.T) {
+	dir := t.TempDir()
+	namesA := make([]string, 0, 30)
+	namesB := make([]string, 0, 30)
+	for index := 0; index < 30; index++ {
+		namesA = append(namesA, fmt.Sprintf("A-%02d", index))
+		namesB = append(namesB, fmt.Sprintf("B-%02d", index))
+	}
+	writeNodesFile(t, dir, "a.yaml", namesA...)
+	writeNodesFile(t, dir, "b.yaml", namesB...)
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	seedEntry(t, dir, store.Entry{ID: "e2", Name: "机场 B", Path: "b.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+	viewport := application.nodeViewport
+	if viewport.Height <= 0 {
+		t.Fatal("没有记录列表视口")
+	}
+	if err := driver.Scroll(ui.ScrollEvent{X: viewport.X + viewport.Width/2, Y: viewport.Y + viewport.Height/2, DeltaY: 200, Precise: true}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := driver.Snapshot()
+	viewport = application.nodeViewport
+	sticky := hitRect(t, driver, application.entries[0].ids.selectAll)
+	// 按钮在 32px 标题内垂直居中，命中顶部比列表顶多几个像素。
+	if delta := sticky.Y - viewport.Y; delta < -1.5 || delta > 6 {
+		t.Fatalf("第一组标题应固定在列表顶部：hit.Y=%v viewport.Y=%v", sticky.Y, viewport.Y)
+	}
+	if got := countHitID(snapshot, application.entries[0].ids.selectAll); got != 1 {
+		t.Fatalf("固定标题只应出现一次，实际 %d 次", got)
+	}
+
+	if err := driver.Scroll(ui.ScrollEvent{X: viewport.X + viewport.Width/2, Y: viewport.Y + viewport.Height/2, DeltaY: 5000, Precise: true}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot = driver.Snapshot()
+	viewport = application.nodeViewport
+	second := hitRect(t, driver, application.entries[1].ids.selectAll)
+	if delta := second.Y - viewport.Y; delta < -1.5 || delta > 6 {
+		t.Fatalf("滚到第二组后应固定第二组标题：hit.Y=%v viewport.Y=%v", second.Y, viewport.Y)
+	}
+	if hasHitID(snapshot, application.entries[0].ids.selectAll) {
+		t.Fatal("第一组标题已滚出视口，不应再出现")
+	}
+
+	clickID(t, driver, application.entries[1].ids.selectNone)
+	selected := 0
+	for _, node := range application.entries[1].nodes {
+		if node.selected {
+			selected++
+		}
+	}
+	if selected != 0 {
+		t.Fatalf("固定标题上的「全不选」应生效，实际还有 %d 个选中", selected)
+	}
+}

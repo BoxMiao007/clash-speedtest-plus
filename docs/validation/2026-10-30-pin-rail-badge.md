@@ -2,7 +2,7 @@
 
 - 环境：Windows 11（amd64）、AMD Ryzen 7 4800H、Go 1.27.3（模块指令 1.26）
 - 关联：[ADR-0022](../adr/0022-pin-rail-badge.md)、[规格 0001](../specs/0001-viva-gui.md)
-- 前一轮：[展示细节修复](2026-10-30-display-fixes.md)
+- 前一轮：[展示细节修复](2026-10-30-display-fixes.md)。后续：[分组标题折叠与固定](2026-10-30-group-sticky.md)。
 
 ## 1. 范围
 
