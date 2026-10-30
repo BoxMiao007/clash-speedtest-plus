@@ -93,3 +93,16 @@ go test ./... -count=1   # 8 个包全部 ok
 - `scripts/headless-walkthrough.sh`：`测速` 标签、去掉 `返回选择`。
 - `docs/specs/0001-viva-gui.md`、`GLOSSARY.md`、`README.md`、`AGENTS.md`、ADR-0007/0017/0018：同步。
 - `docs/validation/headless-walkthrough.log`：本轮日志。
+
+## 9. 测试 exe
+
+- 版本：`v2.8.0-viva-test`，对应代码提交 `9701492`
+- 大小：51,139,072 字节（上一版 v2.7.1 为 51,151,360 字节，-12 KB：删掉两个视图文件与结果列表代码）
+- SHA-256：`e98f310b0d41ba4d6403156075ef16466e21109e27dcb444c2b01a4e8ea94262`
+- 形态：PE32+ GUI x86-64
+
+```bash
+CGO_ENABLED=0 go build -trimpath \
+  -ldflags "-s -w -H=windowsgui -X main.version=v2.8.0-viva-test -X main.commit=9701492" \
+  -o clash-speedtest-plus.exe .
+```
