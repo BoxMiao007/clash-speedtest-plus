@@ -42,6 +42,7 @@ type ids struct {
 	exportYAML  ui.ID
 	exportImage ui.ID
 	exportTSV   ui.ID
+	retryExport ui.ID
 	closeDetail ui.ID
 	sortLatency ui.ID
 	sortJitter  ui.ID
@@ -151,6 +152,7 @@ func newIDs(tree *ui.Tree) ids {
 	value.exportYAML = tree.ID(page, "export-yaml")
 	value.exportImage = tree.ID(page, "export-image")
 	value.exportTSV = tree.ID(page, "export-tsv")
+	value.retryExport = tree.ID(page, "retry-export")
 	value.closeDetail = tree.ID(page, "close-detail")
 	value.sortLatency = tree.ID(page, "sort-latency")
 	value.sortJitter = tree.ID(page, "sort-jitter")

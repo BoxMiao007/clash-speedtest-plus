@@ -130,7 +130,8 @@ func joinLines(lines []string) string {
 }
 
 // resultOK 把一次测速结果折算成「上次是否失败」，供「排除上次失败」使用。
-func resultOK(result *speedtester.Result) bool {
+// 快速模式只测延迟，没有下载速度可比，不能按下载速度判定失败。
+func resultOK(result *speedtester.Result, mode speedtester.SpeedMode) bool {
 	if result == nil {
 		return false
 	}
@@ -140,10 +141,13 @@ func resultOK(result *speedtester.Result) bool {
 	if result.DownloadError != "" {
 		return false
 	}
+	if mode == speedtester.SpeedModeFast {
+		return true
+	}
 	return result.DownloadSpeed > 0
 }
 
-func resultToStored(result *speedtester.Result, testedAt time.Time) nodeResult {
+func resultToStored(result *speedtester.Result, testedAt time.Time, mode speedtester.SpeedMode) nodeResult {
 	return nodeResult{
 		LatencyMS:     float64(result.Latency.Milliseconds()),
 		JitterMS:      float64(result.Jitter.Milliseconds()),
@@ -153,7 +157,7 @@ func resultToStored(result *speedtester.Result, testedAt time.Time) nodeResult {
 		DownloadError: result.DownloadError,
 		UploadError:   result.UploadError,
 		TestedAt:      testedAt,
-		OK:            resultOK(result),
+		OK:            resultOK(result, mode),
 	}
 }
 

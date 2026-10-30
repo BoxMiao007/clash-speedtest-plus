@@ -170,6 +170,11 @@ func (a *App) paintTestToolbar(f *flex.Frame) {
 				a.switchRound(1)
 			}
 		}
+		if a.roundIndex >= 0 && a.roundIndex < len(a.rounds) && a.rounds[a.roundIndex].err != "" {
+			if f.Button(a.ids.retryExport, "重试导出").XSmall().Outline().Destructive().Disabled(a.exporting > 0).Clicked() {
+				f.Canvas().AfterPaint(a.retryExportRound)
+			}
+		}
 		disabled := a.exporting > 0 || len(a.results) == 0
 		if f.Button(a.ids.exportYAML, "导出配置").XSmall().Outline().Disabled(disabled).Clicked() {
 			f.Canvas().AfterPaint(func() { a.startManualExport(manualYAML) })
@@ -553,6 +558,9 @@ func (a *App) paintGroupHeader(f *flex.Frame, group *groupState) {
 		}
 		f.Text(group.entry.entry.Name).Bold()
 		f.Text(group.countText).FontSize(11).Muted()
+		if group.entry.loadErr != "" {
+			f.Text("读取失败").FontSize(10).Color(a.theme.Danger).Ellipsis()
+		}
 		if group.collapsed {
 			f.Text("已折叠").FontSize(11).Muted()
 		}

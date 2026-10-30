@@ -2,11 +2,14 @@ package gui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/BoxMiao007/clash-speedtest-plus/internal/filter"
+	"github.com/BoxMiao007/clash-speedtest-plus/internal/speedtester"
 	"github.com/BoxMiao007/clash-speedtest-plus/internal/store"
 	"github.com/vivaui/viva/app"
 	"github.com/vivaui/viva/ui"
@@ -507,5 +510,82 @@ func TestRowClickAndRightClickMarkActive(t *testing.T) {
 	}
 	if !application.menu.open {
 		t.Fatal("右键后菜单应打开")
+	}
+}
+
+// 快速模式只测延迟，不能因为下载速度为 0 被判成失败。
+func TestResultOKRespectsFastMode(t *testing.T) {
+	okResult := &speedtester.Result{Latency: 20 * time.Millisecond}
+	if !resultOK(okResult, speedtester.SpeedModeFast) {
+		t.Fatal("快速模式有延迟就应算成功")
+	}
+	if resultOK(okResult, speedtester.SpeedModeDownload) {
+		t.Fatal("下载模式没有下载速度应算失败")
+	}
+}
+
+// 手动导出配置遇到同名文件要让开，而不是覆盖。
+func TestManualExportPathSkipsExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "A-01")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, _ := openTestApp(t, dir, newFakeRunner(nil))
+	now := time.Date(2026, 10, 30, 12, 0, 0, 0, time.Local)
+	if err := os.WriteFile(filepath.Join(dir, "1.机场A-导出.yaml"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := application.freeManualExportPath("机场A", now, 1)
+	if filepath.Base(path) != "2.机场A-导出.yaml" {
+		t.Fatalf("应避开已有文件，实际 %s", path)
+	}
+}
+
+// 导出失败时结果条给出重试入口，重试会清掉错误并重新导出。
+func TestRetryExportClearsError(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "A-01")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+	application.settings.ImageEnabled = false
+	application.settings.OutputMode = store.OutputModeOff
+	clickID(t, driver, application.ids.startTest)
+	waitUntilIdle(t, application, driver)
+	if len(application.rounds) == 0 {
+		t.Fatal("应生成一轮")
+	}
+	application.rounds[0].err = "磁盘已满"
+	application.rebuild()
+	// 直接改状态不会触发重绘：点一次表头让这一帧重新画出来。
+	clickID(t, driver, application.ids.sortLatency)
+	if !hasHitID(driver.Snapshot(), application.ids.retryExport) {
+		t.Fatalf("导出失败后应出现重试入口；rounds=%d index=%d err=%q hits=%v",
+			len(application.rounds), application.roundIndex, application.rounds[0].err, hitLabels(driver.Snapshot()))
+	}
+	application.retryExportRound()
+	if application.rounds[0].err != "" {
+		t.Fatal("重试应清掉错误")
+	}
+}
+
+// 条目读取失败时，节点组标题也要能看到错误。
+func TestGroupHeaderShowsLoadError(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "A-01")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+	clickID(t, driver, application.entries[0].ids.read)
+	if len(application.entries[0].nodes) == 0 {
+		t.Fatal("读取后应有节点")
+	}
+	application.entries[0].loadErr = "文件不存在"
+	application.rebuild()
+	clickID(t, driver, application.ids.sortLatency)
+	if !hasText(driver.Snapshot(), "读取失败") {
+		groupErr := ""
+		if len(application.groups) > 0 {
+			groupErr = application.groups[0].entry.loadErr
+		}
+		t.Fatalf("组标题应显示读取失败；entry.loadErr=%q group.loadErr=%q groups=%d",
+			application.entries[0].loadErr, groupErr, len(application.groups))
 	}
 }

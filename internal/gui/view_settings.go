@@ -2,8 +2,10 @@ package gui
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/BoxMiao007/clash-speedtest-plus/internal/store"
 	"github.com/vivaui/viva/flex"
@@ -158,8 +160,18 @@ func (s *state) collectSettings() (store.Settings, string) {
 	if outputMode == store.OutputModeCustom && outputPath == "" {
 		return store.Settings{}, "输出模式为「自定义」时必须填输出路径"
 	}
-	if strings.TrimSpace(form.serverURL.Text()) == "" {
+	serverURL := strings.TrimSpace(form.serverURL.Text())
+	if serverURL == "" {
 		return store.Settings{}, "测速服务器地址不能为空"
+	}
+	if parsed, err := url.Parse(serverURL); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return store.Settings{}, "测速服务器地址必须是 http(s) URL"
+	}
+	renameTemplate := strings.TrimSpace(form.renameTemplate.Text())
+	if renameTemplate != "" {
+		if _, err := template.New("rename").Parse(renameTemplate); err != nil {
+			return store.Settings{}, "重命名模板无效：" + err.Error()
+		}
 	}
 	gistToken := strings.TrimSpace(form.gistToken.Text())
 	gistAddress := strings.TrimSpace(form.gistAddress.Text())
@@ -183,7 +195,7 @@ func (s *state) collectSettings() (store.Settings, string) {
 		TimeoutMS:  timeoutMS,
 		Concurrent: concurrent,
 		Parallel:   parallel,
-		ServerURL:  strings.TrimSpace(form.serverURL.Text()),
+		ServerURL:  serverURL,
 		UserAgent:  strings.TrimSpace(form.userAgent.Text()),
 		EarlyStop:  earlyStop,
 
@@ -197,7 +209,7 @@ func (s *state) collectSettings() (store.Settings, string) {
 		ImageEnabled:   form.imageEnabled,
 		ImageSpeedOnly: form.imageSpeedOnly,
 		RenameEnabled:  form.renameEnabled,
-		RenameTemplate: strings.TrimSpace(form.renameTemplate.Text()),
+		RenameTemplate: renameTemplate,
 
 		GistToken:    gistToken,
 		GistAddress:  gistAddress,

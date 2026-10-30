@@ -100,9 +100,6 @@ func (s *state) toggleGroup(group *groupState) {
 func (s *state) excludeFailed() {
 	count := 0
 	for _, entry := range s.entries {
-		if !entry.selected {
-			continue
-		}
 		for _, node := range entry.nodes {
 			if node.selected && node.hasResult && !node.result.OK {
 				node.selected = false
@@ -416,7 +413,11 @@ func (s *state) applyEvent(event runEvent) {
 		if node == nil {
 			return
 		}
-		stored := resultToStored(event.result, time.Now())
+		mode, modeErr := speedtester.ParseSpeedMode(s.settings.Mode)
+		if modeErr != nil {
+			mode = speedtester.SpeedModeDownload
+		}
+		stored := resultToStored(event.result, time.Now(), mode)
 		node.result = stored
 		node.hasResult = true
 		node.phase = phaseDone
@@ -510,6 +511,25 @@ func (s *state) currentRound() *roundState {
 		return nil
 	}
 	return s.rounds[s.roundIndex]
+}
+
+// retryExportRound 重试当前轮的导出：清掉错误后重新写产物，成功后走正常的
+// 自动推进；失败则保留错误，等用户再重试。
+func (s *state) retryExportRound() {
+	if s.running() || s.exporting > 0 {
+		return
+	}
+	round := s.currentRound()
+	if round == nil || round.err == "" {
+		return
+	}
+	if s.roundPosition(round) < 0 {
+		return
+	}
+	round.err = ""
+	s.pendingExport = nil
+	s.rebuild()
+	s.startRoundExport(round)
 }
 
 // afterRoundFinished 在本轮正常结束后先导出（输出开着时），导出完成再推进
@@ -626,7 +646,7 @@ func (s *state) applyExported(event runEvent) {
 		s.setExportStatus(event)
 		// 手动导出挡住了某一轮的自动导出：手动任务结束后必须补上，否则
 		// 后续轮次和合并导出会静默停住。
-		if s.pendingExport != nil && !s.running() && s.exporting == 0 {
+		if event.err == nil && s.pendingExport != nil && !s.running() && s.exporting == 0 {
 			pending := s.pendingExport
 			s.pendingExport = nil
 			if s.roundPosition(pending) >= 0 {

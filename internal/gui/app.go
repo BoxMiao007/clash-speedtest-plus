@@ -259,6 +259,11 @@ func (a *App) paintFilterBar(f *flex.Frame) {
 		f.Row().Height(24).FillWidth().PadX(20).Items(flex.Center).Children(func() {
 			f.Text(a.filterErr).FontSize(11).Color(a.theme.Danger).Ellipsis()
 		})
+	} else if a.filterMode == filter.ModeSimple {
+		// 占位符在输入后消失；语法提示要常驻，随时能查 ! 与通配符。
+		f.Row().Height(20).FillWidth().PadX(20).Items(flex.Center).Children(func() {
+			f.Text("语法：空格分隔；! 排除；* 任意长度；? 一个字符；例：香港 *IPLC !试用").FontSize(10).Muted().Ellipsis()
+		})
 	}
 	f.Column().Height(1).FillWidth().Background(a.theme.Border)
 }

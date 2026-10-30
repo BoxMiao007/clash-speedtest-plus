@@ -107,8 +107,8 @@ func TestFollowedConfigExportPathWithSequence(t *testing.T) {
 		{"result.yaml", "机场A", 3, "3.机场A-result.yaml"},
 		// 分隔符随平台：断言用 filepath.Join 拼期望值，不写死 /。
 		{"/exec/result.yaml", "机场A", 3, filepath.Join("/exec", "3.机场A-result.yaml")},
-		// 订阅轮没有基名可跟；有了序号已能区分轮次，不再叠时间戳。
-		{"result.yaml", "", 3, "3.result.yaml"},
+		// 订阅轮没有基名可跟；序号之外仍要时间戳，跨运行才不覆盖。
+		{"result.yaml", "", 3, "3.result-20260927-153001.yaml"},
 		{"result.yaml", "", 0, "result-20260927-153001.yaml"},
 		{"", "机场A", 3, ""},
 	}

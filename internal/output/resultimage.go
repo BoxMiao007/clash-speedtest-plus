@@ -904,7 +904,8 @@ func FollowedConfigExportPath(path, nameBase string, now time.Time, seq int) str
 	case nameBase != "":
 		stem = nameBase + "-" + stem
 	case seq > 0:
-		// 没有可跟的基名时才用时间戳防覆盖；带序号后同轮已经唯一。
+		// 订阅轮没有基名：序号只在单次运行内唯一，跨运行仍要时间戳防覆盖。
+		stem = stem + "-" + now.Format("20060102-150405")
 	default:
 		stem = stem + "-" + now.Format("20060102-150405")
 	}

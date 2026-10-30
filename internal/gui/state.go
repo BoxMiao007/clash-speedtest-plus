@@ -1220,6 +1220,7 @@ func (s *state) refreshRunText() {
 		if s.exporting > 0 {
 			s.resultText += " · " + s.exportText
 		}
+		s.appendRoundError()
 		return
 	}
 	s.run.text = fmt.Sprintf("%s已完成 %d/%d · 在测 %d", roundPrefix, s.run.done, s.run.total, s.run.active)
@@ -1229,6 +1230,18 @@ func (s *state) refreshRunText() {
 	s.resultText = s.run.text
 	if s.exporting > 0 {
 		s.resultText += " · " + s.exportText
+	}
+	s.appendRoundError()
+}
+
+// appendRoundError 把当前轮的导出失败挂在结果文案后面，避免被后续状态覆盖后
+// 用户不知道哪一轮没写出产物。
+func (s *state) appendRoundError() {
+	if s.roundIndex < 0 || s.roundIndex >= len(s.rounds) {
+		return
+	}
+	if round := s.rounds[s.roundIndex]; round.err != "" {
+		s.resultText += " · 导出失败：" + round.err
 	}
 }
 

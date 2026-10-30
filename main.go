@@ -23,9 +23,12 @@ func main() {
 	}
 	// 内核组件（proxy-provider 缓存等）也写程序目录下的 data/，不写用户主目录。
 	mihomoHome := filepath.Join(baseDir, "data", "mihomo")
-	if mkdirErr := os.MkdirAll(mihomoHome, 0o755); mkdirErr == nil {
-		constant.SetHomeDir(mihomoHome)
+	// 即使创建失败也把 home 指向这里：宁可写文件失败，也不能让内核缓存
+	// 漂移到用户主目录（spec 4.1）。
+	if mkdirErr := os.MkdirAll(mihomoHome, 0o755); mkdirErr != nil {
+		log.Printf("数据目录不可写，内核缓存将尝试写入 %s：%v", mihomoHome, mkdirErr)
 	}
+	constant.SetHomeDir(mihomoHome)
 	application, err := gui.New(gui.Options{BaseDir: baseDir, Version: version})
 	if err != nil {
 		log.Fatalf("启动失败：%v", err)

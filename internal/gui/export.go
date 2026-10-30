@@ -344,6 +344,21 @@ func (s *state) currentResults() []*speedtester.Result {
 	return output.SortResults(results, mode)
 }
 
+// freeManualExportPath 从 seq 起找一个还没被占用的配置产物路径。序号来自
+// 结果图目录时可能和已有 yaml 撞号，这里按文件是否存在再往后让。
+func (s *state) freeManualExportPath(nameBase string, now time.Time, seq int) string {
+	for attempt := 0; attempt < 1000; attempt++ {
+		candidate := s.roundExportPath(nameBase, now, seq+attempt)
+		if candidate == "" {
+			candidate = filepath.Join(s.baseDir, output.AutoExportPath(nameBase, now, seq+attempt))
+		}
+		if _, err := os.Stat(candidate); err != nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
 // startManualExport 启动一次手动导出（配置 / 结果图 / 结果表）。
 func (s *state) startManualExport(kind manualExportKind) {
 	if s.exporting > 0 {
@@ -380,10 +395,7 @@ func (s *state) startManualExport(kind manualExportKind) {
 
 	switch kind {
 	case manualYAML:
-		path := s.roundExportPath(nameBase, now, seq)
-		if path == "" {
-			path = filepath.Join(s.baseDir, output.AutoExportPath(nameBase, now, seq))
-		}
+		path := s.freeManualExportPath(nameBase, now, seq)
 		go func() {
 			filter := testFilter(testConfigFromSettings(settings))
 			proxies := buildProxies(results, filter, settings.RenameEnabled, settings.RenameTemplate)
