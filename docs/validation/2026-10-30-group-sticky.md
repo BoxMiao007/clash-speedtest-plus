@@ -2,7 +2,7 @@
 
 - 环境：Windows 11（amd64）、AMD Ryzen 7 4800H、Go 1.27.3（模块指令 1.26）
 - 关联：[ADR-0023](../adr/0023-group-collapse-sticky.md)、[规格 0001](../specs/0001-viva-gui.md)
-- 前一轮：[单测固定、折叠窄栏与徽标对齐](2026-10-30-pin-rail-badge.md)
+- 前一轮：[单测固定、折叠窄栏与徽标对齐](2026-10-30-pin-rail-badge.md)。后续：[审查修复](2026-10-30-audit-fixes.md)。
 
 ## 1. 范围
 
