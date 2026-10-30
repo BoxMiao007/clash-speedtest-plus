@@ -267,24 +267,33 @@ func (s *state) refreshModeFlags() {
 func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 	row := f.Row().Height(40).FillWidth().PadX(8).Gap(8).Items(flex.Center).
 		Radius(a.theme.Metrics.RadiusItem()).
-		HoverBackground(a.theme.Muted).
 		Hit(node.ids.row, node.rowLabel)
 	// 手动单测的节点用主题色浅浅标出，并在结果到达后保持原位（不参与重排）。
 	pinned := node == a.pinNode
 	active := node == a.activeNode
+	// 悬停只在当前底色上加深一点：不要用固定的灰底覆盖选中态，否则鼠标
+	// 一指过去，蓝色选中效果就像消失了一样。
+	hover := a.theme.Muted
 	switch {
 	case pinned:
 		tint := a.theme.Primary
 		tint.Alpha *= 0.20
 		row = row.Background(tint)
+		hover = a.theme.Primary
+		hover.Alpha *= 0.28
 	case active:
 		// 单击或右键的那一行：主题色淡底 + 主题色节点名，位置一眼可见。
 		tint := a.theme.Primary
 		tint.Alpha *= 0.14
 		row = row.Background(tint)
+		hover = a.theme.Primary
+		hover.Alpha *= 0.22
 	case node.selected || node.phase == phaseTesting:
 		row = row.Background(a.theme.Muted)
+		hover = a.theme.MutedForeground
+		hover.Alpha *= 0.10
 	}
+	row = row.HoverBackground(hover)
 	row.Children(func() {
 		check := f.Checkbox(node.ids.check, node.selected).
 			Label(node.checkLabel)
