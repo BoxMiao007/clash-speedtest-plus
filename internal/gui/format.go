@@ -96,9 +96,17 @@ func clipboardText(n *nodeState) string {
 		lines = append(lines,
 			"上次测速："+n.result.TestedAt.Local().Format("2006-01-02 15:04:05"),
 			"延迟："+n.latencyText,
+			"抖动："+n.jitterText,
 			"丢包："+n.lossText,
 			"下载速度："+n.speedText,
+			"上传速度："+n.uploadText,
 		)
+		if n.result.DownloadError != "" {
+			lines = append(lines, "下载错误："+n.result.DownloadError)
+		}
+		if n.result.UploadError != "" {
+			lines = append(lines, "上传错误："+n.result.UploadError)
+		}
 	} else {
 		lines = append(lines, "上次测速：未测试")
 	}

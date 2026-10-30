@@ -61,6 +61,12 @@ cat > "$tmp/data/entries.json" <<'JSON'
 {"version":1,"entries":[{"id":"e1","name":"机场 A","path":"a.yaml"}]}
 JSON
 
+# 预置输出模式「当前目录下」：测完自动写配置与结果图（结果图在这条走查里关掉，
+# 只验配置导出，免得字体渲染受环境影响）。版本 1 的字段缺失由加载时补默认值。
+cat > "$tmp/data/settings.json" <<'JSON'
+{"version":1,"settings":{"output_mode":"auto","image_enabled":false,"rename_enabled":false,"max_latency_ms":0,"max_packet_loss":-1,"min_download_mbps":0,"min_upload_mbps":0}}
+JSON
+
 log="$tmp/walkthrough.log"
 if command -v cygpath >/dev/null 2>&1; then
   dialog_tmp=$(cygpath -w "$tmp")
@@ -71,6 +77,14 @@ fi
   echo 'size'
   echo 'texts'
   echo 'hits'
+  echo 'click "设置"'
+  echo 'texts'
+  echo 'click "下载大小（MB）"'
+  echo 'select 0 4096'
+  echo 'type 30'
+  echo 'click "保存设置"'
+  echo 'texts'
+  echo 'click "节点选择"'
   echo 'click "选择节点 机场 A / HK-02"'
   echo 'click "选择节点 机场 A / JP-01"'
   echo 'rightclick "节点 机场 A / HK-01"'
@@ -79,6 +93,7 @@ fi
   echo 'clip'
   echo 'click "下载速度"'
   echo 'waitfor "已完成 1/1" 30000'
+  echo 'waitfor "已导出" 30000'
   echo 'texts'
   echo 'click "返回选择"'
   echo 'click "过滤表达式"'
@@ -122,6 +137,8 @@ expect '失败'
 expect 'label="节点 机场 A / HK-01"'
 expect '只看HK'
 expect '机场 B'
+expect '测速与输出设置'
+expect '已导出'
 expect 'ok 0 problems'
 expect 'error no control labelled "节点 机场 A / JP-01"'
 
@@ -139,6 +156,16 @@ if [[ $fail -ne 0 ]]; then
 fi
 
 echo "== 持久化断言 =="
+grep -Fq '"output_mode": "auto"' "$tmp/data/settings.json" || { echo "FAIL：输出模式没有落盘" >&2; exit 1; }
+grep -Fq '"download_mb": 30' "$tmp/data/settings.json" || { echo "FAIL：设置页的下载大小没有落盘" >&2; exit 1; }
+export_yaml=$(ls "$tmp"/[0-9]*.机场A-导出.yaml "$tmp"/[0-9]*.a-导出.yaml 2>/dev/null | head -1 || true)
+if [[ -z "$export_yaml" ]]; then
+  echo "FAIL：没有写出导出配置" >&2
+  ls "$tmp" >&2
+  exit 1
+fi
+grep -Fq 'mixed-port: 7890' "$export_yaml" || { echo "FAIL：导出配置缺少 mixed-port" >&2; exit 1; }
+grep -Fq 'MATCH,节点选择' "$export_yaml" || { echo "FAIL：导出配置缺少 MATCH 规则" >&2; exit 1; }
 grep -Fq '"name": "机场 B"' "$tmp/data/entries.json" || { echo "FAIL：新建条目没有落盘" >&2; exit 1; }
 grep -Fq '"path": "b.yaml"' "$tmp/data/entries.json" || { echo "FAIL：程序目录内路径没有存成软路径" >&2; exit 1; }
 grep -Fq '"name": "只看HK"' "$tmp/data/presets.json" || { echo "FAIL：预设没有落盘" >&2; exit 1; }

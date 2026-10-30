@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,12 +23,13 @@ import (
 
 type nodeResult = store.NodeResult
 
-// viewKind 是主内容区的两种视图；下载速度按钮会切到 viewResults。
+// viewKind 是主内容区的三种视图。
 type viewKind uint8
 
 const (
 	viewNodes viewKind = iota
 	viewResults
+	viewSettings
 )
 
 type nodePhase uint8
@@ -124,6 +127,42 @@ type state struct {
 	pending     []runEvent
 	invalidator *app.Invalidator
 	closed      bool
+
+	// settings 是窗口内可调的全部选项（测速参数、阈值、输出、上传）。
+	// 启动时从 settings.json 读取，保存设置视图时整体写回。
+	settings store.Settings
+
+	// 结果视图的排序与详情。排序只在状态变化时做，Paint 只读字段。
+	sortKey    sortKey
+	sortAsc    bool
+	detailKey  string
+	detailNode *nodeState
+	detailText string
+
+	// 预计算的表头与按钮文案：排序箭头、暂停/继续、上传列是否显示。
+	showUpload    bool
+	pauseLabel    string
+	headerLatency string
+	headerJitter  string
+	headerLoss    string
+	headerSpeed   string
+	headerUpload  string
+	headerTested  string
+
+	// 轮次：每个选中条目一轮，按条目顺序自动推进；全部正常完成后写合并导出。
+	rounds       []*roundState
+	roundIndex   int
+	autoAdvance  bool
+	paused       bool
+	earlyStopped bool
+
+	// 导出：后台任务只写 pending 事件，窗口线程更新状态。
+	exporting   bool
+	exportRound int
+	exportText  string
+	exportSeq   int
+
+	settingsForm settingsForm
 }
 
 type entryState struct {
@@ -133,6 +172,7 @@ type entryState struct {
 	loaded     bool
 	loadErr    string
 	missing    bool
+	fetching   bool
 	nodes      []*nodeState
 	group      *groupState
 	checkLabel string
@@ -140,6 +180,8 @@ type entryState struct {
 	pathText   string
 	absText    string
 	statusText string
+	readLabel  string
+	fetchLabel string
 }
 
 type groupState struct {
@@ -193,8 +235,10 @@ type nodeState struct {
 	infoText     string
 	summaryText  string
 	latencyText  string
+	jitterText   string
 	lossText     string
 	speedText    string
+	uploadText   string
 	statusText   string
 	clipText     string
 }
@@ -202,7 +246,9 @@ type nodeState struct {
 type entryForm struct {
 	editing  bool
 	id       string
+	kind     int // 0 = 本地文件，1 = 订阅地址
 	name     flex.Field
+	url      flex.Field
 	path     string
 	pathText string
 	err      string
@@ -250,13 +296,19 @@ type Handlers struct {
 	Start    func(key, proxyType string)
 	Progress func(speedtester.Progress)
 	Result   func(*speedtester.Result)
-	Finished func(error)
+	// EarlyStop 在过筛结果达到提前结束限额时由引擎调用；随后本轮不再派发新节点。
+	EarlyStop func()
+	Finished  func(error)
 }
 
 // Runner 是 GUI 与测速引擎之间的窄接口；生产实现包 internal/speedtester，
 // 测试注入假实现，避免测试联网。
 type Runner interface {
+	// Configure 在每次开测前把当前参数交给引擎；实现必须自己拷贝一份。
+	Configure(config TestConfig)
 	Run(ctx context.Context, batch []RunNode, handlers Handlers) error
+	Pause()
+	Resume()
 	Stop()
 }
 
@@ -267,6 +319,12 @@ const (
 	eventProgress
 	eventResult
 	eventFinished
+	// eventEarlyStop 是引擎达到提前结束限额、停止派发新节点。
+	eventEarlyStop
+	// eventExported 是某一轮的导出任务结束（yaml/图片/上传都算在里面）。
+	eventExported
+	// eventFetched 是订阅拉取结束，body 是规范化后的配置正文。
+	eventFetched
 )
 
 type runEvent struct {
@@ -275,18 +333,52 @@ type runEvent struct {
 	progress speedtester.Progress
 	result   *speedtester.Result
 	err      error
+	round    int
+	path     string
+	warning  string
+	body     []byte
+	proxies  []map[string]any
 }
 
 type runState struct {
 	running bool
 	stopped bool
+	paused  bool
 	total   int
 	done    int
 	active  int
+	round   int
 	batch   []*nodeState
 	cancel  context.CancelFunc
 	text    string
 }
+
+// roundState 是一轮测速：对应一个选中条目，独立测速、独立导出；
+// 全部轮正常完成后额外写一份「合并导出」。
+type roundState struct {
+	entry    *entryState
+	nodes    []*nodeState
+	done     bool
+	stopped  bool
+	early    bool
+	exported bool
+	err      string
+	// proxies 是本轮导出后过筛的节点，供最后的「合并导出」求并集。
+	proxies []map[string]any
+}
+
+// sortKey 是结果视图可排序的列。默认：fast 模式按延迟升序，其余按下载速度降序。
+type sortKey uint8
+
+const (
+	sortBySpeed sortKey = iota
+	sortByLatency
+	sortByJitter
+	sortByLoss
+	sortByUpload
+	sortByTested
+	sortByName
+)
 
 func newState(opts Options) (*state, error) {
 	baseDir, err := filepath.Abs(opts.BaseDir)
@@ -337,7 +429,8 @@ func newState(opts Options) (*state, error) {
 		value.dataText = "数据目录不可用 · " + dataDir
 	} else {
 		value.store = database
-		settings := database.Settings()
+		value.settings = database.Settings()
+		settings := value.settings
 		value.filterMode = filter.Mode(settings.FilterMode)
 		value.filterCombine = filter.Combine(settings.FilterCombine)
 		value.filterField.SetText(settings.FilterExpression)
@@ -352,6 +445,14 @@ func newState(opts Options) (*state, error) {
 			value.filterCombine = filter.CombineAnd
 		}
 	}
+	if value.store == nil {
+		value.settings = store.DefaultSettings()
+	}
+	value.settings = value.settings.Normalize()
+	value.settingsForm.load(value.settings)
+	value.resetSort()
+	value.refreshSortHeaders()
+	value.refreshModeFlags()
 
 	normalized := filter.Normalize(filter.Spec{Mode: value.filterMode, Combine: value.filterCombine})
 	value.filterMode, value.filterCombine = normalized.Mode, normalized.Combine
@@ -409,17 +510,41 @@ func (s *state) reloadEntries() {
 		s.entries = append(s.entries, entry)
 	}
 	for _, entry := range s.entries {
-		s.readEntry(entry)
+		s.readEntryInitial(entry)
 	}
 	if len(s.entries) > 0 {
-		s.status = fmt.Sprintf("已加载 %d 个测试文件", len(s.entries))
+		s.status = fmt.Sprintf("已加载 %d 个条目", len(s.entries))
 	} else if s.storeErr == "" {
-		s.status = "还没有测试文件条目，先新建一个"
+		s.status = "还没有节点来源条目，先新建一个"
 	}
 }
 
 func (s *state) decorateEntry(entry *entryState) {
 	entry.checkLabel = "选择条目 " + entry.entry.Name
+	entry.readLabel, entry.fetchLabel = "读取", "重新获取"
+	if entry.entry.IsSubscription() {
+		entry.readLabel, entry.fetchLabel = "读取缓存", "重新获取"
+		entry.pathText = "订阅 · " + entry.entry.URL
+		entry.absText = ""
+		entry.missing = false
+		if path, err := s.subscriptionPath(entry); err == nil {
+			entry.absText = "缓存 · " + path
+			if _, statErr := os.Stat(path); statErr != nil {
+				entry.statusText = "尚未拉取订阅"
+				return
+			}
+		} else {
+			entry.absText = "（数据目录不可用，无法缓存订阅）"
+			entry.statusText = "数据目录不可用"
+			return
+		}
+		if entry.loaded {
+			entry.statusText = fmt.Sprintf("已读取 %d 个节点", len(entry.nodes))
+		} else {
+			entry.statusText = "缓存就绪"
+		}
+		return
+	}
 	entry.pathText = formatPathKind(entry.entry.Path)
 	absolute, _ := s.resolvePath(entry.entry.Path)
 	entry.absText = absolute
@@ -457,10 +582,37 @@ func (s *state) storePath(absolute string) string {
 	return filepath.Clean(absolute)
 }
 
-// readEntry 读取一个条目文件，并把节点列表与已有状态按稳定身份合并：
-// 身份匹配的节点保留勾选与测试结果，新节点默认勾选，消失的节点移除。
+// readEntryInitial 是启动时的读取：订阅条目只用缓存，不联网。这样打开窗口
+// 不会因为订阅多而卡在网络请求上；要拉新内容点「重新获取」。
+func (s *state) readEntryInitial(entry *entryState) {
+	if !entry.entry.IsSubscription() {
+		s.readEntry(entry)
+		return
+	}
+	path, err := s.subscriptionPath(entry)
+	if err != nil {
+		entry.loadErr = err.Error()
+		return
+	}
+	proxies, err := speedtester.LoadNodesFile(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			entry.loadErr = err.Error()
+		}
+		return
+	}
+	s.applyNodes(entry, proxies)
+}
+
+// readEntry 读取一个条目：本地文件直接解析；订阅条目优先用缓存，没有缓存
+// 时异步拉取。节点列表与已有状态按稳定身份合并：身份匹配的节点保留勾选与
+// 测试结果，新节点默认勾选，消失的节点移除。
 func (s *state) readEntry(entry *entryState) {
 	if s.running() {
+		return
+	}
+	if entry.entry.IsSubscription() {
+		s.readSubscription(entry, false)
 		return
 	}
 	if entry.entry.Path == "" {
@@ -483,7 +635,11 @@ func (s *state) readEntry(entry *entryState) {
 		s.rebuild()
 		return
 	}
+	s.applyNodes(entry, proxies)
+}
 
+// applyNodes 把刚解析出的节点并入条目：按稳定身份保留勾选与上次结果。
+func (s *state) applyNodes(entry *entryState, proxies []*speedtester.CProxy) {
 	previous := make(map[string]*nodeState, len(entry.nodes))
 	for _, node := range entry.nodes {
 		previous[node.id] = node
@@ -533,6 +689,65 @@ func (s *state) readEntry(entry *entryState) {
 	s.rebuild()
 }
 
+// readSubscription 读取订阅条目。force 为真时无条件重新拉取；否则有缓存
+// 直接解析缓存，没有缓存才异步拉取（应用启动、勾选条目都不会阻塞在网络）。
+func (s *state) readSubscription(entry *entryState, force bool) {
+	if entry.entry.URL == "" {
+		entry.loadErr = "未设置订阅地址"
+		entry.statusText = "未设置订阅地址"
+		s.rebuild()
+		return
+	}
+	if entry.fetching {
+		entry.statusText = "正在拉取订阅…"
+		s.rebuild()
+		return
+	}
+	path, err := s.subscriptionPath(entry)
+	if err != nil {
+		entry.loadErr = err.Error()
+		entry.statusText = "数据目录不可用，无法缓存订阅"
+		s.rebuild()
+		return
+	}
+	if !force {
+		if proxies, err := speedtester.LoadNodesFile(path); err == nil {
+			s.applyNodes(entry, proxies)
+			entry.statusText = fmt.Sprintf("已读取 %d 个节点（缓存）", len(proxies))
+			return
+		} else if !errors.Is(err, os.ErrNotExist) {
+			entry.loadErr = err.Error()
+			entry.statusText = "订阅缓存无法解析：" + err.Error()
+			s.rebuild()
+			return
+		}
+	}
+	s.startSubscriptionFetch(entry)
+}
+
+func (s *state) subscriptionPath(entry *entryState) (string, error) {
+	if s.store == nil {
+		return "", errNoStore
+	}
+	return s.store.SubscriptionPath(entry.entry.ID)
+}
+
+// startSubscriptionFetch 在后台拉取订阅，完成后通过 pending 事件回到窗口
+// 线程写缓存、解析节点。网络请求不在绘制或布局路径上。
+func (s *state) startSubscriptionFetch(entry *entryState) {
+	entry.fetching = true
+	entry.loadErr = ""
+	entry.statusText = "正在拉取订阅…"
+	s.rebuild()
+	userAgent := s.settings.UserAgent
+	target := entry.entry.URL
+	entryID := entry.entry.ID
+	go func() {
+		body, used, err := speedtester.FetchSubscriptionBody(target, userAgent)
+		s.enqueue(runEvent{kind: eventFetched, key: entryID, body: body, path: used, err: err})
+	}()
+}
+
 func configString(proxy *speedtester.CProxy, key string) string {
 	if proxy == nil || proxy.Config == nil {
 		return ""
@@ -571,16 +786,16 @@ func (s *state) setFilterCombine(combine filter.Combine) {
 }
 
 func (s *state) persistSettings() {
+	settings := s.settings
+	settings.FilterMode = string(s.filterMode)
+	settings.FilterExpression = s.filterField.Text()
+	settings.FilterCombine = string(s.filterCombine)
+	s.settings = settings
 	if s.store == nil {
 		s.status = "数据目录不可用，过滤设置未保存"
 		return
 	}
-	err := s.store.SetSettings(store.Settings{
-		FilterMode:       string(s.filterMode),
-		FilterExpression: s.filterField.Text(),
-		FilterCombine:    string(s.filterCombine),
-	})
-	if err != nil {
+	if err := s.store.SetSettings(settings); err != nil {
 		s.status = "保存过滤设置失败：" + err.Error()
 	}
 }
@@ -687,6 +902,18 @@ func (s *state) clampResultOffset() {
 }
 
 func entryStatusText(entry *entryState) string {
+	if entry.entry.IsSubscription() {
+		if entry.fetching {
+			return "正在拉取订阅…"
+		}
+		if entry.loadErr != "" {
+			return "订阅读取失败：" + entry.loadErr
+		}
+		if entry.loaded {
+			return fmt.Sprintf("已读取 %d 个节点", len(entry.nodes))
+		}
+		return "尚未拉取订阅"
+	}
 	if entry.loadErr != "" {
 		if entry.missing {
 			return "文件不存在或已移动"
@@ -699,33 +926,34 @@ func entryStatusText(entry *entryState) string {
 	return "未读取"
 }
 
-// rebuildResults 生成下载速度视图的行：当前批次 + 历史结果，按有效下载速度
-// 降序；测速中的行用瞬时速度参与排序。排序只在状态变化时做，不在 Paint 里做。
+// resetSort 把排序恢复成当前模式的默认：fast 按延迟升序，其余按下载速度降序。
+func (s *state) resetSort() {
+	if s.settings.Mode == "fast" {
+		s.sortKey, s.sortAsc = sortByLatency, true
+		return
+	}
+	s.sortKey, s.sortAsc = sortBySpeed, false
+}
+
+// rebuildResults 生成下载速度视图的行。有轮次时只看当前轮：本轮已测结果
+// 与在测/排队节点；没有轮次时退回全部历史结果。排序只在状态变化时做，
+// Paint 只读字段。
 func (s *state) rebuildResults() {
 	rows := s.results[:0]
-	batch := make(map[string]bool)
-	if s.run != nil {
-		for _, node := range s.run.batch {
-			batch[node.key] = true
+	if len(s.rounds) > 0 && s.roundIndex >= 0 && s.roundIndex < len(s.rounds) {
+		for _, node := range s.rounds[s.roundIndex].nodes {
+			if node.hasResult || node.phase == phaseTesting || node.phase == phaseQueued {
+				rows = append(rows, node)
+			}
+		}
+	} else {
+		for _, node := range s.nodes {
+			if node.hasResult {
+				rows = append(rows, node)
+			}
 		}
 	}
-	for _, node := range s.nodes {
-		if node.hasResult || batch[node.key] || node.phase == phaseTesting || node.phase == phaseQueued {
-			rows = append(rows, node)
-		}
-	}
-	sort.Slice(rows, func(left, right int) bool {
-		a, b := rows[left], rows[right]
-		speedA, speedB := s.effectiveSpeed(a), s.effectiveSpeed(b)
-		if speedA != speedB {
-			return speedA > speedB
-		}
-		rankA, rankB := phaseRank(a.phase), phaseRank(b.phase)
-		if rankA != rankB {
-			return rankA > rankB
-		}
-		return a.key < b.key
-	})
+	s.sortRows(rows)
 	s.results = rows
 	items := s.resultItems[:0]
 	y := float32(8)
@@ -740,6 +968,66 @@ func (s *state) rebuildResults() {
 	s.resultContent = y
 	s.clampResultOffset()
 	s.refreshRunText()
+}
+
+// sortRows 按当前排序列排序；主列相等时在测行排前、再按稳定身份，保证
+// 同一帧内顺序确定、行身份不随重排丢失。
+func (s *state) sortRows(rows []*nodeState) {
+	sort.SliceStable(rows, func(left, right int) bool {
+		a, b := rows[left], rows[right]
+		if cmp := s.compareRows(a, b); cmp != 0 {
+			if s.sortAsc {
+				return cmp < 0
+			}
+			return cmp > 0
+		}
+		rankA, rankB := phaseRank(a.phase), phaseRank(b.phase)
+		if rankA != rankB {
+			return rankA > rankB
+		}
+		return a.key < b.key
+	})
+}
+
+// compareRows 比较两行的排序列，返回 -1/0/1。未测到的值统一当作最差
+// （延迟、抖动取无穷大，速度与丢包按 0 参与比较）。
+func (s *state) compareRows(a, b *nodeState) int {
+	switch s.sortKey {
+	case sortByLatency:
+		return compareFloat(latencySortValue(a), latencySortValue(b))
+	case sortByJitter:
+		return compareFloat(latencySortValue2(a.result.JitterMS), latencySortValue2(b.result.JitterMS))
+	case sortByLoss:
+		return compareFloat(a.result.PacketLoss, b.result.PacketLoss)
+	case sortByUpload:
+		return compareFloat(a.result.UploadBps, b.result.UploadBps)
+	case sortByTested:
+		return compareFloat(float64(a.result.TestedAt.Unix()), float64(b.result.TestedAt.Unix()))
+	case sortByName:
+		return strings.Compare(a.name, b.name)
+	default:
+		return compareFloat(s.effectiveSpeed(a), s.effectiveSpeed(b))
+	}
+}
+
+func latencySortValue(node *nodeState) float64 { return latencySortValue2(node.result.LatencyMS) }
+
+func latencySortValue2(milliseconds float64) float64 {
+	if milliseconds <= 0 {
+		return math.MaxFloat64
+	}
+	return milliseconds
+}
+
+func compareFloat(left, right float64) int {
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func (s *state) effectiveSpeed(node *nodeState) float64 {
@@ -769,18 +1057,41 @@ func phaseRank(phase nodePhase) int {
 }
 
 func (s *state) refreshRunText() {
-	if s.run == nil {
-		s.resultText = fmt.Sprintf("共 %d 条结果", len(s.results))
+	roundPrefix := ""
+	if len(s.rounds) > 0 {
+		roundPrefix = fmt.Sprintf("第 %d/%d 轮 · ", s.roundIndex+1, len(s.rounds))
+	}
+	if s.run == nil || !s.run.running {
+		switch {
+		case s.run != nil && s.run.total > 0:
+			s.resultText = fmt.Sprintf("%s已完成 %d/%d", roundPrefix, s.run.done, s.run.total)
+		case len(s.results) > 0:
+			s.resultText = fmt.Sprintf("%s共 %d 条结果", roundPrefix, len(s.results))
+		default:
+			s.resultText = roundPrefix + "还没有结果"
+		}
+		if len(s.rounds) > 0 && s.roundIndex < len(s.rounds) {
+			round := s.rounds[s.roundIndex]
+			if round.done {
+				s.resultText += " · 本轮完成"
+				if round.early {
+					s.resultText += "（提前结束）"
+				}
+			}
+		}
+		if s.exporting {
+			s.resultText += " · " + s.exportText
+		}
 		return
 	}
-	if s.run.running {
-		s.run.text = fmt.Sprintf("已完成 %d/%d · 在测 %d", s.run.done, s.run.total, s.run.active)
-	} else if s.run.stopped {
-		s.run.text = fmt.Sprintf("已停止 · 完成 %d/%d", s.run.done, s.run.total)
-	} else {
-		s.run.text = fmt.Sprintf("已完成 %d/%d", s.run.done, s.run.total)
+	s.run.text = fmt.Sprintf("%s已完成 %d/%d · 在测 %d", roundPrefix, s.run.done, s.run.total, s.run.active)
+	if s.paused {
+		s.run.text += " · 已暂停"
 	}
 	s.resultText = s.run.text
+	if s.exporting {
+		s.resultText += " · " + s.exportText
+	}
 }
 
 func (s *state) running() bool { return s.run != nil && s.run.running }
@@ -795,8 +1106,10 @@ func (s *state) refreshNodeDisplay(node *nodeState) {
 		node.subtitle = node.serverText + " · " + node.typ
 	}
 	node.lastTestText = formatTested(node.result.TestedAt)
-	node.latencyText = formatLatency(time.Duration(node.result.LatencyMS * float64(time.Millisecond)))
+	node.latencyText = formatLatency(durationMillis(node.result.LatencyMS))
+	node.jitterText = formatLatency(durationMillis(node.result.JitterMS))
 	node.lossText = formatLoss(node.result.PacketLoss)
+	node.uploadText = formatSpeed(node.result.UploadBps)
 	node.summaryText = ""
 	switch {
 	case node.phase == phaseTesting:

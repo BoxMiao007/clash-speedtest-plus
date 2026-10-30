@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/metacubex/mihomo v1.19.31
 	github.com/vivaui/viva v0.2.0
+	golang.org/x/image v0.30.0
 	gopkg.in/yaml.v2 v2.4.0
 )
 

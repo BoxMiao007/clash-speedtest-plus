@@ -29,12 +29,23 @@ func (a *App) paintEntryDialog(f *flex.Frame) {
 	dialog.Body(func() {
 		f.Column().Gap(10).Children(func() {
 			f.Field(&a.entryForm.name, a.ids.entryName, "名称", "例如：机场 A")
-			f.Row().Gap(8).Items(flex.Center).Children(func() {
-				f.Text(a.entryForm.pathText).FontSize(12).Muted().Ellipsis().Grow(1)
-				if f.Button(a.ids.entryChoose, "选择文件…").Small().Outline().Clicked() {
-					f.Canvas().AfterPaint(func() { a.chooseEntryPath() })
+			f.Row().Gap(10).Items(flex.Center).Children(func() {
+				f.Text("类型").FontSize(12).Muted().Width(48)
+				if index, ok := f.Choice(a.ids.entryKind, entryKindLabels, a.entryForm.kind).ChosenIndex(); ok {
+					a.entryForm.kind = index
 				}
 			})
+			if a.entryForm.kind == 1 {
+				f.Field(&a.entryForm.url, a.ids.entryURL, "订阅链接", "https://example.com/subscribe")
+				f.Text("支持 Clash/Mihomo 配置、整段 base64 与需要补 flag=meta 的订阅。").FontSize(11).Muted()
+			} else {
+				f.Row().Gap(8).Items(flex.Center).Children(func() {
+					f.Text(a.entryForm.pathText).FontSize(12).Muted().Ellipsis().Grow(1)
+					if f.Button(a.ids.entryChoose, "选择文件…").Small().Outline().Clicked() {
+						f.Canvas().AfterPaint(func() { a.chooseEntryPath() })
+					}
+				})
+			}
 			if a.entryForm.err != "" {
 				f.Text(a.entryForm.err).FontSize(12).Color(a.theme.Danger)
 			}

@@ -25,6 +25,7 @@ type fakeRunner struct {
 	results map[string]fakeResult
 	batch   []RunNode
 	stopped bool
+	config  TestConfig
 }
 
 type fakeResult struct {
@@ -70,6 +71,10 @@ func (runner *fakeRunner) Run(ctx context.Context, batch []RunNode, handlers Han
 				Latency:       result.latency,
 				DownloadSpeed: result.speed,
 			}
+			if node.Proxy != nil {
+				value.ProxyType = node.Proxy.Type().String()
+				value.ProxyConfig = node.Proxy.Config
+			}
 			if !result.ok {
 				value.DownloadError = "connection refused"
 			}
@@ -83,6 +88,21 @@ func (runner *fakeRunner) Stop() {
 	runner.mu.Lock()
 	runner.stopped = true
 	runner.mu.Unlock()
+}
+
+func (runner *fakeRunner) Configure(config TestConfig) {
+	runner.mu.Lock()
+	runner.config = config
+	runner.mu.Unlock()
+}
+
+func (runner *fakeRunner) Pause()  {}
+func (runner *fakeRunner) Resume() {}
+
+func (runner *fakeRunner) lastConfig() TestConfig {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return runner.config
 }
 
 func (runner *fakeRunner) lastBatch() []RunNode {
@@ -722,6 +742,11 @@ func (runner *stagedRunner) Run(ctx context.Context, batch []RunNode, handlers H
 }
 
 func (runner *stagedRunner) Stop() {}
+
+func (runner *stagedRunner) Configure(TestConfig) {}
+
+func (runner *stagedRunner) Pause()  {}
+func (runner *stagedRunner) Resume() {}
 
 // 结果陆续产生时下载速度视图应实时重排，且同一节点的行身份不变。
 func TestLiveSortDuringRunKeepsRowIdentity(t *testing.T) {

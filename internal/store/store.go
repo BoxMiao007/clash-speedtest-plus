@@ -18,7 +18,9 @@ import (
 
 // currentVersion 是数据文件格式版本。加载到更高版本时拒绝启动持久化，
 // 避免旧程序改写新格式数据后丢字段。
-const currentVersion = 1
+// 版本 2 起：条目增加 Kind/URL（订阅条目），设置增加测速/输出/上传字段。
+// 版本 1 的文件按字段缺失读取，再由 Settings.Normalize 补齐默认值。
+const currentVersion = 2
 
 const (
 	settingsFileName = "settings.json"
@@ -30,12 +32,31 @@ const (
 	dirMode  = 0o755
 )
 
-// Entry 是一个测试文件条目。
+// 条目种类。Kind 为空按本地文件处理：版本 1 的数据没有这个字段。
+const (
+	EntryKindLocal        = "local"
+	EntryKindSubscription = "subscription"
+)
+
+// Entry 是一个节点来源条目：本地配置文件或 http(s) 订阅地址。
 type Entry struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
-	Path string `json:"path"` // 软路径：相对程序目录、/ 分隔；硬路径：绝对路径
+	Kind string `json:"kind,omitempty"` // 空 = 本地文件（版本 1 兼容）
+	Path string `json:"path,omitempty"` // 本地：软路径（相对程序目录、/ 分隔）或硬路径（绝对）
+	URL  string `json:"url,omitempty"`  // 订阅：http(s) 地址
 }
+
+// EffectiveKind 把空 Kind 归一成本地文件。
+func (e Entry) EffectiveKind() string {
+	if e.Kind == EntryKindSubscription {
+		return EntryKindSubscription
+	}
+	return EntryKindLocal
+}
+
+// IsSubscription 报告条目是否来自订阅地址。
+func (e Entry) IsSubscription() bool { return e.EffectiveKind() == EntryKindSubscription }
 
 // Preset 是一个过滤预设，跨条目通用。
 type Preset struct {
@@ -58,11 +79,149 @@ type NodeResult struct {
 	OK            bool      `json:"ok"`
 }
 
-// Settings 是过滤条的持久化状态。
+// 输出模式（见 GLOSSARY.md「输出模式」）：关闭 / 当前目录下自动命名 / 自定义词干。
+const (
+	OutputModeOff    = "off"
+	OutputModeAuto   = "auto"
+	OutputModeCustom = "custom"
+)
+
+// 测速默认值，与旧 TUI 的 flag 默认值保持一致（ADR-0001、ADR-0017）。
+const (
+	DefaultMode            = "download"
+	DefaultDownloadMB      = 50
+	DefaultUploadMB        = 20
+	DefaultTimeoutMS       = 5000
+	DefaultConcurrent      = 4
+	DefaultParallel        = 6
+	DefaultServerURL       = "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg"
+	DefaultMaxLatencyMS    = 1000
+	DefaultMaxPacketLoss   = 100
+	DefaultMinDownloadMBps = 5
+	DefaultMinUploadMBps   = 2
+)
+
+// Settings 是窗口内可调的全部选项：过滤条、测速参数、阈值、输出与上传。
+// 零值经 Normalize 补齐成旧 TUI 的默认值，因此版本 1 的设置文件可以原样读取。
 type Settings struct {
 	FilterMode       string `json:"filter_mode"`
 	FilterExpression string `json:"filter_expression"`
 	FilterCombine    string `json:"filter_combine"`
+
+	Mode       string `json:"mode"`        // fast | download | full
+	DownloadMB int    `json:"download_mb"` // 下载测试大小
+	UploadMB   int    `json:"upload_mb"`   // 上传测试大小（仅 full）
+	TimeoutMS  int    `json:"timeout_ms"`  // 单个请求超时
+	Concurrent int    `json:"concurrent"`  // 同一节点的下载并发连接数
+	Parallel   int    `json:"parallel"`    // 同时测试的节点数
+	ServerURL  string `json:"server_url"`
+	UserAgent  string `json:"user_agent"` // 空 = 内核默认 UA
+	EarlyStop  int    `json:"early_stop"` // 过筛结果达到该数量后提前结束，0 = 关闭
+
+	MaxLatencyMS    int     `json:"max_latency_ms"`    // 0 = 不限制
+	MaxPacketLoss   float64 `json:"max_packet_loss"`   // 百分比；<0 = 不限制
+	MinDownloadMBps float64 `json:"min_download_mbps"` // 仅非 fast 模式生效
+	MinUploadMBps   float64 `json:"min_upload_mbps"`   // 仅 full 模式生效
+
+	OutputMode     string `json:"output_mode"` // off | auto | custom
+	OutputPath     string `json:"output_path"` // custom 模式的词干（软/硬路径）
+	ImageEnabled   bool   `json:"image_enabled"`
+	ImageSpeedOnly bool   `json:"image_speed_only"`
+	RenameEnabled  bool   `json:"rename_enabled"`
+	RenameTemplate string `json:"rename_template"` // 空 = 内置模板
+
+	GistToken    string `json:"gist_token"`
+	GistAddress  string `json:"gist_address"`
+	RepoToken    string `json:"repo_token"`
+	RepoAddress  string `json:"repo_address"`
+	RepoFilePath string `json:"repo_file_path"`
+	RepoBranch   string `json:"repo_branch"`
+}
+
+// DefaultSettings 返回旧 TUI 的默认参数组合。
+func DefaultSettings() Settings {
+	return Settings{
+		Mode:            DefaultMode,
+		DownloadMB:      DefaultDownloadMB,
+		UploadMB:        DefaultUploadMB,
+		TimeoutMS:       DefaultTimeoutMS,
+		Concurrent:      DefaultConcurrent,
+		Parallel:        DefaultParallel,
+		ServerURL:       DefaultServerURL,
+		MaxLatencyMS:    DefaultMaxLatencyMS,
+		MaxPacketLoss:   DefaultMaxPacketLoss,
+		MinDownloadMBps: DefaultMinDownloadMBps,
+		MinUploadMBps:   DefaultMinUploadMBps,
+		OutputMode:      OutputModeOff,
+		ImageEnabled:    true,
+		RenameEnabled:   true,
+	}
+}
+
+// Normalize 补齐零值字段并纠正非法值，返回可直接使用的设置。
+// 只处理数值与枚举：过滤表达式由 internal/filter 自己归一化。
+func (s Settings) Normalize() Settings {
+	defaults := DefaultSettings()
+	switch s.Mode {
+	case "fast", "download", "full":
+	default:
+		s.Mode = defaults.Mode
+	}
+	if s.DownloadMB <= 0 {
+		s.DownloadMB = defaults.DownloadMB
+	}
+	if s.UploadMB <= 0 {
+		s.UploadMB = defaults.UploadMB
+	}
+	if s.TimeoutMS <= 0 {
+		s.TimeoutMS = defaults.TimeoutMS
+	}
+	if s.Concurrent <= 0 {
+		s.Concurrent = defaults.Concurrent
+	}
+	if s.Parallel <= 0 {
+		s.Parallel = defaults.Parallel
+	}
+	if strings.TrimSpace(s.ServerURL) == "" {
+		s.ServerURL = defaults.ServerURL
+	}
+	if s.EarlyStop < 0 {
+		s.EarlyStop = 0
+	}
+	if s.MaxLatencyMS < 0 {
+		s.MaxLatencyMS = 0
+	}
+	// 丢包阈值保留 -1「不限制」语义，其余非法负数按默认值处理。
+	if s.MaxPacketLoss < 0 && s.MaxPacketLoss != -1 {
+		s.MaxPacketLoss = defaults.MaxPacketLoss
+	}
+	if s.MaxPacketLoss > 100 {
+		s.MaxPacketLoss = 100
+	}
+	if s.MinDownloadMBps < 0 {
+		s.MinDownloadMBps = 0
+	}
+	if s.MinUploadMBps < 0 {
+		s.MinUploadMBps = 0
+	}
+	switch s.OutputMode {
+	case OutputModeOff, OutputModeAuto:
+	case OutputModeCustom:
+		// 自定义词干为空等于没开输出，避免留下写不出文件的半开状态。
+		if strings.TrimSpace(s.OutputPath) == "" {
+			s.OutputMode = OutputModeOff
+		}
+	default:
+		s.OutputMode = defaults.OutputMode
+	}
+	return s
+}
+
+// UploadEnabled 报告是否配置了 Gist 或仓库上传（地址与 token 齐全）。
+func (s Settings) UploadEnabled() bool {
+	gistReady := strings.TrimSpace(s.GistToken) != "" && strings.TrimSpace(s.GistAddress) != ""
+	repoReady := strings.TrimSpace(s.RepoToken) != "" && strings.TrimSpace(s.RepoAddress) != ""
+	return gistReady || repoReady
 }
 
 // Options 是 Open 的输入。BaseDir 是程序目录（生产环境由 os.Executable 推导）；
@@ -137,11 +296,11 @@ func Open(options Options) (*Store, error) {
 		dataDir: filepath.Clean(dataDir),
 		results: map[string]map[string]NodeResult{},
 	}
-	settings, err := loadFile[settingsFile](filepath.Join(st.dataDir, settingsFileName))
+	settings, err := loadSettings(filepath.Join(st.dataDir, settingsFileName))
 	if err != nil {
 		return nil, err
 	}
-	st.settings = settings.Settings
+	st.settings = settings
 	entries, err := loadFile[entriesFile](filepath.Join(st.dataDir, entriesFileName))
 	if err != nil {
 		return nil, err
@@ -186,6 +345,36 @@ func probeWritable(dir string) error {
 		return fmt.Errorf("数据目录不可写：%w", err)
 	}
 	return nil
+}
+
+// loadSettings 读取设置文件。文件缺失时返回默认设置；文件里出现的键覆盖
+// 默认值，缺失的键（版本 1 的老文件）保留默认值。布尔开关没有「非法值」
+// 可判断，只能靠键是否存在决定默认值，所以不能解析成零值再 Normalize。
+func loadSettings(path string) (Settings, error) {
+	value := DefaultSettings()
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return value, nil
+	}
+	if err != nil {
+		return value, fmt.Errorf("读取 %s 失败：%w", filepath.Base(path), err)
+	}
+	var envelope struct {
+		Version  int             `json:"version"`
+		Settings json.RawMessage `json:"settings"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return value, fmt.Errorf("%s 不是有效的 JSON：%w", filepath.Base(path), err)
+	}
+	if envelope.Version > currentVersion {
+		return value, fmt.Errorf("%s 的版本 %d 高于支持的最高版本 %d", filepath.Base(path), envelope.Version, currentVersion)
+	}
+	if len(envelope.Settings) > 0 {
+		if err := json.Unmarshal(envelope.Settings, &value); err != nil {
+			return value, fmt.Errorf("%s 的内容无法解析：%w", filepath.Base(path), err)
+		}
+	}
+	return value.Normalize(), nil
 }
 
 // loadFile 读取并校验一个带 version 的数据文件；文件不存在时返回零值。
@@ -263,6 +452,72 @@ func (s *Store) BaseDir() string { return s.baseDir }
 // DataDir 返回数据目录的绝对路径。
 func (s *Store) DataDir() string { return s.dataDir }
 
+// subscriptionsDir 是订阅正文缓存目录，位于数据目录之下。
+const subscriptionsDir = "subscriptions"
+
+// SubscriptionPath 返回条目订阅缓存的绝对路径。ID 由 NewID 生成（16 字节 hex），
+// 这里仍做一次校验，避免带分隔符的 ID 把文件写到缓存目录之外。
+func (s *Store) SubscriptionPath(id string) (string, error) {
+	if strings.TrimSpace(id) == "" {
+		return "", errors.New("条目 ID 不能为空")
+	}
+	if id != filepath.Base(id) || id == "." || id == ".." {
+		return "", fmt.Errorf("条目 ID 不合法：%q", id)
+	}
+	return filepath.Join(s.dataDir, subscriptionsDir, id+".yaml"), nil
+}
+
+// WriteSubscription 把订阅正文原子写入缓存文件并返回绝对路径。
+// 缓存只在程序目录内，重新获取时整文件替换。
+func (s *Store) WriteSubscription(id string, body []byte) (string, error) {
+	path, err := s.SubscriptionPath(id)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, dirMode); err != nil {
+		return "", fmt.Errorf("创建订阅缓存目录失败：%w", err)
+	}
+	tmp, err := os.CreateTemp(dir, "."+id+".tmp-*")
+	if err != nil {
+		return "", fmt.Errorf("创建订阅缓存临时文件失败：%w", err)
+	}
+	tmpName := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			tmp.Close()
+			os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(body); err != nil {
+		return "", fmt.Errorf("写入订阅缓存失败：%w", err)
+	}
+	if err := tmp.Chmod(fileMode); err != nil {
+		return "", fmt.Errorf("设置订阅缓存权限失败：%w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("关闭订阅缓存临时文件失败：%w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return "", fmt.Errorf("替换订阅缓存失败：%w", err)
+	}
+	committed = true
+	return path, nil
+}
+
+// RemoveSubscription 删除条目的订阅缓存；缓存不存在视为成功。
+func (s *Store) RemoveSubscription(id string) error {
+	path, err := s.SubscriptionPath(id)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("删除订阅缓存失败：%w", err)
+	}
+	return nil
+}
+
 // Entries 返回全部条目的副本，调用方可以自由修改。
 func (s *Store) Entries() []Entry {
 	s.mu.RLock()
@@ -288,12 +543,12 @@ func (s *Store) Settings() Settings {
 	return s.settings
 }
 
-// SetSettings 覆盖过滤条设置并立即落盘。
+// SetSettings 覆盖设置并立即落盘；写入前先归一化，非法值不会进文件。
 func (s *Store) SetSettings(settings Settings) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.settings = settings
-	return s.writeFile(settingsFileName, settingsFile{Version: currentVersion, Settings: settings})
+	s.settings = settings.Normalize()
+	return s.writeFile(settingsFileName, settingsFile{Version: currentVersion, Settings: s.settings})
 }
 
 // PutEntry 按 ID 覆盖已有条目，否则追加；写入失败时返回错误，内存状态保持最新。
@@ -333,6 +588,8 @@ func (s *Store) DeleteEntry(id string) error {
 	if hasResults {
 		delete(s.results, id)
 	}
+	// 订阅缓存跟着条目走；删除失败不回滚条目，缓存残留最多占一点磁盘。
+	_ = s.RemoveSubscription(id)
 	if entryChanged {
 		if err := s.writeFile(entriesFileName, entriesFile{Version: currentVersion, Entries: s.entries}); err != nil {
 			return err

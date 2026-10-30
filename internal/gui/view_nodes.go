@@ -8,7 +8,7 @@ import (
 func (a *App) paintEntriesPanel(f *flex.Frame) {
 	f.Column().Width(320).FillHeight().Children(func() {
 		f.Row().Height(54).PadX(16).Items(flex.Center).Gap(8).Children(func() {
-			f.Text("测试文件").Bold()
+			f.Text("节点来源").Bold()
 			f.Spacer()
 			if f.Button(a.ids.newEntry, "新建条目").Small().Outline().Disabled(a.running()).Clicked() {
 				a.openEntryDialog(nil)
@@ -17,8 +17,8 @@ func (a *App) paintEntriesPanel(f *flex.Frame) {
 		f.ScrollArea(a.ids.entryScroll).Grow(1).FillWidth().PadSides(12, 12, 12, 12).Gap(10).Children(func() {
 			if len(a.entries) == 0 {
 				f.Column().Pad(10).Gap(6).Children(func() {
-					f.Text("还没有测试文件条目。").FontSize(13).Bold()
-					f.Text("点上方「新建条目」，选择一份 Clash/Mihomo 配置文件。").FontSize(12).Muted()
+					f.Text("还没有节点来源条目。").FontSize(13).Bold()
+					f.Text("点上方「新建条目」，选择本地配置文件或填订阅地址。").FontSize(12).Muted()
 				})
 				return
 			}
@@ -41,17 +41,19 @@ func (a *App) paintEntryCard(f *flex.Frame, entry *entryState) {
 			f.Text(entry.entry.Name).Bold().Ellipsis().Grow(1)
 		})
 		f.Text(entry.pathText).FontSize(11).Muted().Ellipsis()
-		f.Text(entry.absText).FontSize(11).Muted().Ellipsis()
+		if entry.absText != "" {
+			f.Text(entry.absText).FontSize(11).Muted().Ellipsis()
+		}
 		statusColor := a.theme.MutedForeground
 		if entry.loadErr != "" || entry.missing {
 			statusColor = a.theme.Danger
 		}
 		f.Text(entry.statusText).FontSize(11).Color(statusColor).Ellipsis()
 		f.Row().Gap(6).Children(func() {
-			if f.Button(entry.ids.read, "读取").XSmall().Outline().Disabled(a.running()).Clicked() {
+			if f.Button(entry.ids.read, entry.readLabel).XSmall().Outline().Disabled(a.running() || entry.fetching).Clicked() {
 				f.Canvas().AfterPaint(func() { a.readEntry(entry) })
 			}
-			if f.Button(entry.ids.refetch, "重新获取").XSmall().Outline().Disabled(a.running()).Clicked() {
+			if f.Button(entry.ids.refetch, entry.fetchLabel).XSmall().Outline().Disabled(a.running() || entry.fetching).Clicked() {
 				f.Canvas().AfterPaint(func() { a.refetchEntry(entry) })
 			}
 			if f.Button(entry.ids.edit, "编辑").XSmall().Ghost().Disabled(a.running()).Clicked() {
@@ -142,7 +144,7 @@ func (a *App) paintNodeEmpty(f *flex.Frame) {
 func (a *App) paintNoEntries(f *flex.Frame) {
 	f.Column().Grow(1).FillWidth().PadY(32).Items(flex.Center).Gap(8).Children(func() {
 		f.Text("欢迎使用订阅测速").FontSize(18).Bold()
-		f.Text("还没有测试文件条目。点左上角「新建条目」，添加一份 Clash/Mihomo 配置文件。").FontSize(12).Muted()
+		f.Text("还没有节点来源条目。点左上角「新建条目」，添加本地配置文件或订阅地址。").FontSize(12).Muted()
 	})
 }
 

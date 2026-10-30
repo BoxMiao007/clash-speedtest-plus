@@ -1,6 +1,6 @@
 # 订阅按 yaml、base64、再补 flag=meta 规范化
 
-> 状态：GUI 不再接收订阅 URL（ADR-0017）；本规范化顺序仅保留在 `internal/speedtester` 的 `NormalizeSubscription`/`LoadProxies`（含 provider 拉取）中。
+> 状态：在 GUI 中恢复（ADR-0018）：订阅条目拉取复用这套规范化顺序（`FetchSubscriptionBody`）。
 
 很多订阅打开不是 Clash/Mihomo yaml：有的是整段 base64，有的要在地址上加 `flag=meta` 才返回 yaml。这个参数是机场约定，不是协议标准，所以不总是先改地址。
 

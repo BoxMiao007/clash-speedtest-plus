@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	viewLabels    = []string{"节点选择", "下载速度"}
-	modeLabels    = []string{"简化", "正则"}
-	combineLabels = []string{"与", "或"}
+	viewLabels      = []string{"节点选择", "测速结果", "设置"}
+	modeLabels      = []string{"简化", "正则"}
+	combineLabels   = []string{"与", "或"}
+	entryKindLabels = []string{"本地文件", "订阅地址"}
 )
 
 // Options 是 GUI 的启动参数。生产代码只传程序目录与版本；测试注入临时目录
@@ -49,8 +50,11 @@ func New(opts Options) (*App, error) {
 		state:   model,
 		version: versionBadge(opts.Version),
 	}
-	// 页面的 build 回调只创建一次：每帧新建捕获变量的闭包会把分配带进绘制路径。
+	// 页面与输入框集合都只装配一次：每帧新建捕获变量的闭包或切片会把分配
+	// 带进绘制路径。
 	application.paintRoot = func(f *flex.Frame) { application.paintPage(f) }
+	inputs := []*flex.Field{&model.filterField, &model.entryForm.name, &model.entryForm.url, &model.presetForm.name}
+	inputs = append(inputs, model.settingsForm.fields()...)
 	application.config = app.Config{
 		Title:       "订阅测速",
 		Width:       1180,
@@ -62,7 +66,7 @@ func New(opts Options) (*App, error) {
 		OnWake:      model.applyPending,
 		Invalidator: &application.invalidator,
 		OnScroll:    application.onScroll,
-		TextInput:   flex.Fields(&model.filterField, &model.entryForm.name, &model.presetForm.name),
+		TextInput:   flex.Fields(inputs...),
 		OnClosed:    model.close,
 		ClearColor:  appColor(model.theme.Background),
 	}
@@ -93,6 +97,10 @@ func (a *App) onScroll(event ui.ScrollEvent) ui.EventResult {
 		if pointIn(a.resultViewport, event.X, event.Y) {
 			return scrollList(&a.resultOffset, a.resultContent, a.resultViewport.Height, event.DeltaY)
 		}
+		return a.view.Wheel(event)
+	}
+	if a.active != viewNodes {
+		// 设置视图的滚动交给 ScrollArea 自己处理。
 		return a.view.Wheel(event)
 	}
 	if pointIn(a.nodeViewport, event.X, event.Y) {
@@ -257,11 +265,14 @@ func (a *App) paintFooter(f *flex.Frame) {
 
 func (a *App) paintContent(f *flex.Frame) {
 	f.Column().Grow(1).FillHeight().Children(func() {
-		if a.active == viewResults {
+		switch a.active {
+		case viewResults:
 			a.paintResults(f)
-			return
+		case viewSettings:
+			a.paintSettings(f)
+		default:
+			a.paintNodes(f)
 		}
-		a.paintNodes(f)
 	})
 }
 

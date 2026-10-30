@@ -13,4 +13,6 @@
 
 后果：没有终端/管道模式，旧的 `-f`、`-o`、`-early-stop`、gist/仓库上传、结果表图、IP 改名等入口一并消失（见规格 11 节 Out of Scope）。Windows 发布二进制用 `-H=windowsgui`，不再有控制台窗口。数据目录不可用、文件读取失败等窗口内错误有对话框/行内提示；窗口与图形后端初始化失败时还没有界面可用，只能写 stderr/系统日志，无法在窗口内提示。macOS 的 Viva 后端依赖 cgo，发布矩阵只含 Windows/Linux（amd64、arm64），macOS 需在 Mac 上 `CGO_ENABLED=1` 从源码构建；386/arm32 不再发布。`proxy-providers` 的内核缓存通过 `constant.SetHomeDir` 重定向到 `<程序目录>/data/mihomo/`，不写用户主目录。新增依赖只有 Viva，体积/启动/空闲内存测量记录在交付说明里。
 
+> 2026-10-30 修订：本 ADR 第 1、2、5 条与「后果」里「入口一并消失」的判断已被 [ADR-0018](0018-tui-parity.md) 取代——订阅地址、测速参数、阈值、导出配置/结果图/TSV、Gist/仓库上传、IP 改名、多轮队列、暂停/继续都搬回 GUI（`internal/output`、`internal/ip`、`internal/gist` 恢复，新增 `internal/export`），视图扩展为 `节点选择` / `测速结果` / `设置`，过滤结果同时决定测速与导出范围。本 ADR 仍然有效的是「只保留 GUI、数据写程序目录、软硬路径、单窗口 Viva」这些架构结论。
+
 备选：保留 CLI 与 GUI 双入口（`gui` 与旧 `main` 并存，构建目标与依赖翻倍，且需求明确要求移除）；用 WebView（违反 Viva 无 Web 技术约束）；把数据放 `os.UserConfigDir()`（违反「目录拷贝即迁移」）。

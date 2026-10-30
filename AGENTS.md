@@ -27,11 +27,15 @@ Issues 放在本仓库的 GitHub Issues，通过 `gh` CLI 读写。详见 `docs/
 
 单模块，不是 monorepo。入口是根目录 `main.go`（Viva GUI），`download-server/` 是另一个 `package main`。
 
-- `internal/gui/`：Viva 应用与全部界面（节点选择 / 下载速度双视图、过滤条、预设、右键菜单、对话框）。`Runner` 接口是 GUI 与引擎的唯一接缝。
-- `internal/speedtester/`：测速、订阅规范化、调度、`LoadNodesFile`。
-- `internal/store/`：数据目录探测、条目/预设/结果 JSON、软硬路径互转。
+- `internal/gui/`：Viva 应用与全部界面（节点选择 / 测速结果 / 设置三视图、过滤条、预设、右键菜单、对话框）。`Runner` 接口是 GUI 与引擎的唯一接缝；`export.go` 编排每轮导出，`view_settings.go` 是设置表单。
+- `internal/speedtester/`：测速、订阅规范化与拉取（`FetchSubscriptionBody` / `ParseSubscriptionNodes`）、调度、`LoadNodesFile`。
+- `internal/store/`：数据目录探测、设置/条目/预设/结果 JSON、订阅缓存、软硬路径互转。
 - `internal/filter/`：简化关键词过滤与高级正则。
-- `docs/specs/0001-viva-gui.md`：本分支需求基线。
+- `internal/output/`：结果图渲染、导出路径与产物序号、TSV、结果表格式化。
+- `internal/export/`：导出 profile 骨架与阈值过滤（导出与提前结束共用）。
+- `internal/ip/`：IP 归属地查询与节点重命名模板。
+- `internal/gist/`：Gist / GitHub 仓库上传。
+- `docs/specs/0001-viva-gui.md`：需求基线；ADR-0017（GUI 架构）、ADR-0018（TUI 能力补齐）。
 
 界面代码遵守 Viva 规则：空闲不绘制；绘制/布局路径无反射、无 `map[string]any`、无常驻分配；命中身份一律 `ui.Tree` 的名字，行身份用节点稳定身份而非列表位置；点击在控件声明处用 `Clicked()` / `PointerOn` 处理。
 
@@ -39,12 +43,17 @@ Issues 放在本仓库的 GitHub Issues，通过 `gh` CLI 读写。详见 `docs/
 
 ## 不要猜错的约定
 
-- **节点并行**是同时测几个节点（GUI 固定 `6`）。**下载并发**是同一节点的连接数（GUI 固定 `4`）。不要混用，也不要改 `-concurrent` 的旧语义（ADR-0001）。
-- 程序目录 = `os.Executable()` 所在目录。**全部持久化数据**写在 `<程序目录>/data/`（`settings.json` / `entries.json` / `presets.json` / `results.json`），不写主目录、AppData、注册表；目录不可写时窗口内报错并禁用持久化，不换位置（ADR-0017）。
-- 条目路径是软路径（相对程序目录、`/` 分隔）或硬路径（绝对路径）；程序目录内的绝对路径保存时自动转软路径。`go run` 的程序目录是临时构建目录，数据不会落在仓库根。
+- **节点并行**是同时测几个节点（默认 `6`）。**下载并发**是同一节点的连接数（默认 `4`）。都可在设置里改；不要混用，也不要改 `-concurrent` 的旧语义（ADR-0001）。
+- 程序目录 = `os.Executable()` 所在目录。**全部持久化数据**写在 `<程序目录>/data/`（`settings.json` / `entries.json` / `presets.json` / `results.json` / `subscriptions/` / `mihomo/`），不写主目录、AppData、注册表；目录不可写时窗口内报错并禁用持久化，不换位置（ADR-0017）。
+- 数据文件版本为 2；加载更高版本视为错误。版本 1 的文件按字段缺失读取并补默认值（布尔开关按「键是否存在」补，不能先解析零值再归一化）。
+- 条目有两类：本地文件（软路径 `/` 分隔或硬路径）与订阅地址（`http(s)`）。订阅正文缓存到 `data/subscriptions/<条目 ID>.yaml`；启动只读缓存不联网，`重新获取`/地址变更才拉取。
 - **节点身份** = 协议 + 名称 + 服务器 + 端口 + 规范化参数序列化的 sha256 前缀（yaml.v2 排序键，能处理嵌套 map）；同一文件里的完全相同节点追加 `#2`、`#3`。重新获取节点时按身份保留结果与上次测速时间，不依赖列表顺序。
-- 下载速度视图的行按有效下载速度实时降序；行命中身份来自节点身份，重排不换 ID。
-- 过滤简化模式：空格分词、`!` 排除、`*`/`?` 通配、大小写不敏感、与/或可选；高级模式是完整 Go 正则（区分大小写）。预设保存模式 + 表达式 + 组合方式，跨条目通用。
+- 测速按条目分轮：每个选中条目一轮，轮内节点 = 选中 ∩ 过滤命中，测完导出再推进；事件带轮次号，迟到事件按轮次丢弃。
+- 结果视图默认 fast 按延迟升序、其余按下载速度降序；点表头切换列、再点反转；行命中身份来自节点身份，重排不换 ID。
+- 过滤简化模式：空格分词、`!` 排除、`*`/`?` 通配、大小写不敏感、与/或可选；高级模式是完整 Go 正则（区分大小写）。预设保存模式 + 表达式 + 组合方式，跨条目通用。过滤结果同时决定测速与导出范围。
+- 导出骨架固定（ADR-0016）：`mixed-port: 7890`、`节点选择` + `自动选择` 两组、国内直连 + `MATCH`；阈值过滤只影响导出，不影响结果表。输出模式默认关闭。
+- 重命名只在导出时按 IP 归属地套模板，不改界面显示；上传失败只提示，不影响轮次推进。上传 token 明文存 `data/settings.json`。
+- 订阅拉取、导出（含 IP 查询、图片渲染）、上传都在后台 goroutine；不要在 Paint/布局里同步做网络或文件对话框（用 `canvas.AfterPaint` + goroutine）。
 - Clash/Mihomo 配置用 `gopkg.in/yaml.v2` 解析。不要改成 yaml.v3。
 - `test/test.yaml`、`*.local.yaml`、`clash-speedtest-plus-sub-*.yaml` 含节点凭据，禁止入库。测试夹具只用 `127.0.0.1` / `example.com` 假值。
 

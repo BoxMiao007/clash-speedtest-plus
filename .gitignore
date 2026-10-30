@@ -15,3 +15,10 @@ skills-lock.json
 
 # GUI 运行时数据：条目、预设、结果（可能含节点凭据）
 data/
+
+# GUI 导出产物（配置/结果图/结果表）含节点凭据，禁止入库
+*-导出.yaml
+导出-合并-*.yaml
+结果表-*.tsv
+[0-9]*.png
+clash-speedtest-plus-*.png

@@ -77,9 +77,9 @@ func TestOpenCreatesDataDir(t *testing.T) {
 		t.Fatalf("数据目录 %q 不是目录", wantDataDir)
 	}
 
-	// 全新数据目录：四项均为空值，不报错。
-	if got := st.Settings(); got != (store.Settings{}) {
-		t.Errorf("Settings() = %+v，期望零值", got)
+	// 全新数据目录：四项均为空值，不报错；设置返回归一化后的默认参数。
+	if got := st.Settings(); got != store.DefaultSettings() {
+		t.Errorf("Settings() = %+v，期望默认值 %+v", got, store.DefaultSettings())
 	}
 	if got := st.Entries(); len(got) != 0 {
 		t.Errorf("Entries() = %+v，期望为空", got)
@@ -120,6 +120,8 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	if err := st.SetSettings(settings); err != nil {
 		t.Fatalf("SetSettings 失败：%v", err)
 	}
+	// 写盘前会归一化，重启后读到的也是归一化后的值。
+	settings = settings.Normalize()
 
 	entryA := store.Entry{ID: store.NewID(), Name: "订阅 A", Path: "test/a.yaml"}
 	entryB := store.Entry{ID: store.NewID(), Name: "订阅 B", Path: filepath.Join(t.TempDir(), "b.yaml")}
@@ -154,8 +156,8 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	dataDir := filepath.Join(base, "data")
 	for _, name := range []string{"settings.json", "entries.json", "presets.json", "results.json"} {
 		path := filepath.Join(dataDir, name)
-		if got := readVersion(t, path); got != 1 {
-			t.Errorf("%s 的 version = %d，期望 1", name, got)
+		if got := readVersion(t, path); got != 2 {
+			t.Errorf("%s 的 version = %d，期望 2", name, got)
 		}
 	}
 
@@ -501,11 +503,11 @@ func TestVersionTooNewReturnsError(t *testing.T) {
 			if err := os.MkdirAll(dataDir, 0o755); err != nil {
 				t.Fatalf("创建数据目录失败：%v", err)
 			}
-			if err := os.WriteFile(filepath.Join(dataDir, file), []byte(`{"version":2}`), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dataDir, file), []byte(`{"version":3}`), 0o644); err != nil {
 				t.Fatalf("写入夹具失败：%v", err)
 			}
 			if _, err := store.Open(store.Options{BaseDir: base}); err == nil {
-				t.Fatalf("%s 版本为 2 时期望 Open 返回错误，实际为 nil", file)
+				t.Fatalf("%s 版本为 3 时期望 Open 返回错误，实际为 nil", file)
 			}
 		})
 	}
@@ -567,5 +569,146 @@ func TestWriteLeavesNoTempFiles(t *testing.T) {
 	}
 	if len(entries) != len(want) {
 		t.Errorf("数据目录里有 %d 个文件，期望 %d 个", len(entries), len(want))
+	}
+}
+
+func TestEntryKindDefaultsToLocal(t *testing.T) {
+	legacy := store.Entry{ID: "id", Name: "旧条目", Path: "a.yaml"}
+	if got := legacy.EffectiveKind(); got != store.EntryKindLocal {
+		t.Errorf("空 Kind 的 EffectiveKind() = %q，期望 %q", got, store.EntryKindLocal)
+	}
+	if legacy.IsSubscription() {
+		t.Error("本地条目不应报告为订阅条目")
+	}
+	sub := store.Entry{ID: "id2", Name: "订阅", Kind: store.EntryKindSubscription, URL: "https://example.com/sub"}
+	if got := sub.EffectiveKind(); got != store.EntryKindSubscription {
+		t.Errorf("订阅条目 EffectiveKind() = %q，期望 %q", got, store.EntryKindSubscription)
+	}
+	if !sub.IsSubscription() {
+		t.Error("订阅条目应报告为订阅")
+	}
+}
+
+func TestSubscriptionCacheRoundTrip(t *testing.T) {
+	st, base := openTempStore(t)
+	id := store.NewID()
+	wantPath, err := st.SubscriptionPath(id)
+	if err != nil {
+		t.Fatalf("SubscriptionPath 失败：%v", err)
+	}
+	if got := filepath.Dir(wantPath); got != filepath.Join(base, "data", "subscriptions") {
+		t.Errorf("订阅缓存目录 = %q，期望在 data/subscriptions 下", got)
+	}
+	body := []byte("proxies:\n  - name: a\n")
+	path, err := st.WriteSubscription(id, body)
+	if err != nil {
+		t.Fatalf("WriteSubscription 失败：%v", err)
+	}
+	if path != wantPath {
+		t.Errorf("WriteSubscription 返回 %q，期望 %q", path, wantPath)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读取订阅缓存失败：%v", err)
+	}
+	if string(got) != string(body) {
+		t.Errorf("订阅缓存内容 = %q，期望 %q", got, body)
+	}
+	if err := st.RemoveSubscription(id); err != nil {
+		t.Fatalf("RemoveSubscription 失败：%v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("RemoveSubscription 后缓存仍存在：%v", err)
+	}
+	// 再删一次视为成功。
+	if err := st.RemoveSubscription(id); err != nil {
+		t.Errorf("重复 RemoveSubscription 应成功，实际 %v", err)
+	}
+}
+
+func TestSubscriptionPathRejectsBadID(t *testing.T) {
+	st, _ := openTempStore(t)
+	for _, id := range []string{"", "..", "a/b", `a\b`} {
+		if _, err := st.SubscriptionPath(id); err == nil {
+			t.Errorf("SubscriptionPath(%q) 期望报错，实际为 nil", id)
+		}
+	}
+}
+
+func TestDeleteEntryRemovesSubscriptionCache(t *testing.T) {
+	st, _ := openTempStore(t)
+	entry := store.Entry{ID: store.NewID(), Name: "订阅", Kind: store.EntryKindSubscription, URL: "https://example.com/sub"}
+	if err := st.PutEntry(entry); err != nil {
+		t.Fatalf("PutEntry 失败：%v", err)
+	}
+	path, err := st.WriteSubscription(entry.ID, []byte("proxies: []\n"))
+	if err != nil {
+		t.Fatalf("WriteSubscription 失败：%v", err)
+	}
+	if err := st.DeleteEntry(entry.ID); err != nil {
+		t.Fatalf("DeleteEntry 失败：%v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("删除条目后订阅缓存仍存在：%v", err)
+	}
+}
+
+func TestSettingsNormalizeFixesInvalidValues(t *testing.T) {
+	got := store.Settings{
+		Mode:            "turbo",
+		DownloadMB:      -1,
+		UploadMB:        0,
+		TimeoutMS:       -5,
+		Concurrent:      0,
+		Parallel:        -3,
+		EarlyStop:       -2,
+		MaxLatencyMS:    -1,
+		MaxPacketLoss:   250,
+		MinDownloadMBps: -1,
+		MinUploadMBps:   -1,
+		OutputMode:      "custom",
+		OutputPath:      "   ",
+	}.Normalize()
+	want := store.Settings{
+		Mode:          store.DefaultMode,
+		DownloadMB:    store.DefaultDownloadMB,
+		UploadMB:      store.DefaultUploadMB,
+		TimeoutMS:     store.DefaultTimeoutMS,
+		Concurrent:    store.DefaultConcurrent,
+		Parallel:      store.DefaultParallel,
+		ServerURL:     store.DefaultServerURL,
+		MaxPacketLoss: store.DefaultMaxPacketLoss,
+		OutputMode:    store.OutputModeOff,
+		OutputPath:    "   ", // 词干原样保留，等用户改回自定义时还在
+	}
+	if got != want {
+		t.Errorf("非法值 Normalize() = %+v，期望 %+v", got, want)
+	}
+	// -1 的丢包阈值保留「不限制」语义。
+	if got := (store.Settings{MaxPacketLoss: -1}).Normalize().MaxPacketLoss; got != -1 {
+		t.Errorf("MaxPacketLoss=-1 归一化后 = %v，期望 -1", got)
+	}
+}
+
+func TestVersionOneSettingsLoadWithDefaults(t *testing.T) {
+	base := t.TempDir()
+	dataDir := filepath.Join(base, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("创建数据目录失败：%v", err)
+	}
+	legacy := `{"version":1,"settings":{"filter_mode":"advanced","filter_expression":"^HK-","filter_combine":"or"}}`
+	if err := os.WriteFile(filepath.Join(dataDir, "settings.json"), []byte(legacy), 0o644); err != nil {
+		t.Fatalf("写入版本 1 设置失败：%v", err)
+	}
+	st, err := store.Open(store.Options{BaseDir: base})
+	if err != nil {
+		t.Fatalf("Open 版本 1 数据失败：%v", err)
+	}
+	got := st.Settings()
+	if got.FilterMode != "advanced" || got.FilterExpression != "^HK-" || got.FilterCombine != "or" {
+		t.Errorf("版本 1 过滤设置未保留：%+v", got)
+	}
+	if got.Mode != store.DefaultMode || got.Parallel != store.DefaultParallel || got.OutputMode != store.OutputModeOff {
+		t.Errorf("版本 1 缺失字段未补默认值：%+v", got)
 	}
 }

@@ -27,9 +27,56 @@ type ids struct {
 	startTest     ui.ID
 	backToSelect  ui.ID
 	stopTest      ui.ID
+	pauseTest     ui.ID
+
+	// 结果视图：轮次切换、导出、详情。
+	roundPrev   ui.ID
+	roundNext   ui.ID
+	exportYAML  ui.ID
+	exportImage ui.ID
+	exportTSV   ui.ID
+	closeDetail ui.ID
+	sortLatency ui.ID
+	sortJitter  ui.ID
+	sortLoss    ui.ID
+	sortSpeed   ui.ID
+	sortUpload  ui.ID
+	sortTested  ui.ID
+
+	// 设置视图。
+	settingsScroll ui.ID
+	settingsSave   ui.ID
+	settingsReset  ui.ID
+	settingsMode   ui.Scope
+	settingsOutput ui.Scope
+	setDownload    ui.ID
+	setUpload      ui.ID
+	setTimeout     ui.ID
+	setConcurrent  ui.ID
+	setParallel    ui.ID
+	setServer      ui.ID
+	setUA          ui.ID
+	setEarlyStop   ui.ID
+	setMaxLatency  ui.ID
+	setMaxLoss     ui.ID
+	setMinDownload ui.ID
+	setMinUpload   ui.ID
+	setOutputPath  ui.ID
+	setImage       ui.ID
+	setSpeedOnly   ui.ID
+	setRename      ui.ID
+	setRenameTmpl  ui.ID
+	setGistToken   ui.ID
+	setGistAddress ui.ID
+	setRepoToken   ui.ID
+	setRepoAddress ui.ID
+	setRepoFile    ui.ID
+	setRepoBranch  ui.ID
 
 	entryDialogScope ui.ID
 	entryName        ui.ID
+	entryKind        ui.Scope
+	entryURL         ui.ID
 	entryChoose      ui.ID
 	entryCancel      ui.ID
 	entrySave        ui.ID
@@ -84,9 +131,54 @@ func newIDs(tree *ui.Tree) ids {
 	value.startTest = tree.ID(page, "start-test")
 	value.backToSelect = tree.ID(page, "back-to-select")
 	value.stopTest = tree.ID(page, "stop-test")
+	value.pauseTest = tree.ID(page, "pause-test")
+
+	value.roundPrev = tree.ID(page, "round-prev")
+	value.roundNext = tree.ID(page, "round-next")
+	value.exportYAML = tree.ID(page, "export-yaml")
+	value.exportImage = tree.ID(page, "export-image")
+	value.exportTSV = tree.ID(page, "export-tsv")
+	value.closeDetail = tree.ID(page, "close-detail")
+	value.sortLatency = tree.ID(page, "sort-latency")
+	value.sortJitter = tree.ID(page, "sort-jitter")
+	value.sortLoss = tree.ID(page, "sort-loss")
+	value.sortSpeed = tree.ID(page, "sort-speed")
+	value.sortUpload = tree.ID(page, "sort-upload")
+	value.sortTested = tree.ID(page, "sort-tested")
+
+	value.settingsScroll = tree.ID(page, "settings-scroll")
+	value.settingsSave = tree.ID(page, "settings-save")
+	value.settingsReset = tree.ID(page, "settings-reset")
+	value.settingsMode = tree.Sub(page, tree.Name("settings-mode"))
+	value.settingsOutput = tree.Sub(page, tree.Name("settings-output"))
+	value.setDownload = tree.ID(page, "set-download")
+	value.setUpload = tree.ID(page, "set-upload")
+	value.setTimeout = tree.ID(page, "set-timeout")
+	value.setConcurrent = tree.ID(page, "set-concurrent")
+	value.setParallel = tree.ID(page, "set-parallel")
+	value.setServer = tree.ID(page, "set-server")
+	value.setUA = tree.ID(page, "set-ua")
+	value.setEarlyStop = tree.ID(page, "set-early-stop")
+	value.setMaxLatency = tree.ID(page, "set-max-latency")
+	value.setMaxLoss = tree.ID(page, "set-max-loss")
+	value.setMinDownload = tree.ID(page, "set-min-download")
+	value.setMinUpload = tree.ID(page, "set-min-upload")
+	value.setOutputPath = tree.ID(page, "set-output-path")
+	value.setImage = tree.ID(page, "set-image")
+	value.setSpeedOnly = tree.ID(page, "set-speed-only")
+	value.setRename = tree.ID(page, "set-rename")
+	value.setRenameTmpl = tree.ID(page, "set-rename-template")
+	value.setGistToken = tree.ID(page, "set-gist-token")
+	value.setGistAddress = tree.ID(page, "set-gist-address")
+	value.setRepoToken = tree.ID(page, "set-repo-token")
+	value.setRepoAddress = tree.ID(page, "set-repo-address")
+	value.setRepoFile = tree.ID(page, "set-repo-file")
+	value.setRepoBranch = tree.ID(page, "set-repo-branch")
 
 	value.entryDialogScope = tree.ID(value.dialogs, "entry-scope")
 	value.entryName = tree.ID(value.dialogs, "entry-name")
+	value.entryKind = tree.Sub(value.dialogs, tree.Name("entry-kind"))
+	value.entryURL = tree.ID(value.dialogs, "entry-url")
 	value.entryChoose = tree.ID(value.dialogs, "entry-choose")
 	value.entryCancel = tree.ID(value.dialogs, "entry-cancel")
 	value.entrySave = tree.ID(value.dialogs, "entry-save")
@@ -162,8 +254,12 @@ func registerNodeIDs(tree *ui.Tree, entry entryIDs, nodeID string) nodeIDs {
 }
 
 func (value ids) viewIndex(active viewKind) int {
-	if active == viewResults {
+	switch active {
+	case viewResults:
 		return 1
+	case viewSettings:
+		return 2
+	default:
+		return 0
 	}
-	return 0
 }
