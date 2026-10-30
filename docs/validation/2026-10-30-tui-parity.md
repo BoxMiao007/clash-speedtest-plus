@@ -1,6 +1,7 @@
 # 验证记录：GUI 补齐 TUI 能力（2026-10-30）
 
 > 对应：[规格 0001](../specs/0001-viva-gui.md)、[ADR-0018](../adr/0018-tui-parity.md)。
+> 后续交互补全（折叠调宽、滚动条、自解释文案）：[2026-10-30-interaction.md](2026-10-30-interaction.md)。
 > 环境：Windows 11（amd64）、AMD Ryzen 7 4800H、Go 1.27.3（模块指令 1.26）。
 > 所有测试离线：订阅用 `httptest`，引擎用假实现，节点夹具全是 `127.0.0.1` / `example.com` 假值。
 
