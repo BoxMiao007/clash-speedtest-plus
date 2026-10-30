@@ -331,7 +331,7 @@ func (a *App) paintSettings(f *flex.Frame) {
 		a.settingsFieldRow(f, "输出路径", "自定义模式的词干；自动补 .yaml", &a.settingsForm.outputPath, a.ids.setOutputPath, "例如 D:/订阅/导出.yaml")
 		// 三个开关各自控制一种产物，逐行给标签与说明，避免只看名字猜作用。
 		if a.settingsToggleRow(f, a.ids.setImage, a.settingsForm.imageEnabled,
-			"每轮自动保存结果图（PNG）", "测完在输出目录生成结果图；关闭后仍可在结果视图点「结果图」手动保存") {
+			"每轮自动保存结果图（PNG）", "测完在输出目录生成结果图；关闭后仍可在「测速」页点「结果图」手动保存") {
 			a.settingsForm.imageEnabled = !a.settingsForm.imageEnabled
 		}
 		if a.settingsToggleRow(f, a.ids.setSpeedOnly, a.settingsForm.imageSpeedOnly,

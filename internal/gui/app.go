@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	viewLabels      = []string{"节点选择", "测速结果", "设置"}
+	viewLabels      = []string{"测速", "设置"}
 	modeLabels      = []string{"简化", "正则"}
 	combineLabels   = []string{"全部命中", "任一命中"}
 	entryKindLabels = []string{"本地文件", "订阅地址"}
@@ -94,13 +94,7 @@ func (a *App) onScroll(event ui.ScrollEvent) ui.EventResult {
 	if a.menu.open {
 		return ui.EventResult{}
 	}
-	if a.active == viewResults {
-		if pointIn(a.resultViewport, event.X, event.Y) {
-			return scrollList(&a.resultOffset, a.resultContent, a.resultViewport.Height, event.DeltaY)
-		}
-		return a.view.Wheel(event)
-	}
-	if a.active != viewNodes {
+	if a.active != viewTest {
 		// 设置视图的滚动交给 ScrollArea 自己处理。
 		return a.view.Wheel(event)
 	}
@@ -143,17 +137,12 @@ func scrollList(offset *float32, content, viewport, delta float32) ui.EventResul
 func (a *App) paint(canvas *ui.Canvas, size ui.Size) {
 	a.window = size
 	a.nodeListValid = false
-	a.resultListValid = false
 	bounds := ui.Rect{X: 0, Y: 0, Width: size.Width, Height: size.Height}
 	canvas.Fill(bounds, a.theme.Background)
 	a.view.Draw(canvas, a.theme, bounds, a.paintRoot)
 	if a.nodeListValid {
 		a.nodeViewport = a.nodeListBox.Rect()
 		a.clampNodeOffset()
-	}
-	if a.resultListValid {
-		a.resultViewport = a.resultListBox.Rect()
-		a.clampResultOffset()
 	}
 	// 滚动条画在内容之上：flex 只负责裁剪与偏移，轨道、滑块与拖动都在应用侧。
 	a.paintScrollBars(canvas)
@@ -293,14 +282,11 @@ func (a *App) paintFooter(f *flex.Frame) {
 
 func (a *App) paintContent(f *flex.Frame) {
 	f.Column().Grow(1).FillHeight().Children(func() {
-		switch a.active {
-		case viewResults:
-			a.paintResults(f)
-		case viewSettings:
+		if a.active == viewSettings {
 			a.paintSettings(f)
-		default:
-			a.paintNodes(f)
+			return
 		}
+		a.paintTest(f)
 	})
 }
 

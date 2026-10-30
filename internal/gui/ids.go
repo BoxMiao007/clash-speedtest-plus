@@ -19,10 +19,9 @@ type ids struct {
 	entryExpand   ui.ID
 	entrySplitter ui.ID
 
-	// 滚动条身份：节点来源、节点列表、结果列表、设置四处各一条。
+	// 滚动条身份：节点来源、节点列表、设置三处各一条。
 	entryBar    ui.ID
 	nodeBar     ui.ID
-	resultBar   ui.ID
 	settingsBar ui.ID
 
 	filterField  ui.ID
@@ -34,11 +33,10 @@ type ids struct {
 	readNodes     ui.ID
 	excludeFailed ui.ID
 	startTest     ui.ID
-	backToSelect  ui.ID
 	stopTest      ui.ID
 	pauseTest     ui.ID
 
-	// 结果视图：轮次切换、导出、详情。
+	// 测速视图：轮次切换、导出、详情。
 	roundPrev   ui.ID
 	roundNext   ui.ID
 	exportYAML  ui.ID
@@ -133,7 +131,6 @@ func newIDs(tree *ui.Tree) ids {
 	value.entrySplitter = tree.ID(page, "entry-splitter")
 	value.entryBar = tree.ID(page, "entry-scrollbar")
 	value.nodeBar = tree.ID(page, "node-scrollbar")
-	value.resultBar = tree.ID(page, "result-scrollbar")
 	value.settingsBar = tree.ID(page, "settings-scrollbar")
 
 	value.filterField = tree.ID(page, "filter-expression")
@@ -145,7 +142,6 @@ func newIDs(tree *ui.Tree) ids {
 	value.readNodes = tree.ID(page, "read-nodes")
 	value.excludeFailed = tree.ID(page, "exclude-failed")
 	value.startTest = tree.ID(page, "start-test")
-	value.backToSelect = tree.ID(page, "back-to-select")
 	value.stopTest = tree.ID(page, "stop-test")
 	value.pauseTest = tree.ID(page, "pause-test")
 
@@ -270,12 +266,8 @@ func registerNodeIDs(tree *ui.Tree, entry entryIDs, nodeID string) nodeIDs {
 }
 
 func (value ids) viewIndex(active viewKind) int {
-	switch active {
-	case viewResults:
+	if active == viewSettings {
 		return 1
-	case viewSettings:
-		return 2
-	default:
-		return 0
 	}
+	return 0
 }

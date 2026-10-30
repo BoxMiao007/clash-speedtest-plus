@@ -23,12 +23,12 @@ import (
 
 type nodeResult = store.NodeResult
 
-// viewKind 是主内容区的三种视图。
+// viewKind 是主内容区的视图。节点选择与测速结果已合并成一个「测速」视图：
+// 同一个列表既用于勾选节点，也实时显示测速结果。
 type viewKind uint8
 
 const (
-	viewNodes viewKind = iota
-	viewResults
+	viewTest viewKind = iota
 	viewSettings
 )
 
@@ -114,13 +114,6 @@ type state struct {
 	nodeListBox   flex.Box
 	nodeListValid bool
 
-	resultItems     []listItem
-	resultContent   float32
-	resultOffset    float32
-	resultViewport  ui.Rect
-	resultListBox   flex.Box
-	resultListValid bool
-
 	// 节点来源面板：折叠状态、拖动后的宽度，以及滚动条的拖动状态。
 	// 宽度由 flex.Splitter 维护（Pos = 面板宽度）；折叠时不声明 Splitter。
 	entriesCollapsed bool
@@ -131,11 +124,10 @@ type state struct {
 	settingsScrollBox   flex.Box
 	settingsScrollValid bool
 
-	// 四条滚动条的拖动状态：滑块抓取点与是否正在拖。偏移量仍由列表
-	// （nodeOffset / resultOffset）或 flex.ScrollState 持有。
+	// 三条滚动条的拖动状态：滑块抓取点与是否正在拖。偏移量仍由列表
+	// （nodeOffset）或 flex.ScrollState 持有。
 	entryBar    barState
 	nodeBar     barState
-	resultBar   barState
 	settingsBar barState
 
 	engine      Runner
@@ -149,7 +141,7 @@ type state struct {
 	// 启动时从 settings.json 读取，保存设置视图时整体写回。
 	settings store.Settings
 
-	// 结果视图的排序与详情。排序只在状态变化时做，Paint 只读字段。
+	// 测速视图的排序与详情。排序只在状态变化时做，Paint 只读字段。
 	sortKey    sortKey
 	sortAsc    bool
 	detailKey  string
@@ -157,6 +149,7 @@ type state struct {
 	detailText string
 
 	// 预计算的表头与按钮文案：排序箭头、暂停/继续、上传列是否显示。
+	// sortHit* 是表头的无障碍名称，预计算避免绘制时拼字符串。
 	showUpload    bool
 	pauseLabel    string
 	headerLatency string
@@ -165,6 +158,13 @@ type state struct {
 	headerSpeed   string
 	headerUpload  string
 	headerTested  string
+
+	sortHitLatency string
+	sortHitJitter  string
+	sortHitLoss    string
+	sortHitSpeed   string
+	sortHitUpload  string
+	sortHitTested  string
 
 	// 轮次：每个选中条目一轮，按条目顺序自动推进；全部正常完成后写合并导出。
 	rounds       []*roundState
@@ -233,6 +233,9 @@ type nodeState struct {
 	key   string
 	id    string
 	ids   nodeIDs
+	// order 是节点在条目文件里的原始序号：排序主键相同时按它兜底，
+	// 未测速时列表保持读取顺序，不会因为身份哈希排成随机顺序。
+	order int
 
 	name   string
 	typ    string
@@ -388,7 +391,7 @@ type roundState struct {
 	proxies []map[string]any
 }
 
-// sortKey 是结果视图可排序的列。默认：fast 模式按延迟升序，其余按下载速度降序。
+// sortKey 是测速视图可排序的列。默认：fast 模式按延迟升序，其余按下载速度降序。
 type sortKey uint8
 
 const (
@@ -426,7 +429,7 @@ func newState(opts Options) (*state, error) {
 		baseDir:      baseDir,
 		dataDir:      dataDir,
 		theme:        theme,
-		active:       viewNodes,
+		active:       viewTest,
 		presetSel:    -1,
 		byKey:        make(map[string]*nodeState),
 		status:       "就绪",
@@ -668,7 +671,7 @@ func (s *state) applyNodes(entry *entryState, proxies []*speedtester.CProxy) {
 	}
 	seen := make(map[string]int, len(proxies))
 	next := make([]*nodeState, 0, len(proxies))
-	for _, proxy := range proxies {
+	for index, proxy := range proxies {
 		base := nodeIdentity(proxy)
 		seen[base]++
 		id := base
@@ -692,6 +695,7 @@ func (s *state) applyNodes(entry *entryState, proxies []*speedtester.CProxy) {
 			}
 		}
 		node.entry = entry
+		node.order = index
 		node.proxy = proxy
 		node.name = proxy.Name()
 		node.typ = proxy.Type().String()
@@ -873,6 +877,15 @@ func (s *state) rebuild() {
 	s.selectedCount = selectedCount
 	s.totalCount = total
 	s.countText = fmt.Sprintf("已选 %d / 共 %d 个节点", selectedCount, total)
+	s.applySort()
+}
+
+// applySort 按当前排序列重排每个分组内的节点，并重建列表与结果集合。
+// 列表保留条目分组，排序只在组内进行：每个条目就是一轮，组间不混排。
+func (s *state) applySort() {
+	for _, group := range s.groups {
+		s.sortRows(group.nodes)
+	}
 	s.buildNodeItems()
 	s.rebuildResults()
 }
@@ -884,8 +897,8 @@ func (s *state) buildNodeItems() {
 		items = append(items, listItem{kind: itemHeader, y: y, height: 32, group: group})
 		y += 32
 		for _, node := range group.nodes {
-			items = append(items, listItem{kind: itemNode, y: y, height: 38, node: node})
-			y += 38
+			items = append(items, listItem{kind: itemNode, y: y, height: 40, node: node})
+			y += 40
 		}
 		y += 10
 	}
@@ -907,19 +920,6 @@ func (s *state) clampNodeOffset() {
 	}
 	if s.nodeOffset < 0 {
 		s.nodeOffset = 0
-	}
-}
-
-func (s *state) clampResultOffset() {
-	maximum := s.resultContent - s.resultViewport.Height
-	if maximum < 0 {
-		maximum = 0
-	}
-	if s.resultOffset > maximum {
-		s.resultOffset = maximum
-	}
-	if s.resultOffset < 0 {
-		s.resultOffset = 0
 	}
 }
 
@@ -977,23 +977,11 @@ func (s *state) rebuildResults() {
 	}
 	s.sortRows(rows)
 	s.results = rows
-	items := s.resultItems[:0]
-	y := float32(8)
-	for _, node := range rows {
-		items = append(items, listItem{kind: itemNode, y: y, height: 36, node: node})
-		y += 38
-	}
-	if len(items) > 0 {
-		y += 8
-	}
-	s.resultItems = items
-	s.resultContent = y
-	s.clampResultOffset()
 	s.refreshRunText()
 }
 
-// sortRows 按当前排序列排序；主列相等时在测行排前、再按稳定身份，保证
-// 同一帧内顺序确定、行身份不随重排丢失。
+// sortRows 按当前排序列排序；主列相等时在测行排前，再按节点在文件里的
+// 原始序号兜底（未测速时保持读取顺序），最后才按稳定身份。
 func (s *state) sortRows(rows []*nodeState) {
 	sort.SliceStable(rows, func(left, right int) bool {
 		a, b := rows[left], rows[right]
@@ -1006,6 +994,9 @@ func (s *state) sortRows(rows []*nodeState) {
 		rankA, rankB := phaseRank(a.phase), phaseRank(b.phase)
 		if rankA != rankB {
 			return rankA > rankB
+		}
+		if a.order != b.order {
+			return a.order < b.order
 		}
 		return a.key < b.key
 	})
@@ -1151,7 +1142,7 @@ func (s *state) refreshNodeDisplay(node *nodeState) {
 		}
 	default:
 		node.speedText = "—"
-		node.statusText = ""
+		node.statusText = "未测试"
 	}
 	node.infoText = node.lastTestText
 	if node.summaryText != "" {

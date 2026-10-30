@@ -23,26 +23,17 @@ func (a *App) paintScrollBars(canvas *ui.Canvas) {
 	if !a.entriesCollapsed && a.entryScrollValid {
 		a.paintScrollAreaBar(canvas, a.ids.entryBar, "节点来源滚动条", a.entryScrollBox.Rect(), a.ids.entryScroll, &a.entryBar)
 	}
-	switch a.active {
-	case viewResults:
-		if a.resultListValid {
-			next, changed := a.paintScrollBar(canvas, a.ids.resultBar, "结果列表滚动条", a.resultViewport, a.resultOffset, a.resultContent, &a.resultBar)
-			if changed {
-				a.resultOffset = next
-				a.clampResultOffset()
-			}
-		}
-	case viewSettings:
+	if a.active == viewSettings {
 		if a.settingsScrollValid {
 			a.paintScrollAreaBar(canvas, a.ids.settingsBar, "设置滚动条", a.settingsScrollBox.Rect(), a.ids.settingsScroll, &a.settingsBar)
 		}
-	default:
-		if a.nodeListValid {
-			next, changed := a.paintScrollBar(canvas, a.ids.nodeBar, "节点列表滚动条", a.nodeViewport, a.nodeOffset, a.nodeContent, &a.nodeBar)
-			if changed {
-				a.nodeOffset = next
-				a.clampNodeOffset()
-			}
+		return
+	}
+	if a.nodeListValid {
+		next, changed := a.paintScrollBar(canvas, a.ids.nodeBar, "节点列表滚动条", a.nodeViewport, a.nodeOffset, a.nodeContent, &a.nodeBar)
+		if changed {
+			a.nodeOffset = next
+			a.clampNodeOffset()
 		}
 	}
 }

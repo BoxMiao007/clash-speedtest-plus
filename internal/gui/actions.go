@@ -180,7 +180,8 @@ func (s *state) startRounds(rounds []*roundState) {
 	s.detailKey = ""
 	s.detailNode = nil
 	s.exportSeq = output.NextImageSequence(s.baseDir)
-	s.active = viewResults
+	// 节点选择与结果已经合并成一个视图：开测只刷新当前页，不切视图。
+	s.scrollToRound()
 	s.startRound(0)
 }
 
@@ -277,9 +278,10 @@ func (s *state) togglePause() {
 	s.refreshRunText()
 }
 
-// switchRound 在多轮队列里前后查看某一轮；测速中只切视图，不影响正在跑的轮。
+// switchRound 在多轮队列里切换到某一轮：列表始终显示全部节点，切换只把
+// 该轮条目所在分组滚到顶部，并让结果文案与手动导出指向这一轮。
 func (s *state) switchRound(delta int) {
-	if len(s.rounds) == 0 {
+	if len(s.rounds) < 2 {
 		return
 	}
 	next := s.roundIndex + delta
@@ -290,7 +292,24 @@ func (s *state) switchRound(delta int) {
 	s.detailKey = ""
 	s.detailNode = nil
 	s.rebuild()
+	s.scrollToRound()
 	s.status = fmt.Sprintf("第 %d/%d 轮：%s", next+1, len(s.rounds), s.rounds[next].entry.entry.Name)
+}
+
+// scrollToRound 把当前轮对应条目的分组滚到列表顶部；找不到分组时不动。
+func (s *state) scrollToRound() {
+	round := s.currentRound()
+	if round == nil || round.entry == nil {
+		return
+	}
+	for _, item := range s.nodeItems {
+		if item.kind != itemHeader || item.group == nil || item.group.entry != round.entry {
+			continue
+		}
+		s.nodeOffset = item.y - 8
+		s.clampNodeOffset()
+		return
+	}
 }
 
 func (s *state) enqueue(event runEvent) {
@@ -314,8 +333,8 @@ func (s *state) applyPending() {
 	for _, event := range events {
 		s.applyEvent(event)
 	}
-	s.refreshRunText()
-	s.rebuildResults()
+	// 合并视图里列表就是结果表：新事件到达后按当前排序列重排组内节点。
+	s.applySort()
 }
 
 func (s *state) applyEvent(event runEvent) {
@@ -475,6 +494,8 @@ func (s *state) advanceRound() {
 		s.roundIndex = next
 		s.detailKey = ""
 		s.detailNode = nil
+		// 合并视图里所有节点都在同一张表里：推进轮次时把该轮条目滚到顶部。
+		s.scrollToRound()
 		s.startRound(next)
 		return
 	}
