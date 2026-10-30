@@ -128,15 +128,34 @@ go test ./... -count=1   # 8 个包全部 ok
 
 headless 截图（点击 A-01 后把鼠标移入/移出该行）确认选中行的蓝底持续存在；`layout` 0 problems。
 
-## 11. 测试 exe
+## 11. 功能缺失补齐（同日）
 
-- 版本：`v2.8.7-viva-test`，对应代码提交 `d0a465f`
-- 大小：51,172,864 字节（与上一版基本持平）
-- SHA-256：`a406562d44e35053ef316b1b6fa1c73135d2423329030ee1e9101221401a4370`
+按规格逐项核对后，补齐一批「规格要求、实现没做到」的缺口：
+
+- **快速模式失败判定**：`resultOK` 增加模式参数；快速模式只要求延迟 > 0 且无下载错误，不再因下载速度为 0 判失败（`TestResultOKRespectsFastMode`）。
+- **手动导出不覆盖**：`freeManualExportPath` 从序号起按文件存在性递增；已有 `1.机场A-导出.yaml` 时输出 `2.…`（`TestManualExportPathSkipsExistingFile`）。
+- **导出失败重试**：结果条显示「导出失败：…」并出现「重试导出」，重试清错误后重新写该轮；手动导出失败不再补写挂起轮（`TestRetryExportClearsError`）。
+- **语法提示常驻**：简化模式过滤条第二行固定显示 `空格分隔；! 排除；* 任意长度；? 一个字符；例：…`。
+- **组标题错误态**：条目读取失败时组标题追加「读取失败」（`TestGroupHeaderShowsLoadError`）。
+- **设置校验**：服务器 URL 必须 http(s)；重命名模板预解析，非法值不保存。
+- **排除上次失败**：遍历所有条目，不再只处理已勾选条目。
+- **订阅命名**：无基名的自定义输出始终带时间戳（`3.result-时间戳.yaml`），跨运行不覆盖。
+- **只读 home**：mihomo home 无条件指向 `data/mihomo`，创建失败只记日志。
+- **手动导出补写条件**：加 `event.err == nil`。
+
+测试：`internal/gui` 57 个 Driver 用例；`output` 命名期望同步更新；走查 `PASS`、`layout` 0 problems。
+
+仍未验证：真实窗口下重试按钮在窄宽度下的排布、真实权限下 mihomo 缓存行为、阈值是否应作用于 TSV/结果图（口径待确认）。
+
+## 12. 测试 exe
+
+- 版本：`v2.8.8-viva-test`，对应代码提交 `f3ca060`
+- 大小：51,179,008 字节（上一版 v2.8.7 为 51,172,864 字节，+6 KB）
+- SHA-256：`92863944926afd6be7fac4e8264af73fa908f0e21e8c896bc51e68ce1168fc0b`
 - 形态：PE32+ GUI x86-64
 
 ```bash
 CGO_ENABLED=0 go build -trimpath \
-  -ldflags "-s -w -H=windowsgui -X main.version=v2.8.7-viva-test -X main.commit=d0a465f" \
+  -ldflags "-s -w -H=windowsgui -X main.version=v2.8.8-viva-test -X main.commit=f3ca060" \
   -o clash-speedtest-plus.exe .
 ```
