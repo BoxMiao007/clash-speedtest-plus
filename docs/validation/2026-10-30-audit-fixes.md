@@ -110,15 +110,22 @@ go test ./... -count=1   # 8 个包全部 ok
 
 仍未验证：真实窗口双击手感、只读目录在真实权限下的表现、手动导出覆盖场景的端到端文件检查。
 
-## 9. 测试 exe
+## 9. 节点行选中态与卡片回退（同日）
 
-- 版本：`v2.8.5-viva-test`，对应代码提交 `6575d74`
-- 大小：51,172,864 字节（上一版 v2.8.4 为 51,168,256 字节，+4.5 KB）
-- SHA-256：`5afd752fec403253b7e4f8fc62705c615c7901b37db38c5eb0930097a1b04f26`
+- **卡片回退默认**：去掉整卡主题色底/边框，恢复白底 + 普通边框；是否选中看复选框。整卡点击切换勾选保留。
+- **节点行选中态**：新增 `activeNode`，单击打开详情、右键打开菜单时标记该行；行用主题色 14% 淡底 + 主题色节点名（固定单测行 20%，仍更强）。关闭详情清除，点另一行切换，节点被过滤/重读时由锚点清理一起清掉。
+- 新增 `TestRowClickAndRightClickMarkActive`（gui 53 个用例）；走查 `PASS`、`layout` 0 problems；截图核对了卡片白底、单击行蓝底 + 主题色名称、右键行蓝底 + 菜单。
+- 未验证：真实窗口下 14% 底色的观感、右键菜单关闭后高亮保留是否符合预期。
+
+## 10. 测试 exe
+
+- 版本：`v2.8.6-viva-test`，对应代码提交 `bc7acca`
+- 大小：51,172,352 字节（上一版 v2.8.5 为 51,172,864 字节，-0.5 KB）
+- SHA-256：`86bb200dc3d640c49135cd6795949ef3d062c16ffeaab436a0db480788f8bdad`
 - 形态：PE32+ GUI x86-64
 
 ```bash
 CGO_ENABLED=0 go build -trimpath \
-  -ldflags "-s -w -H=windowsgui -X main.version=v2.8.5-viva-test -X main.commit=6575d74" \
+  -ldflags "-s -w -H=windowsgui -X main.version=v2.8.6-viva-test -X main.commit=bc7acca" \
   -o clash-speedtest-plus.exe .
 ```
