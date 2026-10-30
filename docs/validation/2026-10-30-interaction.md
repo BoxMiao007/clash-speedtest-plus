@@ -1,7 +1,7 @@
 # 交互补全验证记录（折叠调宽 / 滚动条 / 自解释文案）
 
 - 日期：2026-10-30
-- 代码基线：`af0032a`（本记录对应的工作区改动尚未提交）
+- 代码基线：`7e98849`（功能）/ `5552d11`（测试）；文档随 `5a91ac3` 之后的文档提交同步
 - 环境：Windows amd64、Go 1.27.3、AMD Ryzen 7 4800H
 - 关联：[ADR-0019](../adr/0019-interaction-polish.md)、[规格 0001](../specs/0001-viva-gui.md)
 
@@ -94,3 +94,16 @@ go test ./... -count=1             # 8 个包全部 ok
 - `scripts/headless-walkthrough.sh`：折叠、拖动分隔条、设置滚动条断言。
 - `docs/specs/0001-viva-gui.md`、`GLOSSARY.md`、`README.md`、`AGENTS.md`：交互、术语与约定同步。
 - `docs/validation/headless-walkthrough.log`：本轮走查日志。
+
+## 9. 测试 exe
+
+- 版本：`v2.7.1-viva-test`，对应代码提交 `7e98849`（测试与文档提交之后）
+- 大小：51,151,360 字节（上一版 51,125,248 字节，+25.5 KB，来自折叠/滚动条与文案）
+- SHA-256：`465fe0a1867313cb5240a8246c3ed8722dc4f4e51aedd2e9ab21598f57cc4bff`
+- 形态：PE32+ GUI x86-64
+
+```bash
+CGO_ENABLED=0 go build -trimpath \
+  -ldflags "-s -w -H=windowsgui -X main.version=v2.7.1-viva-test -X main.commit=7e98849" \
+  -o clash-speedtest-plus.exe .
+```
