@@ -110,3 +110,12 @@ PASS：headless 走查通过
 - 启动时同步读取本地条目文件；订阅条目只读缓存（不联网），但本地文件很大时首帧会等待。
 - 暂停只停止派发新节点，不中断在测节点的当前请求。
 - 输出模式默认关闭；需要导出必须到设置里开启。
+
+## 8. 测试 exe
+
+- 文件：`clash-speedtest-plus.exe`（仓库根目录，`*.exe` 已忽略，不随仓库分发）
+- 版本：`v2.7.0-viva-test`，提交 `5aa71c6`
+- 大小：51,121,152 字节；SHA-256：`4df3ada1b2206076f51558b384fa80024f7f3fd69150c9d671748c7f74307f5d`
+- 构建：`CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H=windowsgui -X main.version=v2.7.0-viva-test -X main.commit=5aa71c6" -o clash-speedtest-plus.exe .`
+- 文件类型：PE32+ GUI（x86-64）
+- 交付文件清单：[2026-10-30-file-changes.md](2026-10-30-file-changes.md)

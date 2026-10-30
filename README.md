@@ -102,7 +102,7 @@ scripts/headless-walkthrough.sh
 - 架构决策：[ADR-0017](docs/adr/0017-viva-gui.md)（GUI 架构）、[ADR-0018](docs/adr/0018-tui-parity.md)（补齐 TUI 产物能力）
 - 术语：[GLOSSARY.md](GLOSSARY.md)
 - 无窗口验证记录：[docs/validation/2026-10-29-viva-gui.md](docs/validation/2026-10-29-viva-gui.md)、[docs/validation/2026-10-30-tui-parity.md](docs/validation/2026-10-30-tui-parity.md)
-- 交付文件变更：[docs/validation/2026-10-29-file-changes.md](docs/validation/2026-10-29-file-changes.md)
+- 交付文件变更：[docs/validation/2026-10-29-file-changes.md](docs/validation/2026-10-29-file-changes.md)、[docs/validation/2026-10-30-file-changes.md](docs/validation/2026-10-30-file-changes.md)
 
 ## License
 
