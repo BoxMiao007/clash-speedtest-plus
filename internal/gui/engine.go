@@ -136,28 +136,37 @@ func (runner *engineRunner) Run(ctx context.Context, batch []RunNode, handlers H
 	if handlers.Progress != nil {
 		tester.SetProgressFunc(handlers.Progress)
 	}
-	filter := testFilter(settings)
-	matched := 0
+	stopper := &earlyStopCounter{limit: settings.EarlyStop, filter: testFilter(settings)}
 	tester.TestProxiesUntil(proxies, handlers.Start, func(result *speedtester.Result) bool {
 		if handlers.Result != nil {
 			handlers.Result(result)
 		}
-		if settings.EarlyStop <= 0 {
-			return true
-		}
-		if !filter.Match(result) {
-			return true
-		}
-		matched++
-		if matched < settings.EarlyStop {
-			return true
-		}
-		if handlers.EarlyStop != nil {
+		cont := stopper.accept(result)
+		if !cont && handlers.EarlyStop != nil {
 			handlers.EarlyStop()
 		}
-		return false
+		return cont
 	})
 	return nil
+}
+
+// earlyStopCounter 数「过筛」结果，达到限额后要求停止派发。limit<=0 表示关闭。
+// 过筛口径与导出共用 testFilter，保证「提前结束」和最终产物筛的是同一批节点。
+type earlyStopCounter struct {
+	limit   int
+	filter  export.Filter
+	matched int
+}
+
+// accept 返回是否继续派发新节点。
+func (counter *earlyStopCounter) accept(result *speedtester.Result) bool {
+	if counter.limit <= 0 {
+		return true
+	}
+	if counter.filter.Match(result) {
+		counter.matched++
+	}
+	return counter.matched < counter.limit
 }
 
 func (runner *engineRunner) Pause() {

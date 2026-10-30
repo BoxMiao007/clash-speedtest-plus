@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BoxMiao007/clash-speedtest-plus/internal/export"
+	"github.com/BoxMiao007/clash-speedtest-plus/internal/speedtester"
 	"github.com/BoxMiao007/clash-speedtest-plus/internal/store"
 	"github.com/vivaui/viva/app"
 	"github.com/vivaui/viva/ui"
@@ -44,6 +46,21 @@ func seedSettings(t *testing.T, dir string, settings store.Settings) {
 func waitFor(t *testing.T, driver *app.Driver, condition func() bool, message string) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := driver.Pump(); err != nil {
+			t.Fatal(err)
+		}
+		if condition() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal(message)
+}
+
+func waitForTimeout(t *testing.T, driver *app.Driver, timeout time.Duration, condition func() bool, message string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if err := driver.Pump(); err != nil {
 			t.Fatal(err)
@@ -422,5 +439,49 @@ func TestExportedStoppedRoundDoesNotAdvance(t *testing.T) {
 	application.applyExported(runEvent{kind: eventExported, roundRef: round, path: "导出.yaml"})
 	if application.roundIndex != 0 || len(application.rounds) != 1 {
 		t.Fatalf("停止后不应推进轮次：index=%d 轮数=%d", application.roundIndex, len(application.rounds))
+	}
+}
+
+// 导出前的过筛：阈值挡掉慢节点，配置不被就地修改。
+func TestBuildProxiesAppliesThresholds(t *testing.T) {
+	results := []*speedtester.Result{
+		{ProxyConfig: map[string]any{"name": "slow", "server": "127.0.0.1"}, Latency: 50 * time.Millisecond, DownloadSpeed: 1 * megabyte},
+		{ProxyConfig: map[string]any{"name": "fast", "server": "127.0.0.1"}, Latency: 10 * time.Millisecond, DownloadSpeed: 30 * megabyte},
+		{ProxyConfig: map[string]any{"server": "127.0.0.1"}, Latency: 10 * time.Millisecond, DownloadSpeed: 30 * megabyte},
+	}
+	filter := export.Filter{MinDownloadBps: 5 * megabyte, DownloadTested: true, MaxPacketLoss: 100}
+	proxies := buildProxies(results, filter, false, "")
+	if len(proxies) != 1 || proxies[0]["name"] != "fast" {
+		t.Fatalf("过筛结果 = %v，期望只剩 fast", proxies)
+	}
+	if results[0].ProxyConfig["name"] != "slow" {
+		t.Fatal("导出过滤不应改动原结果里的节点配置")
+	}
+}
+
+// 结果图开启时，每轮结束自动写出 PNG。
+func TestRoundExportWritesResultImage(t *testing.T) {
+	dir := t.TempDir()
+	settings := quietSettings()
+	settings.ImageEnabled = true
+	seedSettings(t, dir, settings)
+	writeNodesFile(t, dir, "a.yaml", "HK-01")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+
+	clickID(t, driver, application.ids.startTest)
+	waitUntilIdle(t, application, driver)
+	var path string
+	waitForTimeout(t, driver, 20*time.Second, func() bool {
+		matches, _ := filepath.Glob(filepath.Join(dir, "*.png"))
+		if len(matches) == 0 {
+			return false
+		}
+		path = matches[0]
+		return true
+	}, fmt.Sprintf("没有写出结果图；状态=%q 图片开关=%v 导出中=%d", application.status, application.settings.ImageEnabled, application.exporting))
+	info, err := os.Stat(path)
+	if err != nil || info.Size() == 0 {
+		t.Fatalf("结果图文件为空或不可读：%v", err)
 	}
 }

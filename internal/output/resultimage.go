@@ -797,6 +797,9 @@ func RemovePartialImages(dir string) error {
 	return first
 }
 
+// safeImageDir 把结果图目录规整成绝对路径。GUI 传的是程序目录，可能与进程
+// 当前目录不同盘（桌面启动、测试用临时目录），因此这里不再要求目录必须位于
+// 工作目录之下；相对路径按当前目录展开。
 func safeImageDir(dir string) (string, error) {
 	if dir == "" {
 		dir = "."
@@ -808,13 +811,6 @@ func safeImageDir(dir string) (string, error) {
 	clean := filepath.Clean(dir)
 	if !filepath.IsAbs(clean) {
 		clean = filepath.Join(cwd, clean)
-	}
-	rel, err := filepath.Rel(cwd, clean)
-	if err != nil {
-		return "", err
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("image directory escapes working directory")
 	}
 	return clean, nil
 }

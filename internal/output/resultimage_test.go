@@ -600,3 +600,26 @@ func TestMetricScoreAllSameValueFillsDeepest(t *testing.T) {
 		t.Fatalf("全同延迟应填最深: %v", got)
 	}
 }
+
+// GUI 的程序目录可能与进程当前目录不同盘（桌面启动、测试临时目录），
+// 结果图必须写到显式传入的绝对目录，而不是被工作目录限制住。
+func TestWriteResultImageAcceptsAbsoluteDirOutsideCwd(t *testing.T) {
+	dir := t.TempDir()
+	spec := ImageSpec{
+		Mode:    speedtester.SpeedModeDownload,
+		Source:  "测试",
+		Summary: "已完成",
+		Headers: GetHeaders(speedtester.SpeedModeDownload),
+		Now:     time.Now(),
+	}
+	path, _, err := WriteResultImage(dir, spec)
+	if err != nil {
+		t.Fatalf("WriteResultImage 失败：%v", err)
+	}
+	if !strings.HasPrefix(path, dir) {
+		t.Fatalf("结果图写到了 %q，期望在 %q 下", path, dir)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("结果图不存在：%v", err)
+	}
+}

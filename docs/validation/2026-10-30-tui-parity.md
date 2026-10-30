@@ -13,10 +13,11 @@
 - 结果视图：表头排序、行详情、上传列（完整模式）、手动导出配置/结果图/结果表。
 - 过滤结果现在决定测速与导出范围（与旧 TUI 的 `-f` 一致）。
 - 恢复 `internal/output`、`internal/ip`、`internal/gist`；新增 `internal/export`；`go.mod` 新增 `golang.org/x/image`。
+- 修复结果图目录被进程工作目录限制的问题：程序目录与 cwd 不同盘时（桌面启动、测试临时目录）写图会报 `Rel: can't make … relative to …`，现在按显式传入的绝对目录写。
 
-## 2. Driver 测试（`internal/gui`，28 个）
+## 2. Driver 测试（`internal/gui`，31 个）
 
-第一版 17 个用例保留并继续通过；本次新增 11 个：
+第一版 17 个用例保留并继续通过；本次新增 14 个：
 
 | 用例 | 覆盖 |
 |---|---|
@@ -31,8 +32,11 @@
 | `TestSortHeadersReorderResults` | 点表头换列、再点反转方向 |
 | `TestManualTSVExport` | 手动导出结果表，表头与节点行齐全 |
 | `TestExportedStoppedRoundDoesNotAdvance` | 已停止的轮导出结束后不推进剩余轮次 |
+| `TestEarlyStopCounterCountsOnlyAcceptedResults` | 提前结束只数过筛结果，限额 0 不停止 |
+| `TestBuildProxiesAppliesThresholds` | 导出过筛挡掉慢节点、不改原配置、缺 name/server 跳过 |
+| `TestRoundExportWritesResultImage` | 结果图开启时每轮结束写出非空 PNG |
 
-其他包：store 25（新增订阅缓存、设置归一化、版本 1 兼容）、filter 16、speedtester 31（新增 4 个订阅拉取用例）、output 34、export 5、ip 6、gist 5。
+其他包：store 25（新增订阅缓存、设置归一化、版本 1 兼容）、filter 16、speedtester 31（新增 4 个订阅拉取用例）、output 35、export 5、ip 6、gist 5。
 
 复跑命令与结果：
 
@@ -98,7 +102,7 @@ PASS：headless 走查通过
 - 真实订阅地址（含 base64 与 `flag=meta` 重试）只在本机 `httptest` 与单测里验证，未用真实机场地址跑通。
 - Gist / GitHub 仓库上传只做单测与 httptest，没有用真实 token 验证。
 - IP 归属地重命名会访问 `ip-api.com`，本次未联网验证真实返回；单测覆盖模板与请求路径。
-- 结果图在真实窗口字体下的外观未人工比对；`internal/output` 单测覆盖渲染与文件名。
+- 结果图的写出由 Driver 用例与 `internal/output` 单测覆盖，但真实窗口字体下的最终外观没有人工比对。
 - 系统文件对话框真实交互未验证（Driver 里用 `QueueOpenFiles` 拦截）。
 - 未执行 `-race`（本机无 gcc）。
 

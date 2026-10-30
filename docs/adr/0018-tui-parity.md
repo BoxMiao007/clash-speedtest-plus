@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 日期：2026-10-30
-- 关联：[ADR-0016](0016-export-profile.md)（导出形态）、[ADR-0017](0017-viva-gui.md)（GUI 架构）、[规格 0001](../specs/0001-viva-gui.md)
+- 关联：[ADR-0016](0016-export-full-profile.md)（导出形态）、[ADR-0017](0017-viva-gui.md)（GUI 架构）、[规格 0001](../specs/0001-viva-gui.md)
 
 ## 背景
 
