@@ -95,7 +95,22 @@ go test ./... -count=1   # 8 个包全部 ok
 - `internal/gui/interaction_test.go`、`app_test.go`、`parity_test.go`：5 个新用例与 `gateRunner`。
 - 文档：`docs/specs/0001-viva-gui.md`、`GLOSSARY.md`、`README.md`、`AGENTS.md`、新增 [ADR-0024](../adr/0024-audit-fixes.md)、本文件、`headless-walkthrough.log`。
 
-## 8. 测试 exe
+## 8. 收尾修复（同日）
+
+上一节「已知未修」中可修的部分已处理：
+
+- **只读数据目录**：新增 `store.OpenReadOnly`，GUI 在可写探针失败时只读打开，已有条目/设置照常显示；写操作跳过并提示「未保存」；测速结果不再逐条报保存失败；订阅拉取成功但只读时照常解析、提示未写缓存。`TestDataDirUnavailableShowsAlertAndDoesNotFallBack` 改为断言「数据目录不可写 / 只读」；新增 store 用例 `TestOpenReadOnlyLoadsDataAndRejectsWrites`。
+- **手动导出序号**：手动导出用 `output.NextImageSequence(目标目录)` 现取序号，不再复用 `exportSeq`，与同轮自动产物不会同名覆盖。
+- **导出失败**：停止推进的规格不变，但不再清空 `pendingExport`，用户手动导出成功后会补写；起测时清空，避免污染新队列。
+- **行右缘**：行与表头右侧各留 10px，滚动条轨道不再抢行点击；新增 `TestRowHitsStopBeforeScrollBar`。
+- **双击**：`ClickCount > 1` 时不再切换详情。
+- **行底色**：详情行改为 `MutedForeground` 14% 灰底，和主题色固定行区分。
+
+测试：`internal/gui` 52 个 Driver 用例 + `internal/store` 只读用例，全部通过；走查 `PASS`、`layout` 0 problems。
+
+仍未验证：真实窗口双击手感、只读目录在真实权限下的表现、手动导出覆盖场景的端到端文件检查。
+
+## 9. 测试 exe
 
 - 版本：`v2.8.4-viva-test`，对应代码提交 `1451afe`
 - 大小：51,168,256 字节（上一版 v2.8.3 为 51,157,504 字节，+10.5 KB）
