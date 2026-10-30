@@ -172,7 +172,7 @@ func (s *state) startNodesTest(nodes []*nodeState) {
 	rounds := make([]*roundState, 0, 2)
 	index := make(map[*entryState]int, 2)
 	for _, node := range nodes {
-		if node == nil || node.proxy == nil {
+		if node == nil || node.proxy == nil || !s.match(node.name) {
 			continue
 		}
 		position, ok := index[node.entry]
@@ -184,7 +184,11 @@ func (s *state) startNodesTest(nodes []*nodeState) {
 		rounds[position].nodes = append(rounds[position].nodes, node)
 	}
 	if len(rounds) == 0 {
-		s.status = "请先勾选要测试的节点"
+		if s.selectedCount == 0 {
+			s.status = "请先勾选要测试的节点"
+		} else {
+			s.status = "当前过滤条件下没有可测试的节点"
+		}
 		return
 	}
 	// 只测一个节点时把它钉在原位置并高亮，结果到达后不会跳走。
@@ -343,6 +347,10 @@ func (s *state) scrollToRound() {
 
 func (s *state) enqueue(event runEvent) {
 	s.pendingMu.Lock()
+	if s.closed {
+		s.pendingMu.Unlock()
+		return
+	}
 	s.pending = append(s.pending, event)
 	s.pendingMu.Unlock()
 	if s.invalidator != nil {
@@ -428,7 +436,7 @@ func (s *state) applyEvent(event runEvent) {
 		if s.run == nil || event.round != s.run.round {
 			return
 		}
-		round := s.currentRound()
+		round := s.runRound()
 		s.run.running = false
 		s.run.active = 0
 		s.paused = false
@@ -437,7 +445,7 @@ func (s *state) applyEvent(event runEvent) {
 			s.run.cancel = nil
 		}
 		for _, node := range s.run.batch {
-			if node.phase == phaseQueued {
+			if node.phase == phaseQueued || node.phase == phaseTesting {
 				node.phase = phaseIdle
 				s.refreshNodeDisplay(node)
 			}
@@ -474,7 +482,7 @@ func (s *state) applyEvent(event runEvent) {
 			return
 		}
 		s.earlyStopped = true
-		if round := s.currentRound(); round != nil {
+		if round := s.runRound(); round != nil {
 			round.early = true
 		}
 		s.status = "已提前结束（达到过筛限额）"
@@ -484,6 +492,15 @@ func (s *state) applyEvent(event runEvent) {
 	case eventExported:
 		s.applyExported(event)
 	}
+}
+
+// runRound 返回正在跑的那一轮。完成、提前结束与自动推进都只认这个索引，
+// 和用户正在看的 currentRound 解耦（测速中切轮不影响账本）。
+func (s *state) runRound() *roundState {
+	if s.run == nil || s.run.round < 0 || s.run.round >= len(s.rounds) {
+		return nil
+	}
+	return s.rounds[s.run.round]
 }
 
 // currentRound 返回正在看的这一轮；没有轮次时返回 nil。
@@ -497,7 +514,7 @@ func (s *state) currentRound() *roundState {
 // afterRoundFinished 在本轮正常结束后先导出（输出开着时），导出完成再推进
 // 下一轮；没有导出任务时直接推进。停止或失败不推进、不导出。
 func (s *state) afterRoundFinished() {
-	round := s.currentRound()
+	round := s.runRound()
 	if round == nil {
 		return
 	}
@@ -518,7 +535,11 @@ func (s *state) afterRoundFinished() {
 
 // advanceRound 推进到下一轮；已是最后一轮时收尾（合并导出）。
 func (s *state) advanceRound() {
-	next := s.roundIndex + 1
+	base := s.roundIndex
+	if s.run != nil && s.run.round >= 0 && s.run.round < len(s.rounds) {
+		base = s.run.round
+	}
+	next := base + 1
 	if next < len(s.rounds) {
 		s.roundIndex = next
 		s.detailKey = ""
@@ -546,6 +567,10 @@ func (s *state) allRoundsDone() {
 func (s *state) applyFetched(event runEvent) {
 	entry := s.entryByID(event.key)
 	if entry == nil {
+		return
+	}
+	// 拉取途中地址改过：旧代次的结果作废，不能把旧正文写进缓存。
+	if event.seq != entry.fetchSeq {
 		return
 	}
 	entry.fetching = false
@@ -592,6 +617,15 @@ func (s *state) applyExported(event runEvent) {
 	ref := event.roundRef
 	if ref == nil {
 		s.setExportStatus(event)
+		// 手动导出挡住了某一轮的自动导出：手动任务结束后必须补上，否则
+		// 后续轮次和合并导出会静默停住。
+		if s.pendingExport != nil && !s.running() && s.exporting == 0 {
+			pending := s.pendingExport
+			s.pendingExport = nil
+			if s.roundPosition(pending) >= 0 {
+				s.startRoundExport(pending)
+			}
+		}
 		s.rebuild()
 		return
 	}

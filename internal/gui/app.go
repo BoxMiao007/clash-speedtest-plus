@@ -137,6 +137,8 @@ func scrollList(offset *float32, content, viewport, delta float32) ui.EventResul
 func (a *App) paint(canvas *ui.Canvas, size ui.Size) {
 	a.window = size
 	a.nodeListValid = false
+	a.entryScrollValid = false
+	a.settingsScrollValid = false
 	bounds := ui.Rect{X: 0, Y: 0, Width: size.Width, Height: size.Height}
 	canvas.Fill(bounds, a.theme.Background)
 	a.view.Draw(canvas, a.theme, bounds, a.paintRoot)

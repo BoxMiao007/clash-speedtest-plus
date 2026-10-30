@@ -198,10 +198,13 @@ type entryState struct {
 	loadErr    string
 	missing    bool
 	fetching   bool
+	fetchSeq   int
+	fetchURL   string
 	collapsed  bool
 	nodes      []*nodeState
 	group      *groupState
 	checkLabel string
+	cardLabel  string
 
 	pathText   string
 	pathBadge  string
@@ -372,6 +375,8 @@ type runEvent struct {
 	warning  string
 	body     []byte
 	proxies  []map[string]any
+	// seq 是订阅拉取的代次：拉取途中地址被改过时，旧请求的结果直接丢弃。
+	seq int
 }
 
 type runState struct {
@@ -556,6 +561,7 @@ func (s *state) reloadEntries() {
 
 func (s *state) decorateEntry(entry *entryState) {
 	entry.checkLabel = "选择条目 " + entry.entry.Name
+	entry.cardLabel = "条目 " + entry.entry.Name
 	entry.readLabel, entry.fetchLabel = "读取", "重新获取"
 	if entry.entry.IsSubscription() {
 		entry.readLabel, entry.fetchLabel = "读取缓存", "重新获取"
@@ -739,9 +745,13 @@ func (s *state) readSubscription(entry *entryState, force bool) {
 		return
 	}
 	if entry.fetching {
-		entry.statusText = "正在拉取订阅…"
-		s.rebuild()
-		return
+		// 同一地址正在拉取时保持等待；只有地址改过（force 且目标不同）才
+		// 允许开新请求，旧请求的结果按 fetchSeq 丢弃。
+		if !force || entry.fetchURL == entry.entry.URL {
+			entry.statusText = "正在拉取订阅…"
+			s.rebuild()
+			return
+		}
 	}
 	path, err := s.subscriptionPath(entry)
 	if err != nil {
@@ -776,6 +786,9 @@ func (s *state) subscriptionPath(entry *entryState) (string, error) {
 // 线程写缓存、解析节点。网络请求不在绘制或布局路径上。
 func (s *state) startSubscriptionFetch(entry *entryState) {
 	entry.fetching = true
+	entry.fetchSeq++
+	seq := entry.fetchSeq
+	entry.fetchURL = entry.entry.URL
 	entry.loadErr = ""
 	entry.statusText = "正在拉取订阅…"
 	s.rebuild()
@@ -784,7 +797,7 @@ func (s *state) startSubscriptionFetch(entry *entryState) {
 	entryID := entry.entry.ID
 	go func() {
 		body, used, err := speedtester.FetchSubscriptionBody(target, userAgent)
-		s.enqueue(runEvent{kind: eventFetched, key: entryID, body: body, path: used, err: err})
+		s.enqueue(runEvent{kind: eventFetched, key: entryID, body: body, path: used, err: err, seq: seq})
 	}()
 }
 
@@ -904,6 +917,30 @@ func (s *state) applySort() {
 	}
 	s.buildNodeItems()
 	s.rebuildResults()
+	s.pruneTransientAnchors()
+}
+
+// pruneTransientAnchors 清掉已经不显示的详情/固定行，避免幽灵详情和失效固定。
+func (s *state) pruneTransientAnchors() {
+	if s.detailNode != nil && !s.nodeInGroups(s.detailNode) {
+		s.detailKey = ""
+		s.detailNode = nil
+		s.detailText = ""
+	}
+	if s.pinNode != nil && !s.nodeInGroups(s.pinNode) {
+		s.pinNode, s.pinIndex = nil, 0
+	}
+}
+
+func (s *state) nodeInGroups(node *nodeState) bool {
+	for _, group := range s.groups {
+		for _, candidate := range group.nodes {
+			if candidate == node {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // nodeIndexInGroup 返回节点在当前分组里的显示位置；找不到时回到 0。
@@ -1212,6 +1249,10 @@ func (s *state) refreshNodeDisplay(node *nodeState) {
 		node.infoText += " · " + node.summaryText
 	}
 	node.clipText = clipboardText(node)
+	// 详情文案依赖上面的展示字段，必须最后算，否则会停在旧状态。
+	if s.detailNode == node {
+		s.detailText = detailText(node)
+	}
 }
 
 func durationMillis(value float64) time.Duration {
@@ -1238,10 +1279,13 @@ func (s *state) storeError(action string, err error) {
 }
 
 func (s *state) close() {
+	s.pendingMu.Lock()
 	if s.closed {
+		s.pendingMu.Unlock()
 		return
 	}
 	s.closed = true
+	s.pendingMu.Unlock()
 	if s.run != nil && s.run.running {
 		s.stopTest()
 	}
@@ -1251,6 +1295,18 @@ func (s *state) close() {
 func (s *state) showAlert(title, body string) {
 	s.alert = alertState{open: true, title: title, body: body}
 	s.dialog = dialogAlert
+}
+
+// nodeByKey 按稳定身份找节点；用于菜单这类会跨帧缓存目标的地方。
+func (s *state) nodeByKey(key string) *nodeState {
+	for _, entry := range s.entries {
+		for _, node := range entry.nodes {
+			if node.key == key {
+				return node
+			}
+		}
+	}
+	return nil
 }
 
 func (s *state) entryByID(id string) *entryState {

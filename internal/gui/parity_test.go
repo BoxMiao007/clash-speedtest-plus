@@ -611,3 +611,44 @@ func (fake *fakeUploader) UpdateRepoFile(token, address, filePath, branch string
 	fake.repoAddress = address
 	return nil
 }
+
+// 测速进行中切到另一轮，只改变正在看的轮次，不能把被翻到的那轮误标完成；
+// 正在跑的轮仍要正常收尾并继续推进。
+func TestRoundSwitchDuringRunKeepsRunningRound(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "A-01", "A-02")
+	writeNodesFile(t, dir, "b.yaml", "B-01", "B-02")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	seedEntry(t, dir, store.Entry{ID: "e2", Name: "机场 B", Path: "b.yaml"})
+	runner := &gateRunner{started: make(chan struct{}), release: make(chan struct{})}
+	application, driver := openTestApp(t, dir, runner)
+	application.settings.ImageEnabled = false
+	application.settings.OutputMode = store.OutputModeOff
+
+	clickID(t, driver, application.ids.startTest)
+	waitFor(t, driver, func() bool {
+		select {
+		case <-runner.started:
+			return true
+		default:
+			return false
+		}
+	}, "第一轮没有开始")
+
+	application.switchRound(1)
+	if application.roundIndex != 1 {
+		t.Fatalf("切轮后应看第 2 轮，实际 %d", application.roundIndex)
+	}
+	close(runner.release)
+	waitFor(t, driver, func() bool {
+		return application.rounds[0].done && application.rounds[1].done
+	}, "两轮都应完成")
+	if application.rounds[0].stopped {
+		t.Fatal("正在跑的轮不应被标记停止")
+	}
+	for _, node := range application.rounds[0].nodes {
+		if !node.hasResult {
+			t.Fatalf("第 1 轮节点 %s 没有结果，说明该轮被跳过", node.name)
+		}
+	}
+}

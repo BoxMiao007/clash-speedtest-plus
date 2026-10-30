@@ -228,7 +228,9 @@ func newIDs(tree *ui.Tree) ids {
 type entryIDs struct {
 	scope       ui.Scope
 	check       ui.ID
+	card        ui.ID
 	read        ui.ID
+	emptyRead   ui.ID
 	refetch     ui.ID
 	edit        ui.ID
 	remove      ui.ID
@@ -242,7 +244,9 @@ func registerEntryIDs(tree *ui.Tree, parent ui.Scope, entryID string) entryIDs {
 	return entryIDs{
 		scope:       scope,
 		check:       tree.ID(scope, "check"),
+		card:        tree.ID(scope, "card"),
 		read:        tree.ID(scope, "read"),
+		emptyRead:   tree.ID(scope, "empty-read"),
 		refetch:     tree.ID(scope, "refetch"),
 		edit:        tree.ID(scope, "edit"),
 		remove:      tree.ID(scope, "remove"),

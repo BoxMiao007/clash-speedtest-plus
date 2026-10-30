@@ -64,13 +64,17 @@ func (st *SpeedTester) fetchHTTPConfig(targetURL string) ([]byte, error) {
 
 // fetchConfigWithUA 是 LoadProxies 与 LoadNodesFile 共用的配置拉取路径，
 // 只差 User-Agent：前者可用 -ua 覆盖，后者固定 mihomo 内核默认 UA。
+// configFetchClient 给订阅与 proxy-providers 的拉取设上限：默认客户端没有
+// 超时，网络卡住时界面的「正在拉取订阅…」会永远不结束。
+var configFetchClient = &http.Client{Timeout: 60 * time.Second}
+
 func fetchConfigWithUA(targetURL, userAgent string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := configFetchClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

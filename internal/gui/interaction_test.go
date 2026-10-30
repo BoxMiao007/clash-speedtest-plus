@@ -2,7 +2,9 @@ package gui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/BoxMiao007/clash-speedtest-plus/internal/filter"
 	"github.com/BoxMiao007/clash-speedtest-plus/internal/store"
@@ -365,5 +367,100 @@ func TestStickyGroupHeaderTracksScroll(t *testing.T) {
 	}
 	if selected != 0 {
 		t.Fatalf("固定标题上的「全不选」应生效，实际还有 %d 个选中", selected)
+	}
+}
+
+// 条目卡片整卡可点：点空白处切换勾选，节点列表随之出现/消失。
+func TestEntryCardClickTogglesSelection(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "A-01", "A-02")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+	entry := application.entries[0]
+	node := application.nodes[0]
+	if !entry.selected {
+		t.Fatal("条目默认应选中")
+	}
+	clickID(t, driver, entry.ids.card)
+	if entry.selected {
+		t.Fatal("点卡片应取消条目勾选")
+	}
+	if hasHitID(driver.Snapshot(), node.ids.row) {
+		t.Fatal("条目取消勾选后节点行应消失")
+	}
+	clickID(t, driver, entry.ids.card)
+	if !entry.selected {
+		t.Fatal("再点卡片应重新勾选")
+	}
+	if !hasHitID(driver.Snapshot(), node.ids.row) {
+		t.Fatal("重新勾选后节点行应回来")
+	}
+}
+
+// 右键「立即测试所选节点」也必须遵守当前过滤：隐藏的节点不能被测速。
+func TestContextMenuTestRespectsFilter(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "A-HK", "A-JP")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	runner := newFakeRunner(nil)
+	application, driver := openTestApp(t, dir, runner)
+	application.filterField.SetText("HK")
+	application.compileFilter()
+	all := append([]*nodeState(nil), application.nodes...)
+	application.startNodesTest(all)
+	waitUntilIdle(t, application, driver)
+	runner.mu.Lock()
+	batch := append([]RunNode(nil), runner.batch...)
+	runner.mu.Unlock()
+	if len(batch) != 1 || batch[0].Proxy == nil || batch[0].Proxy.Name() != "A-HK" {
+		t.Fatalf("过滤后只应测 A-HK，实际 %v", batchNames(batch))
+	}
+}
+
+func batchNames(batch []RunNode) []string {
+	names := make([]string, 0, len(batch))
+	for _, node := range batch {
+		if node.Proxy != nil {
+			names = append(names, node.Proxy.Name())
+		}
+	}
+	return names
+}
+
+// 详情面板要跟着结果刷新，而不是停在打开时的快照。
+func TestDetailPanelRefreshesAfterRun(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "A-01")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	runner := newFakeRunner(map[string]fakeResult{"A-01": {ok: true, latency: 42 * time.Millisecond, speed: 8 * 1024 * 1024}})
+	application, driver := openTestApp(t, dir, runner)
+	clickID(t, driver, application.ids.startTest)
+	waitUntilIdle(t, application, driver)
+	node := application.nodes[0]
+	application.toggleDetail(node)
+	if strings.Contains(application.detailText, "尚未测试") || !strings.Contains(application.detailText, "42ms") {
+		t.Fatalf("详情应显示已完成的结果：%s", application.detailText)
+	}
+	// 结果再次更新（例如后面又测了一次）时，打开着的详情也要跟着刷新。
+	node.result.LatencyMS = 99
+	application.refreshNodeDisplay(node)
+	if !strings.Contains(application.detailText, "99ms") {
+		t.Fatalf("详情没有跟随结果刷新：%s", application.detailText)
+	}
+}
+
+// 节点被过滤掉后，详情与固定行要一并清掉，不能留下幽灵详情。
+func TestHiddenNodesClearDetailAndPin(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "A-HK", "A-JP")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, _ := openTestApp(t, dir, newFakeRunner(nil))
+	node := application.nodes[0]
+	application.toggleDetail(node)
+	application.pinNode = node
+	application.filterField.SetText("JP")
+	application.compileFilter()
+	if application.detailNode != nil || application.pinNode != nil {
+		t.Fatal("节点被过滤掉后详情与固定行都应清空")
 	}
 }

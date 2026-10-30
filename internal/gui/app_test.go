@@ -84,6 +84,47 @@ func (runner *fakeRunner) Run(ctx context.Context, batch []RunNode, handlers Han
 	return nil
 }
 
+// gateRunner 在第一轮的第一个节点上停住，直到测试放行；用来模拟
+// 「测速进行中用户切轮」的时序。
+type gateRunner struct {
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+	release chan struct{}
+}
+
+func (runner *gateRunner) Run(ctx context.Context, batch []RunNode, handlers Handlers) error {
+	runner.mu.Lock()
+	runner.calls++
+	first := runner.calls == 1
+	runner.mu.Unlock()
+	for index, node := range batch {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if handlers.Start != nil {
+			handlers.Start(node.Key, "")
+		}
+		if first && index == 0 {
+			close(runner.started)
+			<-runner.release
+		}
+		if handlers.Result != nil {
+			handlers.Result(&speedtester.Result{
+				ProxyName:     node.Key,
+				Latency:       20 * time.Millisecond,
+				DownloadSpeed: 2 * 1024 * 1024,
+			})
+		}
+	}
+	return nil
+}
+
+func (runner *gateRunner) Stop()                {}
+func (runner *gateRunner) Configure(TestConfig) {}
+func (runner *gateRunner) Pause()               {}
+func (runner *gateRunner) Resume()              {}
+
 func (runner *fakeRunner) Stop() {
 	runner.mu.Lock()
 	runner.stopped = true

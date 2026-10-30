@@ -131,8 +131,26 @@ func (a *App) paintMenu(f *flex.Frame) {
 }
 
 func (a *App) activateMenu(id ui.ID) {
-	nodes := a.menu.nodes
 	a.menu.open = false
+	// 菜单开着时后台可能重读过节点：按 key 重新解析，别对已经消失的节点动手。
+	nodes := make([]*nodeState, 0, len(a.menu.nodes))
+	for _, cached := range a.menu.nodes {
+		if current := a.nodeByKey(cached.key); current != nil {
+			nodes = append(nodes, current)
+		}
+	}
+	var single *nodeState
+	if a.menu.node != nil {
+		single = a.nodeByKey(a.menu.node.key)
+	}
+	if id == a.ids.menuTestOne && single == nil {
+		a.status = "节点已不在列表里"
+		return
+	}
+	if (id == a.ids.menuTest || id == a.ids.menuTestMulti) && len(nodes) == 0 {
+		a.status = "节点已不在列表里"
+		return
+	}
 	switch id {
 	case a.ids.menuCopy, a.ids.menuCopyMulti:
 		if err := app.SetClipboardText(a.menu.clip); err != nil {
@@ -148,7 +166,7 @@ func (a *App) activateMenu(id ui.ID) {
 		a.startNodesTest(nodes)
 	case a.ids.menuTestOne:
 		// 多选语境下只测右键指向的那一个节点，不改动其它勾选。
-		a.startNodesTest([]*nodeState{a.menu.node})
+		a.startNodesTest([]*nodeState{single})
 	case a.ids.menuSelect, a.ids.menuUnselect:
 		selected := id == a.ids.menuSelect
 		for _, node := range nodes {

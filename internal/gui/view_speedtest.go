@@ -10,7 +10,7 @@ import (
 // 节点来源面板的宽度约束：默认 320，可拖动到 220；折叠后只留一条窄栏。
 const (
 	entriesPanelWidth float32 = 320
-	entriesPanelMin   float32 = 220
+	entriesPanelMin   float32 = 260
 	entriesRailWidth  float32 = 44
 	contentPanelMin   float32 = 420
 )
@@ -70,7 +70,9 @@ func (a *App) paintTest(f *flex.Frame) {
 	list.Children(func() {
 		for _, item := range a.nodeItems {
 			top := item.y - a.nodeOffset
-			if top+item.height < 0 || top > viewport {
+			// 用窗口高度而不是上一帧的列表视口做下限：窗口刚拉高时这一帧
+			// 也能画满新高度（超出列表的部分由 Stack 的 Clip 裁掉）。
+			if top+item.height < 0 || top > a.window.Height {
 				continue
 			}
 			if item.kind == itemHeader && item.group == sticky {
@@ -185,7 +187,7 @@ func (a *App) paintTestHeader(f *flex.Frame) {
 	f.Row().Height(30).FillWidth().PadX(20).Items(flex.Center).Children(func() {
 		f.Row().FillWidth().PadX(8).Gap(8).Items(flex.Center).Children(func() {
 			f.Spacer().Width(colCheck).Grow(0)
-			f.Text("节点").FontSize(11).Muted().Grow(1)
+			f.Text("节点").FontSize(11).Muted().Grow(1).Basis(0)
 			f.Text("状态").FontSize(11).Muted().Width(colStatus)
 			a.sortHeaderCell(f, a.headerLatency, a.sortHitLatency, a.ids.sortLatency, sortByLatency, colLatency)
 			a.sortHeaderCell(f, a.headerJitter, a.sortHitJitter, a.ids.sortJitter, sortByJitter, colJitter)
@@ -274,7 +276,12 @@ func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 		tint := a.theme.Primary
 		tint.Alpha *= 0.14
 		row = row.Background(tint)
-	case node.selected || node.phase == phaseTesting || a.detailKey == node.key:
+	case a.detailKey == node.key:
+		// 点开详情的行用主题色淡底标出，和普通悬停的灰底区分开。
+		tint := a.theme.Primary
+		tint.Alpha *= 0.10
+		row = row.Background(tint)
+	case node.selected || node.phase == phaseTesting:
 		row = row.Background(a.theme.Muted)
 	}
 	row.Children(func() {
@@ -283,7 +290,7 @@ func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 		if check.Clicked() {
 			a.toggleNode(node)
 		}
-		f.Column().Gap(0).Grow(1).Children(func() {
+		f.Column().Gap(0).Grow(1).Basis(0).Children(func() {
 			nameColor := a.theme.Foreground
 			if pinned {
 				nameColor = a.theme.Primary
@@ -356,7 +363,7 @@ const detailPanelHeight float32 = 148
 func (a *App) paintDetailPanel(f *flex.Frame) {
 	f.Column().Height(detailPanelHeight).FillWidth().PadX(20).PadY(8).Children(func() {
 		panel := f.Column().FillWidth().Height(detailPanelHeight-16).Pad(10).Gap(4).
-			Background(a.theme.Card).Border(1, a.theme.Border).Radius(a.theme.Metrics.RadiusSurface)
+			Background(a.theme.Card).Border(1, a.theme.Border).Radius(a.theme.Metrics.RadiusSurface).Clip()
 		panel.Children(func() {
 			f.Row().FillWidth().Items(flex.Center).Gap(8).Children(func() {
 				f.Text(a.detailNode.name).Bold().Ellipsis().Grow(1)
@@ -396,7 +403,7 @@ func detailText(node *nodeState) string {
 func (a *App) paintEntriesPanel(f *flex.Frame) {
 	f.Column().FillWidth().FillHeight().Children(func() {
 		f.Row().Height(54).PadX(16).Items(flex.Center).Gap(8).Children(func() {
-			f.Text("节点来源").Bold()
+			f.Text("节点来源").Bold().MinWidth(78)
 			f.Spacer()
 			if f.Button(a.ids.entryCollapse, "折叠").XSmall().Ghost().Clicked() {
 				a.entriesCollapsed = true
@@ -458,14 +465,34 @@ func (a *App) paintPill(f *flex.Frame, label string, size float32) {
 	background.Alpha *= 0.16
 	foreground := a.theme.Foreground
 	foreground.Alpha *= 0.85
-	pill := f.Row().Width(width).Height(size + 10).Background(background).Radius(4).Items(flex.Center)
+	pill := f.Row().Width(width).Height(size + 10).Shrink(0).Background(background).Radius(4).Items(flex.Center)
 	pill.Children(func() {
 		f.Text(label).FontSize(size).Color(foreground).TextCenter().Grow(1)
 	})
 }
 
 func (a *App) paintEntryCard(f *flex.Frame, entry *entryState) {
-	f.Column().FillWidth().Pad(10).Gap(5).Background(a.theme.Card).Border(1, a.theme.Border).Radius(a.theme.Metrics.RadiusSurface).Children(func() {
+	// 整张卡片可点：点空白处也能切换条目勾选，选中时用主题色淡底 + 主题色
+	// 边框标出，不再只靠左上角的小复选框。
+	background, border := a.theme.Card, a.theme.Border
+	hover := a.theme.Muted
+	if entry.selected {
+		background = a.theme.Primary
+		background.Alpha *= 0.06
+		border = a.theme.Primary
+		border.Alpha *= 0.45
+		hover = a.theme.Primary
+		hover.Alpha *= 0.10
+	}
+	card := f.Column().FillWidth().Pad(10).Gap(5).
+		Background(background).Border(1, border).
+		Radius(a.theme.Metrics.RadiusSurface).
+		HoverBackground(hover).
+		Hit(entry.ids.card, entry.cardLabel)
+	if card.Clicked() && !a.running() && !entry.fetching {
+		f.Canvas().AfterPaint(func() { a.toggleEntry(entry) })
+	}
+	card.Children(func() {
 		f.Row().Items(flex.Center).Gap(8).Children(func() {
 			check := f.Checkbox(entry.ids.check, entry.selected).
 				Label(entry.checkLabel).
@@ -494,6 +521,8 @@ func (a *App) paintEntryCard(f *flex.Frame, entry *entryState) {
 			if f.Button(entry.ids.refetch, entry.fetchLabel).XSmall().Outline().Disabled(a.running() || entry.fetching).Clicked() {
 				f.Canvas().AfterPaint(func() { a.refetchEntry(entry) })
 			}
+		})
+		f.Row().Gap(6).Children(func() {
 			if f.Button(entry.ids.edit, "编辑").XSmall().Ghost().Disabled(a.running()).Clicked() {
 				a.openEntryDialog(entry)
 			}
@@ -510,7 +539,8 @@ func (a *App) paintGroupHeader(f *flex.Frame, group *groupState) {
 			Radius(4).HoverBackground(a.theme.Muted).
 			Hit(group.entry.ids.groupToggle, group.toggleLabel)
 		if toggle.Clicked() {
-			a.toggleGroup(group)
+			// 重建 nodeItems 不能发生在遍历它的绘制回合里。
+			f.Canvas().AfterPaint(func() { a.toggleGroup(group) })
 		}
 		f.Text(group.entry.entry.Name).Bold()
 		f.Text(group.countText).FontSize(11).Muted()
@@ -542,7 +572,7 @@ func (a *App) paintNodeEmpty(f *flex.Frame) {
 				f.Row().Height(36).FillWidth().Gap(8).Items(flex.Center).Children(func() {
 					f.Text(entry.entry.Name).Bold()
 					f.Text(entry.statusText).FontSize(11).Muted().Ellipsis().Grow(1)
-					if f.Button(entry.ids.read, "读取").Small().Outline().Clicked() {
+					if f.Button(entry.ids.emptyRead, "读取").Small().Outline().Clicked() {
 						f.Canvas().AfterPaint(func() { a.readEntry(entry) })
 					}
 				})
