@@ -564,6 +564,12 @@ func (s *state) applyExported(event runEvent) {
 		s.rebuild()
 		return
 	}
+	// 用户在这一轮结束时按过停止：不推进剩余轮次。
+	if ref.stopped {
+		s.pendingExport = nil
+		s.rebuild()
+		return
+	}
 	if s.pendingExport != nil {
 		pending := s.pendingExport
 		s.pendingExport = nil
@@ -571,10 +577,8 @@ func (s *state) applyExported(event runEvent) {
 		s.rebuild()
 		return
 	}
-	if ref != s.currentRound() {
-		s.rebuild()
-		return
-	}
+	// 自动推进与用户当前翻到哪一轮无关：把索引归位到刚导出完的轮再推进。
+	s.roundIndex = s.roundPosition(ref)
 	s.advanceRound()
 }
 

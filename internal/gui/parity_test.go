@@ -405,3 +405,22 @@ func TestEntryKindSwitchToSubscription(t *testing.T) {
 	}
 	_ = ui.ID{}
 }
+
+// 导出结束时如果这一轮已被用户停止，不推进剩余轮次。
+func TestExportedStoppedRoundDoesNotAdvance(t *testing.T) {
+	dir := t.TempDir()
+	seedSettings(t, dir, quietSettings())
+	writeNodesFile(t, dir, "a.yaml", "HK-01")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+	clickID(t, driver, application.ids.startTest)
+	waitUntilIdle(t, application, driver)
+
+	round := application.rounds[0]
+	round.stopped = true
+	application.exporting = 1
+	application.applyExported(runEvent{kind: eventExported, roundRef: round, path: "导出.yaml"})
+	if application.roundIndex != 0 || len(application.rounds) != 1 {
+		t.Fatalf("停止后不应推进轮次：index=%d 轮数=%d", application.roundIndex, len(application.rounds))
+	}
+}
