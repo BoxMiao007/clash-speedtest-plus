@@ -1,7 +1,7 @@
 # 文件变更清单：GUI 补齐 TUI 能力（2026-10-30）
 
-> 范围：`550ebab..0b6edca`（第一版 GUI 文档收尾 → 本次功能补齐、修复与文档更新）。
-> 由 `git diff --name-status 550ebab 0b6edca` 生成；本记录文件自身也列在清单内。
+> 范围：`550ebab..741107a`（第一版 GUI 文档收尾 → 本次功能补齐、修复与文档更新）。
+> 由 `git diff --name-status 550ebab 741107a` 生成；本记录文件自身也列在清单内。
 > 测试用 exe 用 `*.exe` 忽略，不随仓库分发。
 
 统计：新增 36 个、修改 38 个、删除 0 个、重命名 0 个。
@@ -89,7 +89,7 @@
 ## 说明
 
 - 恢复的旧能力：`internal/output`、`internal/ip`、`internal/gist` 从 `5411565` 取回并改导入到 `internal/speedtester`；新增 `internal/export` 统一导出骨架与阈值过滤。
-- GUI 新代码：`internal/gui/export.go`（轮次导出编排）、`view_settings.go`（设置表单与校验）、`engine_test.go` 与 `parity_test.go`（新增 14 个 Driver/单元用例）。
+- GUI 新代码：`internal/gui/export.go`（轮次导出编排）、`view_settings.go`（设置表单与校验）、`engine_test.go` 与 `parity_test.go`（新增 16 个 Driver/单元用例）。
 - 数据与引擎：`internal/store` 增加条目种类、订阅缓存、版本 2 设置；`internal/speedtester` 增加订阅拉取与正文解析。
 - 修复：结果图目录不再要求位于进程工作目录之下（程序目录与 cwd 不同盘时可正常写图）。
 - 文档：规格重写、ADR-0018、ADR-0017 修订说明、相关 ADR 状态更新、README/GLOSSARY/AGENTS、验证记录与 headless 日志。

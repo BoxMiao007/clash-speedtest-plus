@@ -121,8 +121,8 @@ PASS：headless 走查通过
 ## 8. 测试 exe
 
 - 文件：`clash-speedtest-plus.exe`（仓库根目录，`*.exe` 已忽略，不随仓库分发）
-- 版本：`v2.7.0-viva-test`，提交 `0b6edca`
-- 大小：51,122,688 字节；SHA-256：`9e6ed46d998b93c10225ad20587b217b86138675a8b458527364a478c501d654`
-- 构建：`CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H=windowsgui -X main.version=v2.7.0-viva-test -X main.commit=0b6edca" -o clash-speedtest-plus.exe .`
+- 版本：`v2.7.0-viva-test`，提交 `741107a`
+- 大小：51,125,248 字节；SHA-256：`52d0fbb96507d6ee23da44b07a6d037154f39cdadde1bc825c9e76102723b18c`
+- 构建：`CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H=windowsgui -X main.version=v2.7.0-viva-test -X main.commit=741107a" -o clash-speedtest-plus.exe .`
 - 文件类型：PE32+ GUI（x86-64）
 - 交付文件清单：[2026-10-30-file-changes.md](2026-10-30-file-changes.md)
