@@ -108,14 +108,17 @@ func TestScrollbarsFollowOverflow(t *testing.T) {
 		t.Fatal("设置内容溢出时应显示滚动条")
 	}
 
-	clickLabel(t, driver, "节点选择")
+	clickLabel(t, driver, "测速")
 	clickID(t, driver, application.ids.startTest)
 	waitUntilIdle(t, application, driver)
-	if application.active != viewResults {
-		t.Fatal("开测后应切到结果视图")
+	if application.active != viewTest {
+		t.Fatal("开测后应留在合并的测速视图")
 	}
-	if !hasHitID(driver.Snapshot(), application.ids.resultBar) {
-		t.Fatal("结果列表内容溢出时应显示滚动条")
+	if !hasHitID(driver.Snapshot(), application.ids.nodeBar) {
+		t.Fatal("同一张表在测完后仍应保留滚动条")
+	}
+	if !hasText(driver.Snapshot(), "已完成") {
+		t.Fatalf("合并视图应显示结果进度；文本=%v", driver.Snapshot().Labels)
 	}
 }
 

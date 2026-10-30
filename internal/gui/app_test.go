@@ -430,7 +430,6 @@ func TestRefetchKeepsResultAndDropsRemovedNode(t *testing.T) {
 
 	clickID(t, driver, application.ids.startTest)
 	waitUntilIdle(t, application, driver)
-	clickID(t, driver, application.ids.backToSelect)
 
 	infoBefore := application.byKey["e1/"+nodeIdentityOf(t, application, "HK-01")].infoText
 	if !strings.Contains(infoBefore, "上次") {
@@ -644,7 +643,7 @@ func TestPresetRestoresModeAndSurvivesRestart(t *testing.T) {
 	}
 }
 
-func TestStartTestSwitchesViewSortsBySpeedAndKeepsRowIDs(t *testing.T) {
+func TestStartTestSortsBySpeedAndKeepsRowIDs(t *testing.T) {
 	dir := t.TempDir()
 	writeNodesFile(t, dir, "a.yaml", "HK-01", "HK-02")
 	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
@@ -660,8 +659,8 @@ func TestStartTestSwitchesViewSortsBySpeedAndKeepsRowIDs(t *testing.T) {
 	}
 	clickID(t, driver, application.ids.startTest)
 	waitUntilIdle(t, application, driver)
-	if application.active != viewResults {
-		t.Fatal("开始测速应自动切到下载速度视图")
+	if application.active != viewTest {
+		t.Fatal("开始测速应留在合并的测速视图，不再切到单独的结果视图")
 	}
 	if len(application.results) != 2 || application.results[0].name != "HK-02" {
 		t.Fatalf("结果应按下载速度降序，实际 %v", resultNames(application))
@@ -702,7 +701,6 @@ func TestExcludeFailedOnlySendsHealthyNodes(t *testing.T) {
 
 	clickID(t, driver, application.ids.startTest)
 	waitUntilIdle(t, application, driver)
-	clickID(t, driver, application.ids.backToSelect)
 	clickID(t, driver, application.ids.excludeFailed)
 
 	excluded := 0

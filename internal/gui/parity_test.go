@@ -179,7 +179,45 @@ func TestMultipleEntriesRunSequentialRounds(t *testing.T) {
 		t.Fatalf("最后一轮批量 = %d，期望 2", got)
 	}
 	if !hasText(driver.Snapshot(), "第 2/2 轮") {
-		t.Fatalf("结果视图应显示轮次；文本=%v", driver.Snapshot().Labels)
+		t.Fatalf("合并视图应显示轮次；文本=%v", driver.Snapshot().Labels)
+	}
+}
+
+// 多轮时「上一轮/下一轮」把对应条目的分组滚到列表顶部，而不是切走列表。
+func TestRoundSwitchScrollsToEntryGroup(t *testing.T) {
+	dir := t.TempDir()
+	seedSettings(t, dir, quietSettings())
+	namesA := make([]string, 0, 30)
+	namesB := make([]string, 0, 30)
+	for index := 0; index < 30; index++ {
+		namesA = append(namesA, fmt.Sprintf("A-%02d", index))
+		namesB = append(namesB, fmt.Sprintf("B-%02d", index))
+	}
+	writeNodesFile(t, dir, "a.yaml", namesA...)
+	writeNodesFile(t, dir, "b.yaml", namesB...)
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	seedEntry(t, dir, store.Entry{ID: "e2", Name: "机场 B", Path: "b.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+
+	clickID(t, driver, application.ids.startTest)
+	waitUntilIdle(t, application, driver)
+	if application.roundIndex != 1 {
+		t.Fatalf("测完应停在最后一轮，实际第 %d 轮", application.roundIndex+1)
+	}
+	if application.nodeOffset <= 0 {
+		t.Fatal("自动推进到第二轮时应把机场 B 分组滚进视口")
+	}
+
+	clickID(t, driver, application.ids.roundPrev)
+	if application.roundIndex != 0 {
+		t.Fatalf("点上一轮后应回到第 1 轮，实际第 %d 轮", application.roundIndex+1)
+	}
+	if application.nodeOffset != 0 {
+		t.Fatalf("回到第 1 轮应滚到列表顶部，实际偏移 %v", application.nodeOffset)
+	}
+	clickID(t, driver, application.ids.roundNext)
+	if application.roundIndex != 1 || application.nodeOffset <= 0 {
+		t.Fatalf("点下一轮应回到第 2 轮并滚动到对应分组：轮次=%d 偏移=%v", application.roundIndex+1, application.nodeOffset)
 	}
 }
 
@@ -206,15 +244,11 @@ func TestSettingsSavePersistsAndConfiguresEngine(t *testing.T) {
 		t.Fatalf("设置没有保存：%+v（界面状态：%q，表单错误：%q）", settings, application.status, application.settingsForm.err)
 	}
 
-	clickLabel(t, driver, "节点选择")
+	clickLabel(t, driver, "测速")
 	clickID(t, driver, application.ids.startTest)
 	waitUntilIdle(t, application, driver)
 	if got := runner.lastConfig(); got.Mode != "full" || got.DownloadMB != 12 {
 		t.Fatalf("引擎没有拿到新参数：%+v", got)
-	}
-	application.active = viewResults
-	if err := driver.Pump(); err != nil {
-		t.Fatal(err)
 	}
 	if !hasText(driver.Snapshot(), "上传速度") {
 		t.Fatalf("完整模式应显示上传列；文本=%v", driver.Snapshot().Labels)
@@ -322,14 +356,25 @@ func TestResultRowTogglesDetailPanel(t *testing.T) {
 	clickID(t, driver, application.ids.startTest)
 	waitUntilIdle(t, application, driver)
 	node := application.results[0]
+	selectedBefore := node.selected
 	clickID(t, driver, node.ids.row)
 	snapshot := driver.Snapshot()
 	if !hasText(snapshot, "下载错误") && !hasText(snapshot, "上次测速：") {
 		t.Fatalf("详情面板没有出现；文本=%v", snapshot.Labels)
 	}
+	if node.selected != selectedBefore {
+		t.Fatal("点行只打开详情，不应改变勾选")
+	}
 	clickID(t, driver, node.ids.row)
 	if hasText(driver.Snapshot(), "上次测速：") {
 		t.Fatal("再次点击行应关闭详情")
+	}
+	clickID(t, driver, node.ids.check)
+	if node.selected == selectedBefore {
+		t.Fatal("点复选框应切换勾选")
+	}
+	if hasText(driver.Snapshot(), "上次测速：") {
+		t.Fatal("点复选框不应打开详情")
 	}
 }
 
