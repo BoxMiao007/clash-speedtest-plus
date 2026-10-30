@@ -14,9 +14,9 @@
 - 过滤结果现在决定测速与导出范围（与旧 TUI 的 `-f` 一致）。
 - 恢复 `internal/output`、`internal/ip`、`internal/gist`；新增 `internal/export`；`go.mod` 新增 `golang.org/x/image`。
 
-## 2. Driver 测试（`internal/gui`，27 个）
+## 2. Driver 测试（`internal/gui`，28 个）
 
-第一版 17 个用例保留并继续通过；本次新增 10 个：
+第一版 17 个用例保留并继续通过；本次新增 11 个：
 
 | 用例 | 覆盖 |
 |---|---|
@@ -30,6 +30,7 @@
 | `TestResultRowTogglesDetailPanel` | 点行展开详情、再点收起 |
 | `TestSortHeadersReorderResults` | 点表头换列、再点反转方向 |
 | `TestManualTSVExport` | 手动导出结果表，表头与节点行齐全 |
+| `TestExportedStoppedRoundDoesNotAdvance` | 已停止的轮导出结束后不推进剩余轮次 |
 
 其他包：store 25（新增订阅缓存、设置归一化、版本 1 兼容）、filter 16、speedtester 31（新增 4 个订阅拉取用例）、output 34、export 5、ip 6、gist 5。
 
