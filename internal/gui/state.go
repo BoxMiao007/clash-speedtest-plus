@@ -121,6 +121,23 @@ type state struct {
 	resultListBox   flex.Box
 	resultListValid bool
 
+	// 节点来源面板：折叠状态、拖动后的宽度，以及滚动条的拖动状态。
+	// 宽度由 flex.Splitter 维护（Pos = 面板宽度）；折叠时不声明 Splitter。
+	entriesCollapsed bool
+	entriesSplit     flex.SplitterState
+	entryScrollBox   flex.Box
+	entryScrollValid bool
+
+	settingsScrollBox   flex.Box
+	settingsScrollValid bool
+
+	// 四条滚动条的拖动状态：滑块抓取点与是否正在拖。偏移量仍由列表
+	// （nodeOffset / resultOffset）或 flex.ScrollState 持有。
+	entryBar    barState
+	nodeBar     barState
+	resultBar   barState
+	settingsBar barState
+
 	engine      Runner
 	run         *runState
 	pendingMu   sync.Mutex
@@ -404,15 +421,16 @@ func newState(opts Options) (*state, error) {
 
 	window := &ui.Tree{}
 	value := &state{
-		tree:      window,
-		ids:       newIDs(window),
-		baseDir:   baseDir,
-		dataDir:   dataDir,
-		theme:     theme,
-		active:    viewNodes,
-		presetSel: -1,
-		byKey:     make(map[string]*nodeState),
-		status:    "就绪",
+		tree:         window,
+		ids:          newIDs(window),
+		baseDir:      baseDir,
+		dataDir:      dataDir,
+		theme:        theme,
+		active:       viewNodes,
+		presetSel:    -1,
+		byKey:        make(map[string]*nodeState),
+		status:       "就绪",
+		entriesSplit: flex.SplitterState{Pos: entriesPanelWidth},
 	}
 	value.dataText = "数据目录：" + dataDir
 	value.engine = opts.Runner

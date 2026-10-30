@@ -13,8 +13,17 @@ type ids struct {
 	dialogs   ui.Scope
 	menu      ui.Scope
 
-	newEntry    ui.ID
-	entryScroll ui.ID
+	newEntry      ui.ID
+	entryScroll   ui.ID
+	entryCollapse ui.ID
+	entryExpand   ui.ID
+	entrySplitter ui.ID
+
+	// 滚动条身份：节点来源、节点列表、结果列表、设置四处各一条。
+	entryBar    ui.ID
+	nodeBar     ui.ID
+	resultBar   ui.ID
+	settingsBar ui.ID
 
 	filterField  ui.ID
 	filterApply  ui.ID
@@ -119,6 +128,13 @@ func newIDs(tree *ui.Tree) ids {
 
 	value.newEntry = tree.ID(page, "new-entry")
 	value.entryScroll = tree.ID(page, "entry-scroll")
+	value.entryCollapse = tree.ID(page, "entry-collapse")
+	value.entryExpand = tree.ID(page, "entry-expand")
+	value.entrySplitter = tree.ID(page, "entry-splitter")
+	value.entryBar = tree.ID(page, "entry-scrollbar")
+	value.nodeBar = tree.ID(page, "node-scrollbar")
+	value.resultBar = tree.ID(page, "result-scrollbar")
+	value.settingsBar = tree.ID(page, "settings-scrollbar")
 
 	value.filterField = tree.ID(page, "filter-expression")
 	value.filterApply = tree.ID(page, "filter-apply")

@@ -5,16 +5,29 @@ import (
 	"github.com/vivaui/viva/ui"
 )
 
+// 节点来源面板的宽度约束：默认 320，可拖动到 220；折叠后只留一条窄栏。
+const (
+	entriesPanelWidth float32 = 320
+	entriesPanelMin   float32 = 220
+	entriesRailWidth  float32 = 56
+	contentPanelMin   float32 = 420
+)
+
 func (a *App) paintEntriesPanel(f *flex.Frame) {
-	f.Column().Width(320).FillHeight().Children(func() {
+	f.Column().FillWidth().FillHeight().Children(func() {
 		f.Row().Height(54).PadX(16).Items(flex.Center).Gap(8).Children(func() {
 			f.Text("节点来源").Bold()
 			f.Spacer()
+			if f.Button(a.ids.entryCollapse, "折叠").XSmall().Ghost().Clicked() {
+				a.entriesCollapsed = true
+			}
 			if f.Button(a.ids.newEntry, "新建条目").Small().Outline().Disabled(a.running()).Clicked() {
 				a.openEntryDialog(nil)
 			}
 		})
-		f.ScrollArea(a.ids.entryScroll).Grow(1).FillWidth().PadSides(12, 12, 12, 12).Gap(10).Children(func() {
+		scroll := f.ScrollArea(a.ids.entryScroll).Grow(1).FillWidth().PadSides(12, 12, 12, 12).Gap(10)
+		a.entryScrollBox, a.entryScrollValid = scroll, true
+		scroll.Children(func() {
 			if len(a.entries) == 0 {
 				f.Column().Pad(10).Gap(6).Children(func() {
 					f.Text("还没有节点来源条目。").FontSize(13).Bold()
@@ -26,6 +39,16 @@ func (a *App) paintEntriesPanel(f *flex.Frame) {
 				a.paintEntryCard(f, entry)
 			}
 		})
+	})
+}
+
+// paintEntriesRail 是折叠后的窄栏：只留展开按钮，宽度固定，不占内容。
+func (a *App) paintEntriesRail(f *flex.Frame) {
+	f.Column().Width(entriesRailWidth).FillHeight().PadY(10).PadX(8).Gap(8).Children(func() {
+		if f.Button(a.ids.entryExpand, "展开").XSmall().Outline().Clicked() {
+			a.entriesCollapsed = false
+		}
+		f.Text("来源").FontSize(10).Muted()
 	})
 }
 

@@ -12,7 +12,7 @@ import (
 var (
 	viewLabels      = []string{"节点选择", "测速结果", "设置"}
 	modeLabels      = []string{"简化", "正则"}
-	combineLabels   = []string{"与", "或"}
+	combineLabels   = []string{"全部命中", "任一命中"}
 	entryKindLabels = []string{"本地文件", "订阅地址"}
 )
 
@@ -66,6 +66,7 @@ func New(opts Options) (*App, error) {
 		OnWake:      model.applyPending,
 		Invalidator: &application.invalidator,
 		OnScroll:    application.onScroll,
+		OnKey:       application.onKey,
 		TextInput:   flex.Fields(inputs...),
 		OnClosed:    model.close,
 		ClearColor:  appColor(model.theme.Background),
@@ -113,6 +114,15 @@ func pointIn(rect ui.Rect, x, y float32) bool {
 	return x >= rect.X && x < rect.X+rect.Width && y >= rect.Y && y < rect.Y+rect.Height
 }
 
+// onKey 只转交聚焦中的分隔条：方向键微调「节点来源」宽度。折叠时没有
+// 分隔条，按键原样放行。
+func (a *App) onKey(event ui.KeyEvent) ui.EventResult {
+	if a.entriesCollapsed {
+		return ui.EventResult{}
+	}
+	return a.entriesSplit.Key(event)
+}
+
 func scrollList(offset *float32, content, viewport, delta float32) ui.EventResult {
 	maximum := content - viewport
 	if maximum < 0 {
@@ -145,6 +155,8 @@ func (a *App) paint(canvas *ui.Canvas, size ui.Size) {
 		a.resultViewport = a.resultListBox.Rect()
 		a.clampResultOffset()
 	}
+	// 滚动条画在内容之上：flex 只负责裁剪与偏移，轨道、滑块与拖动都在应用侧。
+	a.paintScrollBars(canvas)
 }
 
 func (a *App) paintPage(f *flex.Frame) {
@@ -152,8 +164,19 @@ func (a *App) paintPage(f *flex.Frame) {
 		a.paintHeader(f)
 		a.paintFilterBar(f)
 		f.Row().Grow(1).FillWidth().Children(func() {
-			a.paintEntriesPanel(f)
-			f.Column().Width(1).FillHeight().Background(a.theme.Border)
+			if a.entriesCollapsed {
+				a.paintEntriesRail(f)
+				f.Column().Width(1).FillHeight().Background(a.theme.Border)
+			} else {
+				// 第一栏宽度由分隔条维护：拖动或方向键改 SplitterState.Pos，
+				// 下一帧按新宽度排版。
+				f.Column().Width(a.entriesSplit.Pos).FillHeight().Children(func() {
+					a.paintEntriesPanel(f)
+				})
+				f.Splitter(a.ids.entrySplitter, &a.entriesSplit).
+					Mins(entriesPanelMin, contentPanelMin).
+					Label("调整节点来源面板宽度")
+			}
 			a.paintContent(f)
 		})
 		a.paintFooter(f)
@@ -206,6 +229,11 @@ func (a *App) paintFilterBar(f *flex.Frame) {
 				} else {
 					a.setFilterCombine(filter.CombineOr)
 				}
+			}
+			if a.filterCombine == filter.CombineAnd {
+				f.Text("每个关键词都要出现").FontSize(10).Muted().Ellipsis()
+			} else {
+				f.Text("任一关键词出现即可").FontSize(10).Muted().Ellipsis()
 			}
 		} else {
 			f.Text("完整正则，区分大小写").FontSize(11).Muted()

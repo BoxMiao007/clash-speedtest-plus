@@ -292,7 +292,9 @@ func (a *App) paintSettings(f *flex.Frame) {
 			f.Text(a.settingsForm.err).FontSize(11).Color(a.theme.Danger).Ellipsis()
 		})
 	}
-	f.ScrollArea(a.ids.settingsScroll).Grow(1).FillWidth().PadSides(20, 20, 12, 12).Gap(2).Children(func() {
+	scroll := f.ScrollArea(a.ids.settingsScroll).Grow(1).FillWidth().PadSides(20, 20, 12, 12).Gap(2)
+	a.settingsScrollBox, a.settingsScrollValid = scroll, true
+	scroll.Children(func() {
 		a.settingsSection(f, "测速模式")
 		f.Row().Height(44).FillWidth().Items(flex.Center).Gap(10).Children(func() {
 			f.Text("模式").FontSize(12).Muted().Width(150)
@@ -324,20 +326,22 @@ func (a *App) paintSettings(f *flex.Frame) {
 			if index, ok := f.Choice(a.ids.settingsOutput, outputChoiceLabels, a.settingsForm.outputIdx).ChosenIndex(); ok {
 				a.settingsForm.outputIdx = index
 			}
-			f.Text("关闭 / 写程序目录 / 写指定路径").FontSize(10).Muted()
+			f.Text("每轮测完是否自动写配置文件：关闭 = 不写；其余见下方开关").FontSize(10).Muted().Ellipsis().Grow(1)
 		})
 		a.settingsFieldRow(f, "输出路径", "自定义模式的词干；自动补 .yaml", &a.settingsForm.outputPath, a.ids.setOutputPath, "例如 D:/订阅/导出.yaml")
-		f.Row().Height(40).FillWidth().Items(flex.Center).Gap(16).Children(func() {
-			if f.Checkbox(a.ids.setImage, a.settingsForm.imageEnabled).Label("导出结果图").Clicked() {
-				a.settingsForm.imageEnabled = !a.settingsForm.imageEnabled
-			}
-			if f.Checkbox(a.ids.setSpeedOnly, a.settingsForm.imageSpeedOnly).Label("结果图只保留有速度的行").Clicked() {
-				a.settingsForm.imageSpeedOnly = !a.settingsForm.imageSpeedOnly
-			}
-			if f.Checkbox(a.ids.setRename, a.settingsForm.renameEnabled).Label("按 IP 归属地与速度重命名").Clicked() {
-				a.settingsForm.renameEnabled = !a.settingsForm.renameEnabled
-			}
-		})
+		// 三个开关各自控制一种产物，逐行给标签与说明，避免只看名字猜作用。
+		if a.settingsToggleRow(f, a.ids.setImage, a.settingsForm.imageEnabled,
+			"每轮自动保存结果图（PNG）", "测完在输出目录生成结果图；关闭后仍可在结果视图点「结果图」手动保存") {
+			a.settingsForm.imageEnabled = !a.settingsForm.imageEnabled
+		}
+		if a.settingsToggleRow(f, a.ids.setSpeedOnly, a.settingsForm.imageSpeedOnly,
+			"结果图只保留有速度的节点", "只影响结果图的内容；结果表与导出的配置文件不受影响") {
+			a.settingsForm.imageSpeedOnly = !a.settingsForm.imageSpeedOnly
+		}
+		if a.settingsToggleRow(f, a.ids.setRename, a.settingsForm.renameEnabled,
+			"导出配置时按 IP 归属地重命名节点", "只改导出文件里的节点名；关闭则保留原始名称，节点多时命名会逐条查询 IP") {
+			a.settingsForm.renameEnabled = !a.settingsForm.renameEnabled
+		}
 		a.settingsFieldRow(f, "重命名模板", "Go 模板；空 = 内置「🇭🇰 HK 001 | ⬇️ 12.3MB/s」格式", &a.settingsForm.renameTemplate, a.ids.setRenameTmpl, "{{.Flag}} {{.CountryCode}} {{.Index}} | {{.Direction}} {{.Speed}}{{.SpeedUnit}}")
 
 		a.settingsSection(f, "上传")
@@ -370,4 +374,21 @@ func (a *App) settingsFieldRow(f *flex.Frame, label, hint string, field *flex.Fi
 		})
 		f.Field(field, id, label, placeholder).Grow(1)
 	})
+}
+
+// settingsToggleRow 画一行开关：勾选框 + 标签 + 一句说明，返回本帧是否被点击。
+// 说明始终可见，用户不用记住三个开关分别对应哪种产物；勾选框的命中区向右
+// 扩到标签末尾，点标签也能切换。
+func (a *App) settingsToggleRow(f *flex.Frame, id ui.ID, on bool, label, hint string) bool {
+	clicked := false
+	f.Row().Height(42).FillWidth().Gap(10).Items(flex.Center).Children(func() {
+		labelWidth := f.Canvas().TextWidth(label, 12)
+		box := f.Checkbox(id, on).Label(label).HitOutset(0, labelWidth+8, 0, 0)
+		if box.Clicked() {
+			clicked = true
+		}
+		f.Text(label).FontSize(12)
+		f.Text(hint).FontSize(10).Muted().Ellipsis().Grow(1)
+	})
+	return clicked
 }
