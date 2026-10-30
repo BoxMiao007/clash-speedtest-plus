@@ -384,6 +384,7 @@ go test ./... -count=1
 - [x] 审查修复：卡片选中态、右键测试遵守过滤、详情刷新、运行中切轮账本、挂起导出、拉取代次与超时（[ADR-0024](../adr/0024-audit-fixes.md)）。
 - [x] 功能缺失补齐：快速模式失败判定、手动导出唯一路径与失败重试、语法提示、组错误、设置校验、订阅时间戳（[ADR-0027](../adr/0027-feature-gaps.md)）。
 - [x] 体验补齐：全局全选/全不选、清空结果、输出目录浏览、拖放添加条目、关于与帮助、窗口几何记忆、结果图预览、打开配置所在目录、订阅全部重新获取、快捷键（[ADR-0028](../adr/0028-experience-gaps.md)）。
+- [x] 交互优化：卡片「打开目录」入口、行尾三点图标详情弹窗（从图标处展开）、行点击与 Shift/Ctrl 多选（[ADR-0029](../adr/0029-interaction-refinements.md)）。
 - [x] gofmt / go vet / go test 全绿；Driver 用例与 headless 走查记录；未测项列出。
 - [x] benchmark 仍为 0 allocs/op；新增依赖体积/启动/内存记录。
 - [x] README / AGENTS.md / GLOSSARY.md / ADR / 验证记录同步。
