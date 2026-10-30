@@ -76,6 +76,27 @@ func (s *state) setGroupSelected(group *groupState, selected bool) {
 	s.rebuild()
 }
 
+// groupToggleText 预计算组标题折叠按钮的箭头与无障碍名称，绘制里不拼串。
+func groupToggleText(entry *entryState) (string, string) {
+	if entry.collapsed {
+		return "▸", "展开 " + entry.entry.Name + " 的节点"
+	}
+	return "▾", "折叠 " + entry.entry.Name + " 的节点"
+}
+
+// toggleGroup 折叠/展开某个条目的节点行。只影响展示，不动勾选与测速范围。
+func (s *state) toggleGroup(group *groupState) {
+	group.entry.collapsed = !group.entry.collapsed
+	group.collapsed = group.entry.collapsed
+	group.arrow, group.toggleLabel = groupToggleText(group.entry)
+	s.buildNodeItems()
+	s.clampNodeOffset()
+	s.status = "已折叠 " + group.entry.entry.Name
+	if !group.collapsed {
+		s.status = "已展开 " + group.entry.entry.Name
+	}
+}
+
 func (s *state) excludeFailed() {
 	count := 0
 	for _, entry := range s.entries {

@@ -17,6 +17,9 @@ const (
 
 // 合并视图（测速）的列宽。节点名列吃剩余宽度；状态与数值列定宽右对齐。
 const (
+	// groupBarHeight 是固定在列表顶部的分组标题高度（32px 标题 + 1px 分隔线）。
+	groupBarHeight float32 = 33
+
 	colCheck   float32 = 40
 	colStatus  float32 = 52
 	colLatency float32 = 62
@@ -51,27 +54,76 @@ func (a *App) paintTest(f *flex.Frame) {
 	list := f.Stack().Grow(1).FillWidth().Clip()
 	a.nodeListBox = list
 	a.nodeListValid = true
+	// 当前停在视口顶部的条目分组：组标题滚出视口后固定在列表顶部，滚到
+	// 下一个条目时自动换成下一组的标题（ADR-0023）。
+	var sticky *groupState
+	for _, item := range a.nodeItems {
+		if item.kind != itemHeader {
+			continue
+		}
+		if item.y-a.nodeOffset <= 0 {
+			sticky = item.group
+			continue
+		}
+		break
+	}
 	list.Children(func() {
 		for _, item := range a.nodeItems {
 			top := item.y - a.nodeOffset
 			if top+item.height < 0 || top > viewport {
 				continue
 			}
-			row := f.Column().Absolute().Top(top).Left(0).Right(0).Height(item.height).PadX(20)
-			if item.kind == itemHeader {
-				row.Children(func() {
-					a.paintGroupHeader(f, item.group)
-				})
+			if item.kind == itemHeader && item.group == sticky {
+				// 这一组的固定标题由下面的浮层画，避免同一身份出现两次。
 				continue
 			}
-			row.Children(func() {
-				a.paintNodeRow(f, item.node)
+			if sticky != nil {
+				// 固定标题盖住的行要单独裁剪：只画 33px 以下的部分，命中区也
+				// 随裁剪收窄，避免点到被盖住的节点；内容本身不移动，不产生跳动。
+				bottom := top + item.height
+				if bottom <= groupBarHeight {
+					continue
+				}
+				if top < groupBarHeight {
+					clip := f.Column().Absolute().Top(groupBarHeight).Left(0).Right(0).
+						Height(bottom - groupBarHeight).Clip()
+					clip.Children(func() {
+						a.paintListRow(f, top-groupBarHeight, item)
+					})
+					continue
+				}
+			}
+			a.paintListRow(f, top, item)
+		}
+		if sticky != nil {
+			// 被盖住的行已经按 33px 裁掉，固定标题空白处不会命中下面任何行。
+			bar := f.Column().Absolute().Top(0).Left(0).Right(0).Height(groupBarHeight).Background(a.theme.Background)
+			bar.Children(func() {
+				f.Column().Height(32).FillWidth().PadX(20).Children(func() {
+					a.paintGroupHeader(f, sticky)
+				})
+				f.Column().Height(1).FillWidth().Background(a.theme.Border)
 			})
 		}
 	})
 	if a.detailNode != nil {
 		a.paintDetailPanel(f)
 	}
+}
+
+// paintListRow 在当前位置声明一行（分组标题或节点行）。top 是相对列表的
+// 坐标，固定标题存在时可能为负（被裁剪的滚动内容）。
+func (a *App) paintListRow(f *flex.Frame, top float32, item listItem) {
+	row := f.Column().Absolute().Top(top).Left(0).Right(0).Height(item.height).PadX(20)
+	if item.kind == itemHeader {
+		row.Children(func() {
+			a.paintGroupHeader(f, item.group)
+		})
+		return
+	}
+	row.Children(func() {
+		a.paintNodeRow(f, item.node)
+	})
 }
 
 // showResultBar 决定是否显示结果条：跑过测速、有结果或在导出时才有意义，
@@ -454,8 +506,17 @@ func (a *App) paintEntryCard(f *flex.Frame, entry *entryState) {
 
 func (a *App) paintGroupHeader(f *flex.Frame, group *groupState) {
 	f.Row().Height(32).FillWidth().Items(flex.Center).Gap(8).Children(func() {
+		toggle := f.Text(group.arrow).FontSize(12).Muted().Width(18).TextCenter().
+			Radius(4).HoverBackground(a.theme.Muted).
+			Hit(group.entry.ids.groupToggle, group.toggleLabel)
+		if toggle.Clicked() {
+			a.toggleGroup(group)
+		}
 		f.Text(group.entry.entry.Name).Bold()
 		f.Text(group.countText).FontSize(11).Muted()
+		if group.collapsed {
+			f.Text("已折叠").FontSize(11).Muted()
+		}
 		f.Spacer()
 		if f.Button(group.entry.ids.selectAll, "全选").XSmall().Ghost().Clicked() {
 			a.setGroupSelected(group, true)

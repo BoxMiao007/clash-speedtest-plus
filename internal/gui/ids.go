@@ -226,27 +226,29 @@ func newIDs(tree *ui.Tree) ids {
 // entryIDs 是每个条目的动态身份。条目有稳定 ID，所以删除/重排其它条目时
 // 这些身份不变。
 type entryIDs struct {
-	scope      ui.Scope
-	check      ui.ID
-	read       ui.ID
-	refetch    ui.ID
-	edit       ui.ID
-	remove     ui.ID
-	selectAll  ui.ID
-	selectNone ui.ID
+	scope       ui.Scope
+	check       ui.ID
+	read        ui.ID
+	refetch     ui.ID
+	edit        ui.ID
+	remove      ui.ID
+	selectAll   ui.ID
+	selectNone  ui.ID
+	groupToggle ui.ID
 }
 
 func registerEntryIDs(tree *ui.Tree, parent ui.Scope, entryID string) entryIDs {
 	scope := tree.Sub(parent, tree.Name("entry:"+entryID))
 	return entryIDs{
-		scope:      scope,
-		check:      tree.ID(scope, "check"),
-		read:       tree.ID(scope, "read"),
-		refetch:    tree.ID(scope, "refetch"),
-		edit:       tree.ID(scope, "edit"),
-		remove:     tree.ID(scope, "remove"),
-		selectAll:  tree.ID(scope, "select-all"),
-		selectNone: tree.ID(scope, "select-none"),
+		scope:       scope,
+		check:       tree.ID(scope, "check"),
+		read:        tree.ID(scope, "read"),
+		refetch:     tree.ID(scope, "refetch"),
+		edit:        tree.ID(scope, "edit"),
+		remove:      tree.ID(scope, "remove"),
+		selectAll:   tree.ID(scope, "select-all"),
+		selectNone:  tree.ID(scope, "select-none"),
+		groupToggle: tree.ID(scope, "group-toggle"),
 	}
 }
 

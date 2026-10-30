@@ -198,6 +198,7 @@ type entryState struct {
 	loadErr    string
 	missing    bool
 	fetching   bool
+	collapsed  bool
 	nodes      []*nodeState
 	group      *groupState
 	checkLabel string
@@ -210,10 +211,13 @@ type entryState struct {
 }
 
 type groupState struct {
-	entry     *entryState
-	nodes     []*nodeState
-	selected  int
-	countText string
+	entry       *entryState
+	nodes       []*nodeState
+	selected    int
+	collapsed   bool
+	countText   string
+	arrow       string
+	toggleLabel string
 }
 
 type listItemKind uint8
@@ -860,7 +864,7 @@ func (s *state) rebuild() {
 		if !entry.selected {
 			continue
 		}
-		group := &groupState{entry: entry}
+		group := &groupState{entry: entry, collapsed: entry.collapsed}
 		for _, node := range entry.nodes {
 			total++
 			if node.selected {
@@ -878,6 +882,7 @@ func (s *state) rebuild() {
 		entry.statusText = entryStatusText(entry)
 		if len(group.nodes) > 0 {
 			group.countText = fmt.Sprintf("%d 个节点 · 已选 %d", len(group.nodes), group.selected)
+			group.arrow, group.toggleLabel = groupToggleText(entry)
 			entry.group = group
 			groups = append(groups, group)
 		}
@@ -952,6 +957,10 @@ func (s *state) buildNodeItems() {
 	for _, group := range s.groups {
 		items = append(items, listItem{kind: itemHeader, y: y, height: 32, group: group})
 		y += 32
+		if group.collapsed {
+			y += 10
+			continue
+		}
 		for _, node := range group.nodes {
 			items = append(items, listItem{kind: itemNode, y: y, height: 40, node: node})
 			y += 40
