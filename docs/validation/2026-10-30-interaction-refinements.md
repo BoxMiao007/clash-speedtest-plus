@@ -25,6 +25,10 @@
 - 行选择（marked）与勾选（selected）分离后，`handleRowClick` 不再调用 `rebuild`（marked 不影响可见集合），勾选相关操作各自 `rebuild`。
 - dismiss 点击的同一事件 pass 里关闭弹窗后必须 `return`，不能继续绘制弹窗内容（空指针）。
 
+## 测试包
+
+`clash-speedtest-plus.exe`：`v2.9.1-viva-test`，对应提交 `22810a4`，51,382,272 字节，SHA-256 `c13e0ea3092bc07f664ba8fc9fd6db72b1a42c65d5c4cca52321c2969d31838b`。
+
 ## 未覆盖（待真机确认）
 
 - ⋮ 图标在高 DPI 下的字形渲染与点击热区手感。
