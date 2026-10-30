@@ -130,13 +130,13 @@ headless 截图（点击 A-01 后把鼠标移入/移出该行）确认选中行�
 
 ## 11. 测试 exe
 
-- 版本：`v2.8.7-viva-test`，对应代码提交 `HEADFIX`
+- 版本：`v2.8.7-viva-test`，对应代码提交 `d0a465f`
 - 大小：51,172,864 字节（与上一版基本持平）
-- SHA-256：`9bb87e6d2a0b85d8a66add0e8f607932396f7005e998b909ce9898668160f124`
+- SHA-256：`a406562d44e35053ef316b1b6fa1c73135d2423329030ee1e9101221401a4370`
 - 形态：PE32+ GUI x86-64
 
 ```bash
 CGO_ENABLED=0 go build -trimpath \
-  -ldflags "-s -w -H=windowsgui -X main.version=v2.8.7-viva-test -X main.commit=HEADFIX" \
+  -ldflags "-s -w -H=windowsgui -X main.version=v2.8.7-viva-test -X main.commit=d0a465f" \
   -o clash-speedtest-plus.exe .
 ```
