@@ -72,3 +72,16 @@ go test ./... -count=1   # 8 个包全部 ok
 - `internal/gui/interaction_test.go`：折叠与固定标题两个用例。
 - `scripts/headless-walkthrough.sh`：折叠/展开与 `已折叠` 断言。
 - 文档：`docs/specs/0001-viva-gui.md`、`GLOSSARY.md`、`README.md`、`AGENTS.md`、新增 [ADR-0023](../adr/0023-group-collapse-sticky.md)、本文件、`headless-walkthrough.log`。
+
+## 9. 测试 exe
+
+- 版本：`v2.8.3-viva-test`，对应代码提交 `26a4503`
+- 大小：51,157,504 字节（上一版 v2.8.2 为 51,145,728 字节，+12 KB）
+- SHA-256：`5f8d7616ccc6864a88c60b946f037ce4d14244744c8218435acbe91f829df1da`
+- 形态：PE32+ GUI x86-64
+
+```bash
+CGO_ENABLED=0 go build -trimpath \
+  -ldflags "-s -w -H=windowsgui -X main.version=v2.8.3-viva-test -X main.commit=26a4503" \
+  -o clash-speedtest-plus.exe .
+```
