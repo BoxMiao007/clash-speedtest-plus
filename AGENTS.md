@@ -27,7 +27,7 @@ Issues 放在本仓库的 GitHub Issues，通过 `gh` CLI 读写。详见 `docs/
 
 单模块，不是 monorepo。入口是根目录 `main.go`（Viva GUI），`download-server/` 是另一个 `package main`。
 
-- `internal/gui/`：Viva 应用与全部界面（`测速` / `设置` 两视图、过滤条、预设、右键菜单、对话框）。`测速` 视图把节点选择与结果合并成一张表（`view_speedtest.go`）；`Runner` 接口是 GUI 与引擎的唯一接缝；`export.go` 编排每轮导出，`view_settings.go` 是设置表单，`scrollbar.go` 是三条可见滚动条（绘制、命中与拖动）。
+- `internal/gui/`：Viva 应用与全部界面（`测速` / `设置` 两视图、过滤条、预设、右键菜单、对话框）。`测速` 视图把节点选择与结果合并成一张表（`view_speedtest.go`）；`Runner` 接口是 GUI 与引擎的唯一接缝；`export.go` 编排每轮导出，`view_settings.go` 是设置表单，`scrollbar.go` 是三条可见滚动条（绘制、命中与拖动），`window.go` 是窗口几何记忆与文件拖放，`shortcuts.go` 是应用级快捷键，`preview.go` 是结果图预览（PNG→预乘 BGRA），`openpath.go` 是打开目录的平台接缝。
 - `internal/speedtester/`：测速、订阅规范化与拉取（`FetchSubscriptionBody` / `ParseSubscriptionNodes`）、调度、`LoadNodesFile`。
 - `internal/store/`：数据目录探测、设置/条目/预设/结果 JSON、订阅缓存、软硬路径互转。
 - `internal/filter/`：简化关键词过滤与高级正则。
@@ -35,7 +35,7 @@ Issues 放在本仓库的 GitHub Issues，通过 `gh` CLI 读写。详见 `docs/
 - `internal/export/`：导出 profile 骨架与阈值过滤（导出与提前结束共用）。
 - `internal/ip/`：IP 归属地查询与节点重命名模板。
 - `internal/gist/`：Gist / GitHub 仓库上传。
-- `docs/specs/0001-viva-gui.md`：需求基线；ADR-0017（GUI 架构）、ADR-0018（TUI 能力补齐）、ADR-0019（折叠/调宽/滚动条与文案）、ADR-0020（合并节点选择与结果视图）、ADR-0021（路径/协议徽标、单独测试、详情留白）、ADR-0022（单测固定高亮、折叠窄栏、徽标对齐）、ADR-0023（分组标题折叠与固定）、ADR-0024（审查修复：卡片选中、轮次账本、导出挂起、拉取代次）、ADR-0025（收尾：只读数据目录、导出唯一序号、行右缘）、ADR-0026（节点行选中态、卡片视觉回退）、ADR-0027（功能缺失补齐：快速模式、导出重试、语法提示）。
+- `docs/specs/0001-viva-gui.md`：需求基线；ADR-0017（GUI 架构）、ADR-0018（TUI 能力补齐）、ADR-0019（折叠/调宽/滚动条与文案）、ADR-0020（合并节点选择与结果视图）、ADR-0021（路径/协议徽标、单独测试、详情留白）、ADR-0022（单测固定高亮、折叠窄栏、徽标对齐）、ADR-0023（分组标题折叠与固定）、ADR-0024（审查修复：卡片选中、轮次账本、导出挂起、拉取代次）、ADR-0025（收尾：只读数据目录、导出唯一序号、行右缘）、ADR-0026（节点行选中态、卡片视觉回退）、ADR-0027（功能缺失补齐：快速模式、导出重试、语法提示）、ADR-0028（体验补齐：全局选择、清空结果、拖放、窗口记忆、结果图预览、快捷键）。
 
 界面代码遵守 Viva 规则：空闲不绘制；绘制/布局路径无反射、无 `map[string]any`、无常驻分配；命中身份一律 `ui.Tree` 的名字，行身份用节点稳定身份而非列表位置；点击在控件声明处用 `Clicked()` / `PointerOn` 处理。
 
@@ -70,6 +70,13 @@ Issues 放在本仓库的 GitHub Issues，通过 `gh` CLI 读写。详见 `docs/
 - 导出骨架固定（ADR-0016）：`mixed-port: 7890`、`节点选择` + `自动选择` 两组、国内直连 + `MATCH`；阈值过滤只影响导出，不影响结果表。输出模式默认关闭。
 - 重命名只在导出时按 IP 归属地套模板，不改界面显示；上传失败只提示，不影响轮次推进。上传 token 明文存 `data/settings.json`。
 - 订阅拉取、导出（含 IP 查询、图片渲染）、上传都在后台 goroutine；不要在 Paint/布局里同步做网络或文件对话框（用 `canvas.AfterPaint` + goroutine）。
+- 工具条「全选/全不选」（Ctrl+A / Ctrl+Shift+A）作用于**所有条目的所有节点**，不受过滤影响，与「已选 x / 共 y」同口径；分组级全选保留（ADR-0028）。
+- 「清空结果」先弹确认，执行时 `store.ClearResults()` + 节点复位 + 清轮次账本与挂起导出；测速或导出进行中禁用。条目与订阅缓存不动。
+- 窗口几何存 `settings.json`（`window_width/height/x/y/set`）：`OnFrameChange` 只写内存（拖动高频回调不做磁盘 I/O），保存设置或退出时随 `SetSettings` 落盘；`collectSettings` 必须保留窗口字段，否则保存设置会清掉几何。位置允许负值（副屏），只校验尺寸。
+- 结果图预览：PNG 在后台解码成**预乘 BGRA**（Viva `ui.Bitmap` 约定），`eventPreview` 带 version 防旧结果覆盖新请求；绘制用 `components.PaintImageView`，区域取对话框内容区上一帧布局。最近一次成功导出的 PNG 路径记在 `lastImage`。
+- 拖放（`OnFileDrop`）只接受 `.yaml/.yml`，名称取文件名去扩展名、重名加序号；Windows 只报 drop 不报 over/leave。拖放蒙层是纯绘制，不注册命中。
+- 打开目录用 `openpath.go` 的 `openDirectory` 接缝（explorer/open/xdg-open，参数直接传进程不经 shell）；`app.OpenPath` 只接受普通文件，不能开目录。测试替换接缝，别真的拉起文件管理器。
+- 应用级快捷键在 `shortcuts.go`：F1 关于、Ctrl+A/Ctrl+Shift+A 全选/全不选、Ctrl+R 重新获取全部订阅、Ctrl+Enter 开测、Esc 关详情；输入框聚焦时标准编辑和弦先被平台文本系统消费，不冲突。改动快捷键要同步关于对话框文案与 README。
 - Clash/Mihomo 配置用 `gopkg.in/yaml.v2` 解析。不要改成 yaml.v3。
 - `test/test.yaml`、`*.local.yaml`、`clash-speedtest-plus-sub-*.yaml` 含节点凭据，禁止入库。测试夹具只用 `127.0.0.1` / `example.com` 假值。
 
