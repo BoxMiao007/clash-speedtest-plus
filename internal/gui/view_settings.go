@@ -259,7 +259,7 @@ func (s *state) saveSettingsForm() {
 	}
 	s.settings = settings
 	s.settingsForm.err = ""
-	if s.store != nil {
+	if s.savable() {
 		if err := s.store.SetSettings(settings); err != nil {
 			s.settingsForm.err = "保存设置失败：" + err.Error()
 			s.status = s.settingsForm.err

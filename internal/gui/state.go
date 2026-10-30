@@ -458,6 +458,22 @@ func newState(opts Options) (*state, error) {
 
 	database, openErr := store.Open(store.Options{BaseDir: baseDir, DataDir: dataDir})
 	if openErr != nil {
+		// 数据目录不可写时退到只读：已有条目/设置照常加载，写操作提示未保存。
+		if readOnly, readErr := store.OpenReadOnly(store.Options{BaseDir: baseDir, DataDir: dataDir}); readErr == nil {
+			database = readOnly
+			value.storeErr = openErr.Error()
+			value.status = "数据目录只读，改动不会保存"
+			value.alert = alertState{
+				open:  true,
+				title: "数据目录不可写",
+				body:  fmt.Sprintf("无法写入数据目录 %s：%v\n已有数据会照常读取，修改不会保存，也不会写到其它位置。", dataDir, openErr),
+			}
+			value.dialog = dialogAlert
+			value.dataText = "数据目录只读 · " + dataDir
+			openErr = nil
+		}
+	}
+	if openErr != nil {
 		value.storeErr = openErr.Error()
 		value.status = "数据目录不可用，改动不会保存"
 		value.alert = alertState{
@@ -844,8 +860,8 @@ func (s *state) persistSettings() {
 	settings.FilterExpression = s.filterField.Text()
 	settings.FilterCombine = string(s.filterCombine)
 	s.settings = settings
-	if s.store == nil {
-		s.status = "数据目录不可用，过滤设置未保存"
+	if !s.savable() {
+		s.status = "数据目录只读，过滤设置未保存"
 		return
 	}
 	if err := s.store.SetSettings(settings); err != nil {
@@ -1263,9 +1279,19 @@ func (s *state) notify(message string) { s.status = message }
 
 // noteSaved 报告一次本应持久化的操作。数据目录不可用时，成功文案必须带上
 // 未保存提示，不能让用户以为已经落盘。
+// readOnly 报告持久化是否不可用（没有数据目录，或只读打开）。
+func (s *state) readOnly() bool {
+	return s.store == nil || s.store.ReadOnly()
+}
+
+// savable 报告可以写盘：有数据目录且不是只读。
+func (s *state) savable() bool {
+	return s.store != nil && !s.store.ReadOnly()
+}
+
 func (s *state) noteSaved(message string) {
-	if s.store == nil {
-		s.status = message + "（数据目录不可用，未保存）"
+	if s.readOnly() {
+		s.status = message + "（数据目录只读，未保存）"
 		return
 	}
 	s.status = message

@@ -215,6 +215,7 @@ func (s *state) startRounds(rounds []*roundState) {
 	s.exportSeq = output.NextImageSequence(s.baseDir)
 	// 合并视图：开测只刷新当前页，不切视图；也不主动滚到分组顶部，
 	// 免得住手点的那一行（尤其单独测试）被挪走。换轮时再滚动定位。
+	s.pendingExport = nil
 	s.startRound(0)
 }
 
@@ -427,7 +428,7 @@ func (s *state) applyEvent(event runEvent) {
 				s.run.active--
 			}
 		}
-		if s.store != nil {
+		if s.savable() {
 			if err := s.store.PutResult(node.entry.entry.ID, node.id, stored); err != nil {
 				s.status = "保存测速结果失败：" + err.Error()
 			}
@@ -586,11 +587,14 @@ func (s *state) applyFetched(event runEvent) {
 		s.rebuild()
 		return
 	}
-	if _, err := s.store.WriteSubscription(entry.entry.ID, event.body); err != nil {
-		entry.loadErr = err.Error()
-		s.status = "写入订阅缓存失败：" + err.Error()
-		s.rebuild()
-		return
+	cached := s.savable()
+	if cached {
+		if _, err := s.store.WriteSubscription(entry.entry.ID, event.body); err != nil {
+			entry.loadErr = err.Error()
+			s.status = "写入订阅缓存失败：" + err.Error()
+			s.rebuild()
+			return
+		}
 	}
 	proxies, err := speedtester.ParseSubscriptionNodes(event.body, s.settings.UserAgent)
 	if err != nil {
@@ -600,9 +604,12 @@ func (s *state) applyFetched(event runEvent) {
 		return
 	}
 	s.applyNodes(entry, proxies)
-	if event.path != "" && event.path != entry.entry.URL {
+	switch {
+	case event.path != "" && event.path != entry.entry.URL:
 		s.status = "已用补过参数的地址拉取：" + event.path
-	} else {
+	case !cached:
+		s.status = "已拉取订阅 " + entry.entry.Name + "：" + itoa(len(proxies)) + " 个节点（数据目录只读，未写缓存）"
+	default:
 		s.status = "已拉取订阅 " + entry.entry.Name + "：" + itoa(len(proxies)) + " 个节点"
 	}
 }
@@ -641,8 +648,9 @@ func (s *state) applyExported(event runEvent) {
 		return
 	}
 	if event.err != nil {
+		// 按规格导出失败停止推进；但已经测完、等待写盘的另一轮要保留，
+		// 用户修正设置后手动导出成功时会接着补写，不能直接丢掉。
 		ref.err = event.err.Error()
-		s.pendingExport = nil
 		s.rebuild()
 		return
 	}
@@ -774,7 +782,7 @@ func (s *state) saveEntryForm() {
 	if entry.entry.ID == "" {
 		entry.entry.ID = store.NewID()
 	}
-	if s.store != nil {
+	if s.savable() {
 		if err := s.store.PutEntry(entry.entry); err != nil {
 			s.entryForm.err = "保存条目失败：" + err.Error()
 			return
@@ -806,7 +814,7 @@ func (s *state) saveSubscriptionEntry(name string) {
 	if entry.entry.ID == "" {
 		entry.entry.ID = store.NewID()
 	}
-	if s.store != nil {
+	if s.savable() {
 		if err := s.store.PutEntry(entry.entry); err != nil {
 			s.entryForm.err = "保存条目失败：" + err.Error()
 			return
@@ -869,7 +877,7 @@ func (s *state) askDeletePreset() {
 func (s *state) confirmDelete() {
 	switch s.confirm.kind {
 	case confirmDeleteEntry:
-		if s.store != nil {
+		if s.savable() {
 			if err := s.store.DeleteEntry(s.confirm.entryID); err != nil {
 				s.status = "删除条目失败：" + err.Error()
 				s.dialog = dialogNone
@@ -886,7 +894,7 @@ func (s *state) confirmDelete() {
 		s.rebuild()
 		s.noteSaved("已删除条目")
 	case confirmDeletePreset:
-		if s.store != nil {
+		if s.savable() {
 			if err := s.store.DeletePreset(s.confirm.presetName); err != nil {
 				s.status = "删除预设失败：" + err.Error()
 				s.dialog = dialogNone
@@ -941,7 +949,7 @@ func (s *state) savePresetForm() {
 		}
 		preset := s.presets[index]
 		preset.Name = name
-		if s.store != nil {
+		if s.savable() {
 			if err := s.store.PutPreset(preset); err != nil {
 				s.presetForm.err = "重命名失败：" + err.Error()
 				return
@@ -963,7 +971,7 @@ func (s *state) savePresetForm() {
 			Expression: s.filterField.Text(),
 			Combine:    string(s.filterCombine),
 		}
-		if s.store != nil {
+		if s.savable() {
 			if err := s.store.PutPreset(preset); err != nil {
 				s.presetForm.err = "保存预设失败：" + err.Error()
 				return

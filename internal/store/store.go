@@ -22,6 +22,9 @@ import (
 // 版本 1 的文件按字段缺失读取，再由 Settings.Normalize 补齐默认值。
 const currentVersion = 2
 
+// ErrReadOnly 表示数据目录不可写：读操作照常，写操作一律拒绝。
+var ErrReadOnly = errors.New("数据目录只读，不能保存")
+
 const (
 	settingsFileName = "settings.json"
 	entriesFileName  = "entries.json"
@@ -254,8 +257,9 @@ type resultsFile struct {
 
 // Store 是打开后的数据目录。所有导出方法都可以并发调用。
 type Store struct {
-	baseDir string
-	dataDir string
+	baseDir  string
+	dataDir  string
+	readOnly bool
 
 	mu       sync.RWMutex
 	settings Settings
@@ -267,7 +271,16 @@ type Store struct {
 // Open 创建（如需要）数据目录并验证可写，然后读取四项数据。
 // 数据文件不存在视为空；JSON 损坏或 version 高于 currentVersion 时返回错误，
 // 由界面层决定禁用持久化，而不是静默改写到别处。
-func Open(options Options) (*Store, error) {
+func Open(options Options) (*Store, error) { return openStore(options, true) }
+
+// OpenReadOnly 在数据目录不可写时尽量加载已有数据：不创建目录、不探测可写，
+// 写方法统一返回 ErrReadOnly。目录或文件缺失时按空数据打开。
+func OpenReadOnly(options Options) (*Store, error) { return openStore(options, false) }
+
+// ReadOnly 报告这个 Store 是否只读。
+func (s *Store) ReadOnly() bool { return s.readOnly }
+
+func openStore(options Options, writable bool) (*Store, error) {
 	if strings.TrimSpace(options.BaseDir) == "" {
 		return nil, errors.New("程序目录不能为空")
 	}
@@ -284,17 +297,20 @@ func Open(options Options) (*Store, error) {
 			return nil, fmt.Errorf("解析数据目录失败：%w", err)
 		}
 	}
-	if err := os.MkdirAll(dataDir, dirMode); err != nil {
-		return nil, fmt.Errorf("创建数据目录失败：%w", err)
-	}
-	if err := probeWritable(dataDir); err != nil {
-		return nil, err
+	if writable {
+		if err := os.MkdirAll(dataDir, dirMode); err != nil {
+			return nil, fmt.Errorf("创建数据目录失败：%w", err)
+		}
+		if err := probeWritable(dataDir); err != nil {
+			return nil, err
+		}
 	}
 
 	st := &Store{
-		baseDir: filepath.Clean(baseDir),
-		dataDir: filepath.Clean(dataDir),
-		results: map[string]map[string]NodeResult{},
+		baseDir:  filepath.Clean(baseDir),
+		dataDir:  filepath.Clean(dataDir),
+		readOnly: !writable,
+		results:  map[string]map[string]NodeResult{},
 	}
 	settings, err := loadSettings(filepath.Join(st.dataDir, settingsFileName))
 	if err != nil {
@@ -405,6 +421,9 @@ func loadFile[T any](path string) (T, error) {
 
 // writeFile 用「同目录临时文件 + rename」原子替换目标文件，附带 0644 权限。
 func (s *Store) writeFile(name string, value any) error {
+	if s.readOnly {
+		return ErrReadOnly
+	}
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return fmt.Errorf("序列化 %s 失败：%w", name, err)
@@ -470,6 +489,9 @@ func (s *Store) SubscriptionPath(id string) (string, error) {
 // WriteSubscription 把订阅正文原子写入缓存文件并返回绝对路径。
 // 缓存只在程序目录内，重新获取时整文件替换。
 func (s *Store) WriteSubscription(id string, body []byte) (string, error) {
+	if s.readOnly {
+		return "", ErrReadOnly
+	}
 	path, err := s.SubscriptionPath(id)
 	if err != nil {
 		return "", err
@@ -508,6 +530,9 @@ func (s *Store) WriteSubscription(id string, body []byte) (string, error) {
 
 // RemoveSubscription 删除条目的订阅缓存；缓存不存在视为成功。
 func (s *Store) RemoveSubscription(id string) error {
+	if s.readOnly {
+		return ErrReadOnly
+	}
 	path, err := s.SubscriptionPath(id)
 	if err != nil {
 		return err

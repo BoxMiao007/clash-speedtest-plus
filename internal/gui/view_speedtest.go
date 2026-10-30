@@ -116,7 +116,7 @@ func (a *App) paintTest(f *flex.Frame) {
 // paintListRow 在当前位置声明一行（分组标题或节点行）。top 是相对列表的
 // 坐标，固定标题存在时可能为负（被裁剪的滚动内容）。
 func (a *App) paintListRow(f *flex.Frame, top float32, item listItem) {
-	row := f.Column().Absolute().Top(top).Left(0).Right(0).Height(item.height).PadX(20)
+	row := f.Column().Absolute().Top(top).Left(0).Right(0).Height(item.height).PadSides(0, 30, 0, 20)
 	if item.kind == itemHeader {
 		row.Children(func() {
 			a.paintGroupHeader(f, item.group)
@@ -184,7 +184,7 @@ func (a *App) paintTestToolbar(f *flex.Frame) {
 }
 
 func (a *App) paintTestHeader(f *flex.Frame) {
-	f.Row().Height(30).FillWidth().PadX(20).Items(flex.Center).Children(func() {
+	f.Row().Height(30).FillWidth().PadSides(0, 30, 0, 20).Items(flex.Center).Children(func() {
 		f.Row().FillWidth().PadX(8).Gap(8).Items(flex.Center).Children(func() {
 			f.Spacer().Width(colCheck).Grow(0)
 			f.Text("节点").FontSize(11).Muted().Grow(1).Basis(0)
@@ -277,9 +277,9 @@ func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 		tint.Alpha *= 0.14
 		row = row.Background(tint)
 	case a.detailKey == node.key:
-		// 点开详情的行用主题色淡底标出，和普通悬停的灰底区分开。
-		tint := a.theme.Primary
-		tint.Alpha *= 0.10
+		// 点开详情的行用加深的灰底，和主题色固定行、普通悬停都区分开。
+		tint := a.theme.MutedForeground
+		tint.Alpha *= 0.14
 		row = row.Background(tint)
 	case node.selected || node.phase == phaseTesting:
 		row = row.Background(a.theme.Muted)
@@ -325,8 +325,12 @@ func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 		}
 		f.Text(node.lastTestText).FontSize(11).Muted().Width(colTested).Ellipsis()
 	})
-	// 复选框负责勾选，行本身打开详情；右键菜单同时提供两种操作。
-	if row.Clicked() {
+	// 复选框负责勾选，行本身打开详情；双击的第二下不再切换，避免刚打开又被关掉。
+	repeated := false
+	if event, ok := f.Canvas().PointerOn(node.ids.row); ok && event.ClickCount > 1 {
+		repeated = true
+	}
+	if !repeated && row.Clicked() {
 		a.toggleDetail(node)
 	}
 	a.handleNodePointer(f.Canvas(), node.ids.row, node)

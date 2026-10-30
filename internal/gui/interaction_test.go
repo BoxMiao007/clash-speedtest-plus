@@ -464,3 +464,21 @@ func TestHiddenNodesClearDetailAndPin(t *testing.T) {
 		t.Fatal("节点被过滤掉后详情与固定行都应清空")
 	}
 }
+
+// 行的命中区在滚动条轨道左侧结束，右缘空白不会吃掉行的左键/右键。
+func TestRowHitsStopBeforeScrollBar(t *testing.T) {
+	dir := t.TempDir()
+	names := make([]string, 0, 30)
+	for index := 0; index < 30; index++ {
+		names = append(names, fmt.Sprintf("A-%02d", index))
+	}
+	writeNodesFile(t, dir, "a.yaml", names...)
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+	node := application.nodes[0]
+	row := hitRect(t, driver, node.ids.row)
+	bar := hitRect(t, driver, application.ids.nodeBar)
+	if row.X+row.Width > bar.X+0.5 {
+		t.Fatalf("行命中右缘 %v 不应盖住滚动条轨道（左缘 %v）", row.X+row.Width, bar.X)
+	}
+}

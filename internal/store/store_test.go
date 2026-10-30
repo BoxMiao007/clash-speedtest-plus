@@ -3,6 +3,7 @@ package store_test
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -710,5 +711,40 @@ func TestVersionOneSettingsLoadWithDefaults(t *testing.T) {
 	}
 	if got.Mode != store.DefaultMode || got.Parallel != store.DefaultParallel || got.OutputMode != store.OutputModeOff {
 		t.Errorf("版本 1 缺失字段未补默认值：%+v", got)
+	}
+}
+
+func TestOpenReadOnlyLoadsDataAndRejectsWrites(t *testing.T) {
+	base := t.TempDir()
+	st, err := store.Open(store.Options{BaseDir: base})
+	if err != nil {
+		t.Fatalf("Open：%v", err)
+	}
+	entry := store.Entry{ID: "e1", Name: "机场 A", Kind: store.EntryKindLocal, Path: "a.yaml"}
+	if err := st.PutEntry(entry); err != nil {
+		t.Fatalf("PutEntry：%v", err)
+	}
+	if err := st.SetSettings(store.DefaultSettings()); err != nil {
+		t.Fatalf("SetSettings：%v", err)
+	}
+
+	readOnly, err := store.OpenReadOnly(store.Options{BaseDir: base})
+	if err != nil {
+		t.Fatalf("OpenReadOnly：%v", err)
+	}
+	if !readOnly.ReadOnly() {
+		t.Fatal("OpenReadOnly 应标记只读")
+	}
+	if entries := readOnly.Entries(); len(entries) != 1 || entries[0].Name != "机场 A" {
+		t.Fatalf("只读打开应读到已有条目：%+v", entries)
+	}
+	if err := readOnly.PutEntry(store.Entry{ID: "e2", Name: "机场 B"}); !errors.Is(err, store.ErrReadOnly) {
+		t.Fatalf("只读 PutEntry 应返回 ErrReadOnly，实际 %v", err)
+	}
+	if err := readOnly.SetSettings(store.DefaultSettings()); !errors.Is(err, store.ErrReadOnly) {
+		t.Fatalf("只读 SetSettings 应返回 ErrReadOnly，实际 %v", err)
+	}
+	if _, err := readOnly.WriteSubscription("e1", []byte("proxies: []")); !errors.Is(err, store.ErrReadOnly) {
+		t.Fatalf("只读 WriteSubscription 应返回 ErrReadOnly，实际 %v", err)
 	}
 }

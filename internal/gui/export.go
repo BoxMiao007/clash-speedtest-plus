@@ -365,7 +365,14 @@ func (s *state) startManualExport(kind manualExportKind) {
 	if round := s.currentRound(); round != nil {
 		source = entrySourceLabel(round.entry)
 	}
-	seq := s.exportSeq
+	// 手动导出单独取一个未被占用的序号，避免和同轮自动产物同名覆盖。
+	exportDir := s.baseDir
+	if s.settings.OutputMode == store.OutputModeCustom {
+		if abs, _ := s.resolvePath(strings.TrimSpace(s.settings.OutputPath)); abs != "" {
+			exportDir = filepath.Dir(abs)
+		}
+	}
+	seq := output.NextImageSequence(exportDir)
 	s.exporting++
 	s.exportText = "正在导出…"
 	s.refreshRunText()

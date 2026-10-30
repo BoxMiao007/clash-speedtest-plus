@@ -998,18 +998,18 @@ func TestDataDirUnavailableShowsAlertAndDoesNotFallBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	application, driver := openTestApp(t, dir, newFakeRunner(nil))
-	if !hasText(driver.Snapshot(), "数据目录不可用") {
-		t.Fatal("数据目录不可用时应显示明确错误")
+	if !hasText(driver.Snapshot(), "数据目录不可写") {
+		t.Fatal("数据目录不可写时应显示明确错误")
 	}
 	clickLabel(t, driver, "确定")
 	if application.dialog != dialogNone {
 		t.Fatalf("确认后错误对话框应关闭；hits=%v", hitLabels(driver.Snapshot()))
 	}
-	if !hasText(driver.Snapshot(), "数据目录不可用 ·") {
-		t.Fatal("数据目录不可用提示应固定在状态栏")
+	if !hasText(driver.Snapshot(), "数据目录只读 ·") {
+		t.Fatal("数据目录只读提示应固定在状态栏")
 	}
 
-	// 持久化不可用时仍可操作，但成功文案必须明确「未保存」。
+	// 只读打开仍可操作（条目只进内存），但成功文案必须明确「未保存」。
 	clickLabel(t, driver, "新建条目")
 	focusAndType(t, driver, "名称", "机场 A")
 	if err := driver.QueueOpenFiles([]string{configPath}, nil); err != nil {
