@@ -193,6 +193,9 @@ func writeResultImage(job roundExport, mode speedtester.SpeedMode) (string, stri
 	return output.WriteResultImage(job.Dir, spec)
 }
 
+// ipLookup 是重命名用的归属地查询；测试替换成假实现，避免联网。
+var ipLookup = ip.GetIPLocation
+
 // buildProxies 按过筛口径把结果收成写盘用的节点列表：阈值过滤、可选按 IP
 // 归属地与速度重命名。与旧 TUI 的 buildProxies 同一口径（ADR-0014）。
 func buildProxies(results []*speedtester.Result, filter export.Filter, rename bool, template string) []map[string]any {
@@ -207,7 +210,7 @@ func buildProxies(results []*speedtester.Result, filter export.Filter, rename bo
 			continue
 		}
 		if rename {
-			location, err := ip.GetIPLocation(fmt.Sprint(proxyConfig["server"]))
+			location, err := ipLookup(fmt.Sprint(proxyConfig["server"]))
 			if err != nil || location.CountryCode == "" {
 				proxies = append(proxies, proxyConfig)
 				continue
@@ -223,6 +226,15 @@ func buildProxies(results []*speedtester.Result, filter export.Filter, rename bo
 	return proxies
 }
 
+// uploader 是上传动作的窄接口；测试注入假实现，避免真实网络。
+type uploader interface {
+	UpdateFile(token, address, filename string, content []byte) error
+	UpdateRepoFile(token, address, filePath, branch string, content []byte) error
+}
+
+// newUploader 生产环境用 gist 包；测试替换成记录调用的假实现。
+var newUploader = func() uploader { return gist.NewUploader(nil) }
+
 // uploadConfig 把已写好的配置同步到 Gist 或仓库。失败只作为提示返回。
 func uploadConfig(settings store.Settings, path string) error {
 	data, err := os.ReadFile(path)
@@ -230,7 +242,7 @@ func uploadConfig(settings store.Settings, path string) error {
 		return fmt.Errorf("读取待上传配置失败：%w", err)
 	}
 	filename := filepath.Base(filepath.Clean(path))
-	uploader := gist.NewUploader(nil)
+	uploader := newUploader()
 	if settings.GistToken != "" && settings.GistAddress != "" {
 		if err := uploader.UpdateFile(settings.GistToken, settings.GistAddress, filename, data); err != nil {
 			return fmt.Errorf("更新 Gist 失败：%w", err)

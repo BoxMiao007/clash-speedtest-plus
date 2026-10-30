@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/BoxMiao007/clash-speedtest-plus/internal/export"
+	"github.com/BoxMiao007/clash-speedtest-plus/internal/ip"
 	"github.com/BoxMiao007/clash-speedtest-plus/internal/speedtester"
 	"github.com/BoxMiao007/clash-speedtest-plus/internal/store"
 	"github.com/vivaui/viva/app"
@@ -484,4 +485,84 @@ func TestRoundExportWritesResultImage(t *testing.T) {
 	if err != nil || info.Size() == 0 {
 		t.Fatalf("结果图文件为空或不可读：%v", err)
 	}
+}
+
+// 重命名只在导出副本上生效，并套用模板；查询失败保留原名。
+func TestBuildProxiesRenamesWithLocation(t *testing.T) {
+	previous := ipLookup
+	defer func() { ipLookup = previous }()
+	ipLookup = func(string) (*ip.IPLocation, error) {
+		return &ip.IPLocation{CountryCode: "HK", Country: "Hong Kong"}, nil
+	}
+	results := []*speedtester.Result{
+		{ProxyConfig: map[string]any{"name": "原名", "server": "127.0.0.1"}, Latency: 20 * time.Millisecond, DownloadSpeed: 12 * megabyte},
+	}
+	proxies := buildProxies(results, export.Filter{MaxPacketLoss: -1, DownloadTested: true}, true, "")
+	if len(proxies) != 1 {
+		t.Fatalf("导出节点数 = %d，期望 1", len(proxies))
+	}
+	name, _ := proxies[0]["name"].(string)
+	if name == "原名" || !strings.Contains(name, "HK") {
+		t.Fatalf("重命名结果 = %q，期望含 HK 且不同于原名", name)
+	}
+	if results[0].ProxyConfig["name"] != "原名" {
+		t.Fatal("重命名不应改动原结果里的节点配置")
+	}
+
+	ipLookup = func(string) (*ip.IPLocation, error) { return nil, fmt.Errorf("查询失败") }
+	proxies = buildProxies(results, export.Filter{MaxPacketLoss: -1, DownloadTested: true}, true, "")
+	if len(proxies) != 1 || proxies[0]["name"] != "原名" {
+		t.Fatalf("查询失败应保留原名，实际 %v", proxies)
+	}
+}
+
+// 上传按设置把配置分别送到 Gist 与仓库，文件名取导出文件名。
+func TestUploadConfigSendsToGistAndRepo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "1.导出.yaml")
+	if err := os.WriteFile(path, []byte("proxies: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeUploader{}
+	previous := newUploader
+	defer func() { newUploader = previous }()
+	newUploader = func() uploader { return fake }
+
+	settings := quietSettings()
+	settings.GistToken = "gist-token"
+	settings.GistAddress = "gist-id"
+	settings.RepoToken = "repo-token"
+	settings.RepoAddress = "owner/repo"
+	settings.RepoFilePath = "clash/proxies.yaml"
+	settings.RepoBranch = "main"
+	if err := uploadConfig(settings, path); err != nil {
+		t.Fatalf("uploadConfig 失败：%v", err)
+	}
+	if fake.gistName != "1.导出.yaml" || fake.gistContent != "proxies: []\n" {
+		t.Fatalf("Gist 上传参数不符：name=%q content=%q", fake.gistName, fake.gistContent)
+	}
+	if fake.repoPath != "clash/proxies.yaml" || fake.repoBranch != "main" || fake.repoAddress != "owner/repo" {
+		t.Fatalf("仓库上传参数不符：%+v", fake)
+	}
+}
+
+type fakeUploader struct {
+	gistName    string
+	gistContent string
+	repoPath    string
+	repoBranch  string
+	repoAddress string
+}
+
+func (fake *fakeUploader) UpdateFile(token, address, filename string, content []byte) error {
+	fake.gistName = filename
+	fake.gistContent = string(content)
+	return nil
+}
+
+func (fake *fakeUploader) UpdateRepoFile(token, address, filePath, branch string, content []byte) error {
+	fake.repoPath = filePath
+	fake.repoBranch = branch
+	fake.repoAddress = address
+	return nil
 }
