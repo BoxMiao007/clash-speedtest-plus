@@ -137,6 +137,8 @@ func (s *state) startSelectedTest() {
 		}
 		return
 	}
+	// 整批测速不固定单行，列表照常按结果重排。
+	s.pinNode, s.pinIndex = nil, 0
 	s.startRounds(rounds)
 }
 
@@ -164,6 +166,12 @@ func (s *state) startNodesTest(nodes []*nodeState) {
 		s.status = "请先勾选要测试的节点"
 		return
 	}
+	// 只测一个节点时把它钉在原位置并高亮，结果到达后不会跳走。
+	s.pinNode, s.pinIndex = nil, 0
+	if len(rounds) == 1 && len(rounds[0].nodes) == 1 {
+		s.pinNode = rounds[0].nodes[0]
+		s.pinIndex = s.nodeIndexInGroup(s.pinNode)
+	}
 	s.startRounds(rounds)
 }
 
@@ -180,8 +188,8 @@ func (s *state) startRounds(rounds []*roundState) {
 	s.detailKey = ""
 	s.detailNode = nil
 	s.exportSeq = output.NextImageSequence(s.baseDir)
-	// 节点选择与结果已经合并成一个视图：开测只刷新当前页，不切视图。
-	s.scrollToRound()
+	// 合并视图：开测只刷新当前页，不切视图；也不主动滚到分组顶部，
+	// 免得住手点的那一行（尤其单独测试）被挪走。换轮时再滚动定位。
 	s.startRound(0)
 }
 

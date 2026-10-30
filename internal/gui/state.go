@@ -173,6 +173,11 @@ type state struct {
 	paused       bool
 	earlyStopped bool
 
+	// 手动单节点测速：把该节点固定在列表原位置并高亮，结果到达后不参与
+	// 重排，用户能一直看着同一行；点表头排序或开始新一轮测速时解除。
+	pinNode  *nodeState
+	pinIndex int
+
 	// 导出：后台任务只写 pending 事件，窗口线程更新状态。
 	// exporting 是进行中的导出任务数（允许上一轮导出未完成时下一轮继续测）；
 	// pendingExport 是一轮测完但还没轮到写盘时挂起的轮次。
@@ -887,12 +892,58 @@ func (s *state) rebuild() {
 
 // applySort 按当前排序列重排每个分组内的节点，并重建列表与结果集合。
 // 列表保留条目分组，排序只在组内进行：每个条目就是一轮，组间不混排。
+// 手动单测的节点原位固定，不让结果到达后把行抽走。
 func (s *state) applySort() {
 	for _, group := range s.groups {
-		s.sortRows(group.nodes)
+		s.sortGroupRows(group.nodes)
 	}
 	s.buildNodeItems()
 	s.rebuildResults()
+}
+
+// nodeIndexInGroup 返回节点在当前分组里的显示位置；找不到时回到 0。
+func (s *state) nodeIndexInGroup(node *nodeState) int {
+	if node == nil || node.entry == nil || node.entry.group == nil {
+		return 0
+	}
+	for index, candidate := range node.entry.group.nodes {
+		if candidate == node {
+			return index
+		}
+	}
+	return 0
+}
+
+// sortGroupRows 排序一个分组；pinNode 在组内时先取出、排序其余节点，再按
+// 开始单测时记录的位置插回。其余节点仍按当前排序列排列。
+func (s *state) sortGroupRows(rows []*nodeState) {
+	pin := s.pinNode
+	index := -1
+	if pin != nil {
+		for position, node := range rows {
+			if node == pin {
+				index = position
+				break
+			}
+		}
+	}
+	if index < 0 {
+		s.sortRows(rows)
+		return
+	}
+	copy(rows[index:], rows[index+1:])
+	rows = rows[:len(rows)-1]
+	s.sortRows(rows)
+	at := s.pinIndex
+	if at < 0 {
+		at = 0
+	}
+	if at > len(rows) {
+		at = len(rows)
+	}
+	rows = rows[:len(rows)+1]
+	copy(rows[at+1:], rows[at:len(rows)-1])
+	rows[at] = pin
 }
 
 func (s *state) buildNodeItems() {

@@ -11,7 +11,7 @@ import (
 const (
 	entriesPanelWidth float32 = 320
 	entriesPanelMin   float32 = 220
-	entriesRailWidth  float32 = 56
+	entriesRailWidth  float32 = 44
 	contentPanelMin   float32 = 420
 )
 
@@ -169,6 +169,8 @@ func (s *state) setSort(key sortKey) {
 		s.sortKey = key
 		s.sortAsc = key == sortByLatency || key == sortByName
 	}
+	// 用户明确点了表头：解除手动单测的固定，按新列重排。
+	s.pinNode, s.pinIndex = nil, 0
 	s.refreshSortHeaders()
 	s.applySort()
 }
@@ -213,7 +215,14 @@ func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 		Radius(a.theme.Metrics.RadiusItem()).
 		HoverBackground(a.theme.Muted).
 		Hit(node.ids.row, node.rowLabel)
-	if node.selected || node.phase == phaseTesting || a.detailKey == node.key {
+	// 手动单测的节点用主题色浅浅标出，并在结果到达后保持原位（不参与重排）。
+	pinned := node == a.pinNode
+	switch {
+	case pinned:
+		tint := a.theme.Primary
+		tint.Alpha *= 0.14
+		row = row.Background(tint)
+	case node.selected || node.phase == phaseTesting || a.detailKey == node.key:
 		row = row.Background(a.theme.Muted)
 	}
 	row.Children(func() {
@@ -223,7 +232,11 @@ func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 			a.toggleNode(node)
 		}
 		f.Column().Gap(0).Grow(1).Children(func() {
-			f.Text(node.name).Ellipsis()
+			nameColor := a.theme.Foreground
+			if pinned {
+				nameColor = a.theme.Primary
+			}
+			f.Text(node.name).Color(nameColor).Ellipsis()
 			f.Row().Gap(4).Items(flex.Center).Children(func() {
 				f.Text(node.serverText).FontSize(10).Muted().Ellipsis().MaxWidth(180)
 				if node.typ != "" {
@@ -357,28 +370,46 @@ func (a *App) paintEntriesPanel(f *flex.Frame) {
 	})
 }
 
-// paintEntriesRail 是折叠后的窄栏：只留展开按钮，宽度固定，不占内容。
+// paintEntriesRail 是折叠后的窄栏：顶部一个「»」展开按钮，下面是竖排的
+// 「节点来源」四个字。竖排用逐字 Text 拼出来，不做文字旋转。
 func (a *App) paintEntriesRail(f *flex.Frame) {
-	f.Column().Width(entriesRailWidth).FillHeight().PadY(10).PadX(8).Gap(8).Children(func() {
-		if f.Button(a.ids.entryExpand, "展开").XSmall().Outline().Clicked() {
+	f.Column().Width(entriesRailWidth).FillHeight().PadY(12).Items(flex.Center).Gap(12).Children(func() {
+		expand := f.Text("»").FontSize(18).Muted().Width(32).PadY(2).
+			TextCenter().Radius(4).HoverBackground(a.theme.Muted).
+			Hit(a.ids.entryExpand, "展开节点来源")
+		if expand.Clicked() {
 			a.entriesCollapsed = false
 		}
-		f.Text("来源").FontSize(10).Muted()
+		f.Column().Items(flex.Center).Gap(2).Children(func() {
+			f.Text("节").FontSize(11).Muted()
+			f.Text("点").FontSize(11).Muted()
+			f.Text("来").FontSize(11).Muted()
+			f.Text("源").FontSize(11).Muted()
+		})
 	})
 }
 
-// paintPill 画小徽标（路径形态、协议类型）：主题 Muted 底 + 圆角，字号比
-// 正文小一号。纯展示，不注册命中。
+// paintPill 画小徽标（路径形态、协议类型）：固定高度、文字居中、底色与
+// 正文有明显区分；字号比正文小一号。纯展示，不注册命中。
 //
 // 中文字符在 Viva 的参考字宽（布局检查用）里按约 1.35em 估，而平台排版引擎
-// 按 1em；自动宽度的中文徽标会被判定为截断。给含非 ASCII 的徽标一个按
-// 1.45em 估算的最小宽度，两种度量都放得下。
+// 按 1em；自动宽度的中文徽标会被判定为截断。取两者较大值再加内边距，两种
+// 度量都放得下，左右留白也对称。
 func (a *App) paintPill(f *flex.Frame, label string, size float32) {
-	text := f.Text(label).FontSize(size).Muted().
-		Background(a.theme.Muted).Radius(4).PadSides(1, 5, 1, 5)
+	width := f.Canvas().TextWidth(label, size) + 12
 	if runes := utf8.RuneCountInString(label); runes != len(label) {
-		text.MinWidth(float32(runes)*size*1.45 + 10)
+		if minimum := float32(runes)*size*1.45 + 12; minimum > width {
+			width = minimum
+		}
 	}
+	background := a.theme.MutedForeground
+	background.Alpha *= 0.16
+	foreground := a.theme.Foreground
+	foreground.Alpha *= 0.85
+	pill := f.Row().Width(width).Height(size + 10).Background(background).Radius(4).Items(flex.Center)
+	pill.Children(func() {
+		f.Text(label).FontSize(size).Color(foreground).TextCenter().Grow(1)
+	})
 }
 
 func (a *App) paintEntryCard(f *flex.Frame, entry *entryState) {
