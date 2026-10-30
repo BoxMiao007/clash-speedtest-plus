@@ -4,3 +4,7 @@
 *.yaml text eol=lf
 *.yml text eol=lf
 *.sh text eol=lf
+*.log text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
+.gitattributes text eol=lf
