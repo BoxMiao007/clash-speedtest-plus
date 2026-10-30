@@ -15,16 +15,18 @@ type menuEntry struct {
 }
 
 func (a *App) openNodeMenu(canvas *ui.Canvas, node *nodeState, x, y float32) {
+	// 多选语境看行选择（marked），与勾选无关：marked 多行时菜单对整个
+	// 选择操作，否则对右键指向的行操作。
 	targets := []*nodeState{node}
 	multi := false
-	if node.selected && a.selectedCount > 1 {
-		targets = a.selectedNodes()
+	if node.marked && a.markedCount() > 1 {
+		targets = a.markedNodes()
 		multi = true
 	}
-	allSelected := true
+	allChecked := true
 	for _, target := range targets {
 		if !target.selected {
-			allSelected = false
+			allChecked = false
 			break
 		}
 	}
@@ -46,7 +48,7 @@ func (a *App) openNodeMenu(canvas *ui.Canvas, node *nodeState, x, y float32) {
 		}})
 		entries = append(entries, menuEntry{separator: true})
 		selectID, selectLabel := a.ids.menuSelect, "选中所选节点"
-		if allSelected {
+		if allChecked {
 			selectID, selectLabel = a.ids.menuUnselMulti, "取消选中所选节点"
 		}
 		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: selectID, Label: selectLabel}})
@@ -62,7 +64,7 @@ func (a *App) openNodeMenu(canvas *ui.Canvas, node *nodeState, x, y float32) {
 		}})
 		entries = append(entries, menuEntry{separator: true})
 		selectID, selectLabel := a.ids.menuSelect, "选中此节点"
-		if allSelected {
+		if node.selected {
 			selectID, selectLabel = a.ids.menuUnselect, "取消选中此节点"
 		}
 		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: selectID, Label: selectLabel}})

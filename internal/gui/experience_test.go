@@ -416,55 +416,56 @@ func clickHitWith(t *testing.T, driver *app.Driver, id ui.ID, key ui.Key, with b
 }
 
 // Shift 点击选中锚点到目标之间的全部可见节点；Ctrl 点击切换单个节点。
+// 行选择（marked）与测速勾选（selected）分离：点行不改勾选。
 func TestShiftAndCtrlClickMultiSelect(t *testing.T) {
 	dir := t.TempDir()
 	writeNodesFile(t, dir, "a.yaml", "A-01", "A-02", "A-03", "A-04", "A-05")
 	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
 	application, driver := openTestApp(t, dir, newFakeRunner(nil))
 
-	// 先全不选，效果才看得清。
-	clickID(t, driver, application.ids.selectNone)
-	if application.selectedCount != 0 {
-		t.Fatalf("全不选后应为 0，实际 %d", application.selectedCount)
+	if application.selectedCount != 5 {
+		t.Fatalf("初始应勾选 5 个节点，实际 %d", application.selectedCount)
 	}
 
-	// 普通点击 A-01：选中并记为范围锚点。
+	// 普通点击 A-01：只选中该行，勾选不变。
 	clickHitWith(t, driver, application.nodes[0].ids.row, 0, false)
-	if application.selectedCount != 1 {
-		t.Fatalf("普通点击应只选 A-01，实际 %d", application.selectedCount)
+	if application.markedCount() != 1 || !application.nodes[0].marked {
+		t.Fatalf("普通点击应只标记 A-01，实际 %d", application.markedCount())
+	}
+	if application.selectedCount != 5 {
+		t.Fatalf("行选择不应改变勾选，实际勾选 %d", application.selectedCount)
 	}
 
-	// Shift 点击 A-04：A-01..A-04 全部选中，A-05 不动。
+	// Shift 点击 A-04：A-01..A-04 被标记，A-05 不在范围内。
 	clickHitWith(t, driver, application.nodes[3].ids.row, ui.KeyShiftLeft, true)
-	if application.selectedCount != 4 {
-		t.Fatalf("Shift 范围应选中 4 个，实际 %d", application.selectedCount)
+	if application.markedCount() != 4 {
+		t.Fatalf("Shift 范围应标记 4 个，实际 %d", application.markedCount())
 	}
 	for index := 0; index < 4; index++ {
-		if !application.nodes[index].selected {
-			t.Fatalf("A-0%d 应被范围选中", index+1)
+		if !application.nodes[index].marked {
+			t.Fatalf("A-0%d 应被范围标记", index+1)
 		}
 	}
-	if application.nodes[4].selected {
-		t.Fatal("范围外的 A-05 不应被选中")
+	if application.nodes[4].marked {
+		t.Fatal("范围外的 A-05 不应被标记")
 	}
 
 	// Ctrl 点击 A-05：单独加入，其它保持。
 	clickHitWith(t, driver, application.nodes[4].ids.row, ui.KeyControlLeft, true)
-	if application.selectedCount != 5 {
-		t.Fatalf("Ctrl 点击应加入 A-05，实际 %d", application.selectedCount)
+	if application.markedCount() != 5 {
+		t.Fatalf("Ctrl 点击应加入 A-05，实际 %d", application.markedCount())
 	}
 
 	// Ctrl 点击 A-05：从选择中移除。
 	clickHitWith(t, driver, application.nodes[4].ids.row, ui.KeyControlLeft, true)
-	if application.selectedCount != 4 || application.nodes[4].selected {
+	if application.markedCount() != 4 || application.nodes[4].marked {
 		t.Fatal("Ctrl 再次点击应移除 A-05")
 	}
 
-	// 锚点未变：Shift 点击 A-02 会把范围缩到 A-01..A-02，但已选中的
-	// A-03、A-04 保留（范围选择只增不减）。
+	// 锚点在 A-05：Shift 点击 A-02 选中反向范围 A-02..A-05（替换语义）。
 	clickHitWith(t, driver, application.nodes[1].ids.row, ui.KeyShiftLeft, true)
-	if !application.nodes[2].selected || !application.nodes[3].selected {
-		t.Fatal("Shift 范围选择不应取消范围外的勾选")
+	if application.markedCount() != 4 || !application.nodes[1].marked || application.nodes[0].marked {
+		t.Fatalf("Shift 反向范围应为 A-02..A-05，实际 %d", application.markedCount())
 	}
 }
 

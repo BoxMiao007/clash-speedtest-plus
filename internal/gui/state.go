@@ -303,7 +303,10 @@ type nodeState struct {
 	result    nodeResult
 	hasResult bool
 
-	selected  bool
+	selected bool
+	// marked 是行选择（点行 / Shift / Ctrl 多选），只用于高亮与右键菜单的
+	// 操作目标，与决定测速范围的 selected（勾选）完全分离。
+	marked    bool
 	phase     nodePhase
 	liveSpeed float64
 

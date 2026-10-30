@@ -369,14 +369,14 @@ func TestResultRowTogglesDetailPanel(t *testing.T) {
 		t.Fatal("再次点击图标应关闭详情")
 	}
 	clickID(t, driver, node.ids.row)
-	if node.selected == selectedBefore {
-		t.Fatal("点行应切换勾选")
+	if node.selected != selectedBefore {
+		t.Fatal("行选择不应改变勾选")
 	}
 	if hasText(driver.Snapshot(), "上次测速：") {
 		t.Fatal("点行不应打开详情")
 	}
 	clickID(t, driver, node.ids.check)
-	if node.selected != selectedBefore {
+	if node.selected == selectedBefore {
 		t.Fatal("点复选框应切换勾选")
 	}
 	if hasText(driver.Snapshot(), "上次测速：") {

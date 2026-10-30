@@ -1150,25 +1150,57 @@ func (s *state) openEntryDirectory(entry *entryState) {
 	s.status = "已打开目录：" + target
 }
 
-// handleRowClick 处理节点行的左键点击（详情改由行尾三点图标打开，行本身
-// 负责勾选）：普通点击与 Ctrl 点击都是切换勾选并更新范围锚点；Shift 点击
-// 选中从锚点到该行的全部可见节点。
+// handleRowClick 处理节点行的左键点击。行选择（marked）与测速勾选
+// （selected，复选框）完全分离：普通点击只选中该行并记为范围锚点；Ctrl
+// 点击把该行加入/移出选择；Shift 点击选中锚点到该行之间的可见节点。
 func (s *state) handleRowClick(node *nodeState, modifiers ui.Modifiers) {
-	// 行点击仍把该行标成「正在操作」；详情只由行尾三点图标打开。
 	s.activeNode = node
-	if modifiers&ui.ModifierShift != 0 {
+	switch {
+	case modifiers&ui.ModifierShift != 0:
 		s.selectRangeTo(node)
-		return
+	case modifiers&(ui.ModifierControl|ui.ModifierMeta) != 0:
+		s.rangeAnchorKey = node.key
+		node.marked = !node.marked
+	default:
+		s.rangeAnchorKey = node.key
+		s.clearMarked()
+		node.marked = true
 	}
-	// 普通点击与 Ctrl 点击都是切换勾选；Ctrl 不清除其它勾选，只把自己
-	// 加进来/移出去，并同样更新范围锚点。
-	s.rangeAnchorKey = node.key
-	node.selected = !node.selected
-	s.rebuild()
 }
 
-// selectRangeTo 把范围锚点到目标行之间（按当前可见顺序）的节点全部选中；
-// 只增不减：范围外的勾选保持原样。锚点行不可见时退化为只选目标行。
+// clearMarked 清掉全部行选择。
+func (s *state) clearMarked() {
+	for _, node := range s.nodes {
+		node.marked = false
+	}
+}
+
+// markedCount 统计当前行选择数量。
+func (s *state) markedCount() int {
+	count := 0
+	for _, node := range s.nodes {
+		if node.marked {
+			count++
+		}
+	}
+	return count
+}
+
+// markedNodes 按可见列表顺序返回被选中的行；行被过滤隐藏后不再出现在
+// 操作目标里。
+func (s *state) markedNodes() []*nodeState {
+	nodes := make([]*nodeState, 0, s.markedCount())
+	for _, item := range s.nodeItems {
+		if item.kind == itemNode && item.node.marked {
+			nodes = append(nodes, item.node)
+		}
+	}
+	return nodes
+}
+
+// selectRangeTo 选中范围锚点到目标行之间（按当前可见顺序）的全部节点：
+// 范围内置为选中，范围外清掉（文件管理器的替换语义）。锚点行不可见时
+// 退化为只选目标行。勾选（selected）不受影响。
 func (s *state) selectRangeTo(node *nodeState) {
 	start, end := -1, -1
 	for index, item := range s.nodeItems {
@@ -1185,21 +1217,20 @@ func (s *state) selectRangeTo(node *nodeState) {
 	if end < 0 {
 		return
 	}
-	if start < 0 || start > end {
+	if start < 0 {
 		start = end
 	}
-	count := 0
-	for index := start; index <= end; index++ {
-		item := s.nodeItems[index]
-		if item.kind == itemNode && !item.node.selected {
-			item.node.selected = true
-			count++
+	if start > end {
+		// 反向范围（锚点在目标之后）同样成立。
+		start, end = end, start
+	}
+	for index, item := range s.nodeItems {
+		if item.kind != itemNode {
+			continue
 		}
+		item.node.marked = index >= start && index <= end
 	}
-	s.rebuild()
-	if count > 0 {
-		s.status = "已按范围选中节点（新增 " + itoa(count) + " 个）"
-	}
+	s.status = "已选中 " + itoa(end-start+1) + " 个节点"
 }
 
 func itoa(value int) string {

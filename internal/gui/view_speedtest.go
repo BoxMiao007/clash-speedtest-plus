@@ -285,7 +285,7 @@ func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 		Hit(node.ids.row, node.rowLabel)
 	// 手动单测的节点用主题色浅浅标出，并在结果到达后保持原位（不参与重排）。
 	pinned := node == a.pinNode
-	active := node == a.activeNode
+	active := node == a.activeNode || node.marked
 	// 悬停只在当前底色上加深一点：不要用固定的灰底覆盖选中态，否则鼠标
 	// 一指过去，蓝色选中效果就像消失了一样。
 	hover := a.theme.Muted
@@ -422,15 +422,12 @@ func (a *App) closeDetail() {
 	a.detailText = ""
 }
 
-// detailPopupWidth/Height 是详情弹窗的固定尺寸：正文按 12 行预留，长行
-// 在 Paragraph 里换行。
-const (
-	detailPopupWidth  float32 = 420
-	detailPopupHeight float32 = 252
-)
+// detailPopupWidth 是详情弹窗宽度；高度按内容行数在绘制时计算。
+const detailPopupWidth float32 = 420
 
 // paintDetailPopup 在三点图标旁绘制详情弹窗。全窗口先声明一个 dismiss 命
-// 中，弹窗内容在后声明、优先接管自己的点击；目标行滚出视口后自动关闭。
+// 中，目标行滚出视口后自动关闭；弹窗本体由 paintDetailOverlay 在 paint 阶
+// 段直接画（见下），这里只处理 flex 阶段能做的 dismiss 命中。
 func (a *App) paintDetailPopup(f *flex.Frame) {
 	if a.detailNode == nil {
 		return
@@ -444,24 +441,48 @@ func (a *App) paintDetailPopup(f *flex.Frame) {
 	canvas.HitWithLabel(a.ids.detailDismiss, ui.Rect{Width: a.window.Width, Height: a.window.Height}, "关闭节点详情")
 	if canvas.Clicked(a.ids.detailDismiss) {
 		a.closeDetail()
-		// 本帧不再声明弹窗：detailNode 已清空，往下走会解引用空指针。
+	}
+}
+
+// paintDetailOverlay 用 canvas 直接绘制详情弹窗。必须在 view.Draw 之后、
+// PushLayer(1) 内画：渲染器按 layer 合成、同层先全部矩形再全部文字，弹窗
+// 不推高层的话列表行文字会画在弹窗背景之上。弹窗内的命中（面板本身）也
+// 在同一层声明，优先于 layer 0 的 dismiss。
+func (a *App) paintDetailOverlay(canvas *ui.Canvas) {
+	if a.detailNode == nil || !a.detailSeen {
 		return
 	}
-	popup := f.Popup().Below(a.detailAnchor, 6, flex.End).Width(detailPopupWidth).Height(detailPopupHeight)
-	popup.Children(func() {
-		f.Column().Fill().Pad(12).Gap(6).
-			Background(a.theme.Card).Border(1, a.theme.Border).
-			Radius(a.theme.Metrics.RadiusSurface).Clip().
-			Children(func() {
-				f.Row().FillWidth().Items(flex.Center).Gap(8).Children(func() {
-					f.Text(a.detailNode.name).Bold().Ellipsis().Grow(1)
-					if f.Button(a.ids.detailClose, "关闭详情").XSmall().Ghost().Clicked() {
-						f.Canvas().AfterPaint(a.closeDetail)
-					}
-				})
-				f.Paragraph(a.detailText, 12).FontSize(11).Muted().Grow(1)
-			})
-	})
+	width := detailPopupWidth
+	contentWidth := width - 24
+	lines := canvas.WrapLines(nil, a.detailText, 11, ui.WeightRegular, contentWidth, 14)
+	lineHeight := float32(18)
+	titleHeight := float32(24)
+	height := 24 + titleHeight + float32(len(lines))*lineHeight
+	// 右缘对齐图标向左展开；下方放不下改到上方，整体钳制在窗口内。
+	x := a.detailAnchor.X + a.detailAnchor.Width - width
+	y := a.detailAnchor.Y + a.detailAnchor.Height + 6
+	if y+height > a.window.Height-8 {
+		y = a.detailAnchor.Y - 6 - height
+	}
+	x = min(max(x, 8), max(a.window.Width-width-8, 8))
+	y = max(min(y, max(a.window.Height-height-8, 8)), 8)
+	rect := ui.Rect{X: x, Y: y, Width: width, Height: height}
+	canvas.PushLayer(1)
+	// 弹窗面板的命中在 layer 1，盖过 layer 0 的 dismiss：点弹窗内部不关闭。
+	canvas.HitWithLabel(a.ids.detailClose, rect, "节点详情")
+	canvas.Elevate(rect, a.theme.Metrics.RadiusSurface, ui.ShadowMD)
+	canvas.RoundedBorder(rect, a.theme.Metrics.RadiusSurface, 1, a.theme.Border, a.theme.Background)
+	canvas.Label(a.detailNode.name, ui.Rect{
+		X: rect.X + 12, Y: rect.Y + 12, Width: contentWidth, Height: titleHeight,
+	}, ui.TextStyle{Size: 13, Weight: ui.WeightMedium, Color: a.theme.Foreground})
+	textY := rect.Y + 12 + titleHeight
+	for _, line := range lines {
+		canvas.Label(line, ui.Rect{
+			X: rect.X + 12, Y: textY, Width: contentWidth, Height: lineHeight,
+		}, ui.TextStyle{Size: 11, Color: a.theme.MutedForeground})
+		textY += lineHeight
+	}
+	canvas.PopLayer()
 }
 
 // detailText 汇总节点的全部测速信息，供详情面板显示。

@@ -899,11 +899,8 @@ func TestContextMenuWordingSingleAndMulti(t *testing.T) {
 	application, driver := openTestApp(t, dir, runner)
 
 	first := application.nodes[0]
-	for _, node := range application.nodes {
-		if node != first && node.selected {
-			clickID(t, driver, node.ids.check)
-		}
-	}
+	second := application.nodes[1]
+	// 单选语境：没有任何行选择（marked）。
 	rightClickID(t, driver, first.ids.row)
 	if application.menu.multi || !menuHasLabel(application.menu, "复制此节点信息") {
 		t.Fatalf("单选右键菜单文案不对：%+v", application.menu.items)
@@ -914,11 +911,9 @@ func TestContextMenuWordingSingleAndMulti(t *testing.T) {
 		t.Fatalf("剪贴板没有节点信息：%q", driver.Clipboard())
 	}
 
-	for _, node := range application.nodes {
-		if !node.selected {
-			clickID(t, driver, node.ids.check)
-		}
-	}
+	// 多选语境：Ctrl 点击标记两行（行选择与勾选分离）。
+	clickHitWith(t, driver, first.ids.row, ui.KeyControlLeft, true)
+	clickHitWith(t, driver, second.ids.row, ui.KeyControlLeft, true)
 	rightClickID(t, driver, first.ids.row)
 	if !application.menu.multi || !menuHasLabel(application.menu, "复制所选节点信息") {
 		t.Fatalf("多选右键菜单文案不对：%+v", application.menu.items)
@@ -1090,8 +1085,8 @@ func TestDetailPopupKeepsListRowsFilled(t *testing.T) {
 	if !hasText(snapshot, "状态：尚未测试") {
 		t.Fatalf("详情弹窗没有打开；文本=%v", snapshot.Labels)
 	}
-	if !hasText(snapshot, "关闭详情") {
-		t.Fatal("详情弹窗应带关闭按钮")
+	if !hasText(snapshot, "节点详情") {
+		t.Fatal("详情弹窗面板应带无障碍名称")
 	}
 	if application.nodeViewport.Height != viewportBefore || application.nodeViewport.Height <= 0 {
 		t.Fatalf("详情弹窗不应改变列表视口高度：%v -> %v", viewportBefore, application.nodeViewport.Height)
@@ -1123,6 +1118,9 @@ func TestSingleNodeTestPinsRowUntilSort(t *testing.T) {
 	application, driver := openTestApp(t, dir, runner)
 
 	pinned := application.groups[0].nodes[1]
+	// 多选语境：Ctrl 点击标记两行，菜单走多选措辞。
+	clickHitWith(t, driver, pinned.ids.row, ui.KeyControlLeft, true)
+	clickHitWith(t, driver, application.groups[0].nodes[0].ids.row, ui.KeyControlLeft, true)
 	rightClickID(t, driver, pinned.ids.row)
 	if !menuHasLabel(application.menu, "单独测试此节点") {
 		t.Fatalf("多选菜单缺少单独测试项：%+v", application.menu.items)

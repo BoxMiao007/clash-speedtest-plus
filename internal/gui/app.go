@@ -155,6 +155,8 @@ func (a *App) paint(canvas *ui.Canvas, size ui.Size) {
 	// 结果图预览的位图最后画：它只覆盖对话框内容区（上一帧记录的几何），
 	// 标题与按钮已经在 flex 里画好了。
 	a.paintPreviewImage(canvas)
+	// 详情弹窗在 flex 绘制之后用 canvas 直接画（layer 1），盖过列表文字。
+	a.paintDetailOverlay(canvas)
 	// 拖入文件时整窗覆盖一层提示，说明松开后会发生什么。
 	if a.dropActive {
 		a.paintDropHint(canvas)

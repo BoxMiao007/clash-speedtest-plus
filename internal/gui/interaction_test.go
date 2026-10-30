@@ -487,7 +487,7 @@ func TestRowHitsStopBeforeScrollBar(t *testing.T) {
 }
 
 // 节点行的选中态：点图标开详情、右键开菜单都会把该行标成当前操作行；
-// 点行本身是切换勾选，不再打开详情。
+// 点行是行选择（marked），与勾选分离、不打开详情。
 func TestRowClickAndRightClickMarkActive(t *testing.T) {
 	dir := t.TempDir()
 	writeNodesFile(t, dir, "a.yaml", "A-01", "A-02")
@@ -501,16 +501,20 @@ func TestRowClickAndRightClickMarkActive(t *testing.T) {
 	if application.activeNode != first || application.detailNode == first {
 		t.Fatal("单击行应把该行标为选中，且不打开详情")
 	}
-	if first.selected == selectedBefore {
-		t.Fatal("单击行应切换勾选")
+	if !first.marked {
+		t.Fatal("单击行应标记该行")
+	}
+	if first.selected != selectedBefore {
+		t.Fatal("行选择不应改变勾选")
 	}
 	clickID(t, driver, first.ids.knob)
 	if application.detailNode != first {
 		t.Fatal("点行尾三点图标应打开详情")
 	}
-	clickLabel(t, driver, "关闭详情")
+	// 再点同一图标关闭；点弹窗之外或 Esc 也一样。
+	clickID(t, driver, first.ids.knob)
 	if application.activeNode != nil || application.detailNode != nil {
-		t.Fatal("关闭详情后选中态应清除")
+		t.Fatal("再次点击图标应关闭详情")
 	}
 
 	rightClickID(t, driver, second.ids.row)
