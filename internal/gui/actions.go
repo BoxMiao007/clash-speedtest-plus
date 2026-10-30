@@ -12,6 +12,7 @@ import (
 	"github.com/BoxMiao007/clash-speedtest-plus/internal/output"
 	"github.com/BoxMiao007/clash-speedtest-plus/internal/speedtester"
 	"github.com/BoxMiao007/clash-speedtest-plus/internal/store"
+	"github.com/vivaui/viva/ui"
 )
 
 func (s *state) toggleEntry(entry *entryState) {
@@ -1122,11 +1123,11 @@ func (s *state) applyPreset(index int) {
 
 // openEntryDirectory 打开条目对应的本地目录：本地文件打开配置文件所在目录，
 // 订阅条目打开缓存目录，排查「文件被移动」「缓存损坏」时不用手动找路径。
-func (s *state) openEntryDirectory(node *nodeState) {
-	if node == nil || node.entry == nil {
+// 入口在节点来源卡片的「打开目录」按钮与节点右键菜单。
+func (s *state) openEntryDirectory(entry *entryState) {
+	if entry == nil {
 		return
 	}
-	entry := node.entry
 	var target string
 	if entry.entry.IsSubscription() {
 		target = filepath.Join(s.dataDir, "subscriptions")
@@ -1147,6 +1148,58 @@ func (s *state) openEntryDirectory(node *nodeState) {
 		return
 	}
 	s.status = "已打开目录：" + target
+}
+
+// handleRowClick 处理节点行的左键点击（详情改由行尾三点图标打开，行本身
+// 负责勾选）：普通点击与 Ctrl 点击都是切换勾选并更新范围锚点；Shift 点击
+// 选中从锚点到该行的全部可见节点。
+func (s *state) handleRowClick(node *nodeState, modifiers ui.Modifiers) {
+	// 行点击仍把该行标成「正在操作」；详情只由行尾三点图标打开。
+	s.activeNode = node
+	if modifiers&ui.ModifierShift != 0 {
+		s.selectRangeTo(node)
+		return
+	}
+	// 普通点击与 Ctrl 点击都是切换勾选；Ctrl 不清除其它勾选，只把自己
+	// 加进来/移出去，并同样更新范围锚点。
+	s.rangeAnchorKey = node.key
+	node.selected = !node.selected
+	s.rebuild()
+}
+
+// selectRangeTo 把范围锚点到目标行之间（按当前可见顺序）的节点全部选中；
+// 只增不减：范围外的勾选保持原样。锚点行不可见时退化为只选目标行。
+func (s *state) selectRangeTo(node *nodeState) {
+	start, end := -1, -1
+	for index, item := range s.nodeItems {
+		if item.kind != itemNode {
+			continue
+		}
+		if item.node == node {
+			end = index
+		}
+		if start < 0 && item.node.key == s.rangeAnchorKey {
+			start = index
+		}
+	}
+	if end < 0 {
+		return
+	}
+	if start < 0 || start > end {
+		start = end
+	}
+	count := 0
+	for index := start; index <= end; index++ {
+		item := s.nodeItems[index]
+		if item.kind == itemNode && !item.node.selected {
+			item.node.selected = true
+			count++
+		}
+	}
+	s.rebuild()
+	if count > 0 {
+		s.status = "已按范围选中节点（新增 " + itoa(count) + " 个）"
+	}
 }
 
 func itoa(value int) string {

@@ -39,14 +39,11 @@ func (a *App) paintTest(f *flex.Frame) {
 		a.paintNodeEmpty(f)
 		return
 	}
-	// nodeViewport 是上一帧列表（Stack）的实际高度，已经扣掉详情面板；只有
-	// 首帧没有记录时才用窗口高度估算，并手动减去可能存在的详情面板。
+	// nodeViewport 是上一帧列表（Stack）的实际高度；只有首帧没有记录时
+	// 才用窗口高度估算。
 	viewport := a.nodeViewport.Height
 	if viewport <= 0 {
 		viewport = a.window.Height - 236
-		if a.detailNode != nil {
-			viewport -= detailPanelHeight
-		}
 		if viewport < 200 {
 			viewport = 200
 		}
@@ -108,9 +105,6 @@ func (a *App) paintTest(f *flex.Frame) {
 			})
 		}
 	})
-	if a.detailNode != nil {
-		a.paintDetailPanel(f)
-	}
 }
 
 // paintListRow 在当前位置声明一行（分组标题或节点行）。top 是相对列表的
@@ -315,6 +309,7 @@ func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 		hover.Alpha *= 0.10
 	}
 	row = row.HoverBackground(hover)
+	canvas := f.Canvas()
 	row.Children(func() {
 		check := f.Checkbox(node.ids.check, node.selected).
 			Label(node.checkLabel)
@@ -355,17 +350,36 @@ func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 			f.Text(node.uploadText).FontSize(11).Muted().Width(colUpload).TextEnd()
 		}
 		f.Text(node.lastTestText).FontSize(11).Muted().Width(colTested).Ellipsis()
+		// 行尾竖向三点：打开详情的唯一入口。在 pointer 事件 pass 里处理，
+		// 才能拿到图标位置作为弹窗锚点；Consume 后不再走 click 事件 pass。
+		knobColor := a.theme.MutedForeground
+		if pinned || active {
+			knobColor = a.theme.Primary
+		}
+		f.Text("⋮").FontSize(16).Color(knobColor).Width(20).Height(24).
+			TextCenter().Radius(4).HoverBackground(a.theme.Muted).
+			Hit(node.ids.knob, node.knobLabel)
+		if event, ok := canvas.PointerOn(node.ids.knob); ok &&
+			event.Kind == ui.PointerUp && event.Button == ui.PointerButtonPrimary && event.ClickCount == 1 {
+			// pointer 事件 pass 结束后不运行 AfterPaint 队列，这里直接改
+			// 状态，Consume 会触发重绘把弹窗画出来。
+			a.toggleDetailAt(node.key, event.X, event.Y)
+			canvas.Consume()
+		}
 	})
-	// 复选框负责勾选，行本身打开详情；双击的第二下不再切换，避免刚打开又被关掉。
-	repeated := false
-	if event, ok := f.Canvas().PointerOn(node.ids.row); ok && event.ClickCount > 1 {
-		repeated = true
-	}
-	if !repeated && row.Clicked() {
-		a.toggleDetail(node)
+	// 行点击在 pointer 事件 pass 里处理（click pass 拿不到修饰键）：
+	// 普通与 Ctrl 点击切换该行，Shift 点击选中范围；双击的第二下忽略。
+	if event, ok := canvas.PointerOn(node.ids.row); ok &&
+		event.Kind == ui.PointerUp && event.Button == ui.PointerButtonPrimary && event.ClickCount == 1 {
+		a.handleRowClick(node, event.Modifiers)
+		canvas.Consume()
 	}
 	a.handleNodePointer(f.Canvas(), node.ids.row, node)
 	a.handleNodePointer(f.Canvas(), node.ids.check, node)
+	// 详情弹窗的锚点跟随目标行：行在本帧绘制过就刷新「还看得见」标记。
+	if a.detailNode == node {
+		a.detailSeen = true
+	}
 }
 
 // handleNodePointer 在行或复选框上处理右键；左键仍由 Clicked 处理。
@@ -380,19 +394,27 @@ func (a *App) handleNodePointer(canvas *ui.Canvas, id ui.ID, node *nodeState) {
 	}
 }
 
-// toggleDetail 展开/收起某个节点的详情面板；文案在切换时算好，Paint 只读。
-func (a *App) toggleDetail(node *nodeState) {
-	if a.detailKey == node.key {
+// toggleDetailAt 打开/关闭某个节点的详情弹窗。弹窗从行尾三点图标的位置
+// 展开（anchor 是图标点击位置），不再使用底部面板；点同一个图标关闭。
+func (a *App) toggleDetailAt(key string, x, y float32) {
+	if a.detailKey == key {
 		a.closeDetail()
 		return
 	}
-	a.detailKey = node.key
+	node := a.byKey[key]
+	if node == nil {
+		return
+	}
+	a.detailKey = key
 	a.detailNode = node
 	a.activeNode = node
 	a.detailText = detailText(node)
+	// 锚点取图标点击位置；弹窗右缘对齐它向左展开，放不下时 Below 会
+	// 自动改到上方。
+	a.detailAnchor = ui.Rect{X: x - 12, Y: y - 12, Width: 24, Height: 24}
 }
 
-// closeDetail 关闭详情面板并清掉行选中态。
+// closeDetail 关闭详情弹窗并清掉行选中态。
 func (a *App) closeDetail() {
 	a.detailKey = ""
 	a.detailNode = nil
@@ -400,22 +422,45 @@ func (a *App) closeDetail() {
 	a.detailText = ""
 }
 
-// detailPanelHeight 是详情面板的固定高度（含标题行）。
-const detailPanelHeight float32 = 148
+// detailPopupWidth/Height 是详情弹窗的固定尺寸：正文按 12 行预留，长行
+// 在 Paragraph 里换行。
+const (
+	detailPopupWidth  float32 = 420
+	detailPopupHeight float32 = 252
+)
 
-func (a *App) paintDetailPanel(f *flex.Frame) {
-	f.Column().Height(detailPanelHeight).FillWidth().PadX(20).PadY(8).Children(func() {
-		panel := f.Column().FillWidth().Height(detailPanelHeight-16).Pad(10).Gap(4).
-			Background(a.theme.Card).Border(1, a.theme.Border).Radius(a.theme.Metrics.RadiusSurface).Clip()
-		panel.Children(func() {
-			f.Row().FillWidth().Items(flex.Center).Gap(8).Children(func() {
-				f.Text(a.detailNode.name).Bold().Ellipsis().Grow(1)
-				if f.Button(a.ids.closeDetail, "关闭详情").XSmall().Ghost().Clicked() {
-					a.closeDetail()
-				}
+// paintDetailPopup 在三点图标旁绘制详情弹窗。全窗口先声明一个 dismiss 命
+// 中，弹窗内容在后声明、优先接管自己的点击；目标行滚出视口后自动关闭。
+func (a *App) paintDetailPopup(f *flex.Frame) {
+	if a.detailNode == nil {
+		return
+	}
+	if !a.detailSeen {
+		// 目标行不在本帧视口内（滚动走了、条目折叠了）：关闭详情。
+		a.closeDetail()
+		return
+	}
+	canvas := f.Canvas()
+	canvas.HitWithLabel(a.ids.detailDismiss, ui.Rect{Width: a.window.Width, Height: a.window.Height}, "关闭节点详情")
+	if canvas.Clicked(a.ids.detailDismiss) {
+		a.closeDetail()
+		// 本帧不再声明弹窗：detailNode 已清空，往下走会解引用空指针。
+		return
+	}
+	popup := f.Popup().Below(a.detailAnchor, 6, flex.End).Width(detailPopupWidth).Height(detailPopupHeight)
+	popup.Children(func() {
+		f.Column().Fill().Pad(12).Gap(6).
+			Background(a.theme.Card).Border(1, a.theme.Border).
+			Radius(a.theme.Metrics.RadiusSurface).Clip().
+			Children(func() {
+				f.Row().FillWidth().Items(flex.Center).Gap(8).Children(func() {
+					f.Text(a.detailNode.name).Bold().Ellipsis().Grow(1)
+					if f.Button(a.ids.detailClose, "关闭详情").XSmall().Ghost().Clicked() {
+						f.Canvas().AfterPaint(a.closeDetail)
+					}
+				})
+				f.Paragraph(a.detailText, 12).FontSize(11).Muted().Grow(1)
 			})
-			f.Paragraph(a.detailText, 6).FontSize(11).Muted()
-		})
 	})
 }
 
@@ -565,6 +610,9 @@ func (a *App) paintEntryCard(f *flex.Frame, entry *entryState) {
 		f.Row().Gap(6).Children(func() {
 			if f.Button(entry.ids.edit, "编辑").XSmall().Ghost().Disabled(a.running()).Clicked() {
 				a.openEntryDialog(entry)
+			}
+			if f.Button(entry.ids.openDir, "打开目录").XSmall().Ghost().Clicked() {
+				f.Canvas().AfterPaint(func() { a.openEntryDirectory(entry) })
 			}
 			if f.Button(entry.ids.remove, "删除").XSmall().Ghost().Destructive().Disabled(a.running()).Clicked() {
 				a.askDeleteEntry(entry)

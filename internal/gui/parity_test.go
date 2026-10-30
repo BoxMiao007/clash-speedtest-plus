@@ -345,7 +345,7 @@ func TestPauseResumeUpdatesStatus(t *testing.T) {
 	waitUntilIdle(t, application, driver)
 }
 
-// 结果表点击行展开详情，再点收起。
+// 结果表：点行切换勾选；详情由行尾三点图标开关。
 func TestResultRowTogglesDetailPanel(t *testing.T) {
 	dir := t.TempDir()
 	seedSettings(t, dir, quietSettings())
@@ -357,20 +357,26 @@ func TestResultRowTogglesDetailPanel(t *testing.T) {
 	waitUntilIdle(t, application, driver)
 	node := application.results[0]
 	selectedBefore := node.selected
-	clickID(t, driver, node.ids.row)
-	snapshot := driver.Snapshot()
-	if !hasText(snapshot, "下载错误") && !hasText(snapshot, "上次测速：") {
-		t.Fatalf("详情面板没有出现；文本=%v", snapshot.Labels)
+	clickID(t, driver, node.ids.knob)
+	if !hasText(driver.Snapshot(), "上次测速：") {
+		t.Fatal("点三点图标应打开详情弹窗")
 	}
 	if node.selected != selectedBefore {
-		t.Fatal("点行只打开详情，不应改变勾选")
+		t.Fatal("打开详情不应改变勾选")
+	}
+	clickID(t, driver, node.ids.knob)
+	if hasText(driver.Snapshot(), "上次测速：") {
+		t.Fatal("再次点击图标应关闭详情")
 	}
 	clickID(t, driver, node.ids.row)
+	if node.selected == selectedBefore {
+		t.Fatal("点行应切换勾选")
+	}
 	if hasText(driver.Snapshot(), "上次测速：") {
-		t.Fatal("再次点击行应关闭详情")
+		t.Fatal("点行不应打开详情")
 	}
 	clickID(t, driver, node.ids.check)
-	if node.selected == selectedBefore {
+	if node.selected != selectedBefore {
 		t.Fatal("点复选框应切换勾选")
 	}
 	if hasText(driver.Snapshot(), "上次测速：") {

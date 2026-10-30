@@ -1072,8 +1072,8 @@ func TestEntryCardShowsPathBadgeAndSinglePath(t *testing.T) {
 	}
 }
 
-// 打开详情后列表变矮，视口内的每一行都必须继续绘制，不能留出空白。
-func TestDetailPanelKeepsListRowsFilled(t *testing.T) {
+// 详情改为从行尾三点图标展开的弹窗：不再挤压列表布局，视口内每行照常绘制。
+func TestDetailPopupKeepsListRowsFilled(t *testing.T) {
 	dir := t.TempDir()
 	names := make([]string, 0, 30)
 	for index := 0; index < 30; index++ {
@@ -1083,14 +1083,18 @@ func TestDetailPanelKeepsListRowsFilled(t *testing.T) {
 	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
 	application, driver := openTestApp(t, dir, newFakeRunner(nil))
 
+	viewportBefore := application.nodeViewport.Height
 	first := application.nodes[0]
-	clickID(t, driver, first.ids.row)
+	clickID(t, driver, first.ids.knob)
 	snapshot := driver.Snapshot()
 	if !hasText(snapshot, "状态：尚未测试") {
-		t.Fatalf("详情面板没有打开；文本=%v", snapshot.Labels)
+		t.Fatalf("详情弹窗没有打开；文本=%v", snapshot.Labels)
 	}
-	if application.nodeViewport.Height <= 0 {
-		t.Fatal("没有记录列表视口")
+	if !hasText(snapshot, "关闭详情") {
+		t.Fatal("详情弹窗应带关闭按钮")
+	}
+	if application.nodeViewport.Height != viewportBefore || application.nodeViewport.Height <= 0 {
+		t.Fatalf("详情弹窗不应改变列表视口高度：%v -> %v", viewportBefore, application.nodeViewport.Height)
 	}
 	for _, item := range application.nodeItems {
 		if item.kind != itemNode {

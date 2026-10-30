@@ -187,6 +187,15 @@ type state struct {
 	// 把它标成选中态，用户能看清操作的是哪个节点。
 	activeNode *nodeState
 
+	// Shift/Ctrl 多选：rangeAnchorKey 是范围选择的起点（普通点击与 Ctrl
+	// 点击都会更新它），Shift 点击选中锚点到目标之间的可见节点。
+	rangeAnchorKey string
+
+	// detailAnchor 是详情弹窗的锚点（行尾三点图标的点击位置）；弹窗从
+	// 这个位置展开。detailSeen 由行绘制每帧刷新：目标行滚出视口后关闭。
+	detailAnchor ui.Rect
+	detailSeen   bool
+
 	// 导出：后台任务只写 pending 事件，窗口线程更新状态。
 	// exporting 是进行中的导出任务数（允许上一轮导出未完成时下一轮继续测）；
 	// pendingExport 是一轮测完但还没轮到写盘时挂起的轮次。
@@ -311,6 +320,7 @@ type nodeState struct {
 	uploadText   string
 	statusText   string
 	clipText     string
+	knobLabel    string
 }
 
 type entryForm struct {
@@ -1327,6 +1337,8 @@ func (s *state) refreshNodeDisplay(node *nodeState) {
 		node.infoText += " · " + node.summaryText
 	}
 	node.clipText = clipboardText(node)
+	// 行尾三点图标的无障碍名称也预计算，绘制里不拼字符串。
+	node.knobLabel = "打开节点详情 " + node.name
 	// 详情文案依赖上面的展示字段，必须最后算，否则会停在旧状态。
 	if s.detailNode == node {
 		s.detailText = detailText(node)

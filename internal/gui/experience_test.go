@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/BoxMiao007/clash-speedtest-plus/internal/store"
+	"github.com/vivaui/viva/app"
 	"github.com/vivaui/viva/ui"
 )
 
@@ -392,5 +393,122 @@ func TestWindowSettingsRoundTrip(t *testing.T) {
 	}
 	if origin := application.Config().Origin; origin == nil || origin.X != -200 || origin.Y != 50 {
 		t.Fatalf("重启后应使用保存的位置，实际 %+v", origin)
+	}
+}
+
+// 点击一个命中的中心；with 为真时先按住修饰键（Shift 或 Ctrl）再点击。
+func clickHitWith(t *testing.T, driver *app.Driver, id ui.ID, key ui.Key, with bool) {
+	t.Helper()
+	var rect = hitRect(t, driver, id)
+	if with {
+		if err := driver.KeyDown(key, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := driver.Click(rect.X+rect.Width/2, rect.Y+rect.Height/2); err != nil {
+		t.Fatal(err)
+	}
+	if with {
+		if err := driver.KeyUp(key, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Shift 点击选中锚点到目标之间的全部可见节点；Ctrl 点击切换单个节点。
+func TestShiftAndCtrlClickMultiSelect(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "A-01", "A-02", "A-03", "A-04", "A-05")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+
+	// 先全不选，效果才看得清。
+	clickID(t, driver, application.ids.selectNone)
+	if application.selectedCount != 0 {
+		t.Fatalf("全不选后应为 0，实际 %d", application.selectedCount)
+	}
+
+	// 普通点击 A-01：选中并记为范围锚点。
+	clickHitWith(t, driver, application.nodes[0].ids.row, 0, false)
+	if application.selectedCount != 1 {
+		t.Fatalf("普通点击应只选 A-01，实际 %d", application.selectedCount)
+	}
+
+	// Shift 点击 A-04：A-01..A-04 全部选中，A-05 不动。
+	clickHitWith(t, driver, application.nodes[3].ids.row, ui.KeyShiftLeft, true)
+	if application.selectedCount != 4 {
+		t.Fatalf("Shift 范围应选中 4 个，实际 %d", application.selectedCount)
+	}
+	for index := 0; index < 4; index++ {
+		if !application.nodes[index].selected {
+			t.Fatalf("A-0%d 应被范围选中", index+1)
+		}
+	}
+	if application.nodes[4].selected {
+		t.Fatal("范围外的 A-05 不应被选中")
+	}
+
+	// Ctrl 点击 A-05：单独加入，其它保持。
+	clickHitWith(t, driver, application.nodes[4].ids.row, ui.KeyControlLeft, true)
+	if application.selectedCount != 5 {
+		t.Fatalf("Ctrl 点击应加入 A-05，实际 %d", application.selectedCount)
+	}
+
+	// Ctrl 点击 A-05：从选择中移除。
+	clickHitWith(t, driver, application.nodes[4].ids.row, ui.KeyControlLeft, true)
+	if application.selectedCount != 4 || application.nodes[4].selected {
+		t.Fatal("Ctrl 再次点击应移除 A-05")
+	}
+
+	// 锚点未变：Shift 点击 A-02 会把范围缩到 A-01..A-02，但已选中的
+	// A-03、A-04 保留（范围选择只增不减）。
+	clickHitWith(t, driver, application.nodes[1].ids.row, ui.KeyShiftLeft, true)
+	if !application.nodes[2].selected || !application.nodes[3].selected {
+		t.Fatal("Shift 范围选择不应取消范围外的勾选")
+	}
+}
+
+// 条目卡片上的「打开目录」打开配置文件所在目录。
+func TestEntryCardOpensDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "HK-01")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+
+	var opened string
+	original := openDirectory
+	openDirectory = func(path string) error {
+		opened = path
+		return nil
+	}
+	t.Cleanup(func() { openDirectory = original })
+
+	entry := application.entryByID("e1")
+	clickID(t, driver, entry.ids.openDir)
+	if opened != filepath.Clean(dir) {
+		t.Fatalf("应打开配置所在目录 %q，实际 %q", dir, opened)
+	}
+	if !strings.Contains(application.status, "已打开目录") {
+		t.Fatalf("应有状态提示，实际 %q", application.status)
+	}
+}
+
+// 点击详情弹窗以外的任意位置关闭弹窗。
+func TestDetailPopupDismissesOnOutsideClick(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "HK-01")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+
+	clickID(t, driver, application.nodes[0].ids.knob)
+	if application.detailNode == nil {
+		t.Fatal("点三点图标应打开详情")
+	}
+	// 点窗口左上角（页面标题区，弹窗之外）。
+	if err := driver.Click(300, 16); err != nil {
+		t.Fatal(err)
+	}
+	if application.detailNode != nil || application.activeNode != nil {
+		t.Fatal("点击弹窗之外应关闭详情")
 	}
 }

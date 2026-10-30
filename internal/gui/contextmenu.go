@@ -197,7 +197,9 @@ func (a *App) activateMenu(id ui.ID) {
 			a.status = "已排除此节点"
 		}
 	case a.ids.menuOpenDir:
-		a.openEntryDirectory(single)
+		if single != nil {
+			a.openEntryDirectory(single.entry)
+		}
 	}
 }
 

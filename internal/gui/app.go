@@ -146,6 +146,9 @@ func (a *App) paint(canvas *ui.Canvas, size ui.Size) {
 	a.nodeListValid = false
 	a.entryScrollValid = false
 	a.settingsScrollValid = false
+	// 详情弹窗的「目标行还看得见」标记由行绘制刷新；本帧没画到目标行就
+	// 会在 paintDetailPopup 里关闭弹窗。
+	a.detailSeen = false
 	bounds := ui.Rect{X: 0, Y: 0, Width: size.Width, Height: size.Height}
 	canvas.Fill(bounds, a.theme.Background)
 	a.view.Draw(canvas, a.theme, bounds, a.paintRoot)
@@ -186,6 +189,8 @@ func (a *App) paintPage(f *flex.Frame) {
 		})
 		a.paintFooter(f)
 		a.paintDialogs(f)
+		// 详情弹窗在右键菜单之下：两者同时打开时菜单优先。
+		a.paintDetailPopup(f)
 		a.paintMenu(f)
 	})
 }

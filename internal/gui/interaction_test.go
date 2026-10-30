@@ -440,7 +440,7 @@ func TestDetailPanelRefreshesAfterRun(t *testing.T) {
 	clickID(t, driver, application.ids.startTest)
 	waitUntilIdle(t, application, driver)
 	node := application.nodes[0]
-	application.toggleDetail(node)
+	application.toggleDetailAt(node.key, 100, 100)
 	if strings.Contains(application.detailText, "尚未测试") || !strings.Contains(application.detailText, "42ms") {
 		t.Fatalf("详情应显示已完成的结果：%s", application.detailText)
 	}
@@ -459,7 +459,7 @@ func TestHiddenNodesClearDetailAndPin(t *testing.T) {
 	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
 	application, _ := openTestApp(t, dir, newFakeRunner(nil))
 	node := application.nodes[0]
-	application.toggleDetail(node)
+	application.toggleDetailAt(node.key, 100, 100)
 	application.pinNode = node
 	application.filterField.SetText("JP")
 	application.compileFilter()
@@ -486,7 +486,8 @@ func TestRowHitsStopBeforeScrollBar(t *testing.T) {
 	}
 }
 
-// 节点行的选中态：单击打开详情、右键打开菜单，都会把该行标成当前操作行。
+// 节点行的选中态：点图标开详情、右键开菜单都会把该行标成当前操作行；
+// 点行本身是切换勾选，不再打开详情。
 func TestRowClickAndRightClickMarkActive(t *testing.T) {
 	dir := t.TempDir()
 	writeNodesFile(t, dir, "a.yaml", "A-01", "A-02")
@@ -495,12 +496,20 @@ func TestRowClickAndRightClickMarkActive(t *testing.T) {
 	first := application.nodes[0]
 	second := application.nodes[1]
 
+	selectedBefore := first.selected
 	clickID(t, driver, first.ids.row)
-	if application.activeNode != first || application.detailNode != first {
-		t.Fatal("单击行应把该行标为选中并打开详情")
+	if application.activeNode != first || application.detailNode == first {
+		t.Fatal("单击行应把该行标为选中，且不打开详情")
 	}
-	clickID(t, driver, application.ids.closeDetail)
-	if application.activeNode != nil {
+	if first.selected == selectedBefore {
+		t.Fatal("单击行应切换勾选")
+	}
+	clickID(t, driver, first.ids.knob)
+	if application.detailNode != first {
+		t.Fatal("点行尾三点图标应打开详情")
+	}
+	clickLabel(t, driver, "关闭详情")
+	if application.activeNode != nil || application.detailNode != nil {
 		t.Fatal("关闭详情后选中态应清除")
 	}
 

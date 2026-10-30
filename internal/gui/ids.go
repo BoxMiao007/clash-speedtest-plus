@@ -117,6 +117,10 @@ type ids struct {
 	previewClose ui.ID
 	previewZoom  ui.ID
 
+	// 节点详情弹窗（从行尾三点图标展开）。
+	detailDismiss ui.ID
+	detailClose   ui.ID
+
 	menuDismiss    ui.ID
 	menuRoot       ui.ID
 	menuCopy       ui.ID
@@ -240,6 +244,9 @@ func newIDs(tree *ui.Tree) ids {
 	value.previewClose = tree.ID(value.dialogs, "preview-close")
 	value.previewZoom = tree.ID(value.dialogs, "preview-zoom")
 
+	value.detailDismiss = tree.ID(value.dialogs, "detail-dismiss")
+	value.detailClose = tree.ID(value.dialogs, "detail-close")
+
 	value.menuDismiss = tree.ID(value.menu, "dismiss")
 	value.menuRoot = tree.ID(value.menu, "root")
 	value.menuCopy = tree.ID(value.menu, "copy-one")
@@ -266,6 +273,7 @@ type entryIDs struct {
 	emptyRead   ui.ID
 	refetch     ui.ID
 	edit        ui.ID
+	openDir     ui.ID
 	remove      ui.ID
 	selectAll   ui.ID
 	selectNone  ui.ID
@@ -282,6 +290,7 @@ func registerEntryIDs(tree *ui.Tree, parent ui.Scope, entryID string) entryIDs {
 		emptyRead:   tree.ID(scope, "empty-read"),
 		refetch:     tree.ID(scope, "refetch"),
 		edit:        tree.ID(scope, "edit"),
+		openDir:     tree.ID(scope, "open-dir"),
 		remove:      tree.ID(scope, "remove"),
 		selectAll:   tree.ID(scope, "select-all"),
 		selectNone:  tree.ID(scope, "select-none"),
@@ -295,6 +304,8 @@ type nodeIDs struct {
 	scope ui.Scope
 	row   ui.ID
 	check ui.ID
+	// knob 是行尾的竖向三点图标：打开详情的唯一入口。
+	knob ui.ID
 }
 
 func registerNodeIDs(tree *ui.Tree, entry entryIDs, nodeID string) nodeIDs {
@@ -303,6 +314,7 @@ func registerNodeIDs(tree *ui.Tree, entry entryIDs, nodeID string) nodeIDs {
 		scope: scope,
 		row:   tree.ID(scope, "row"),
 		check: tree.ID(scope, "check"),
+		knob:  tree.ID(scope, "detail-knob"),
 	}
 }
 
