@@ -121,7 +121,7 @@ fi
   echo 'layout'
   echo 'click "折叠"'
   echo 'texts'
-  echo 'click "展开"'
+  echo 'click "展开节点来源"'
   echo 'move 324 300'
   echo 'down 324 300'
   echo 'move 424 300'
@@ -160,8 +160,8 @@ expect '测速与输出设置'
 expect '已导出'
 expect 'ok 0 problems'
 expect 'error no control labelled "节点 机场 A / JP-01"'
-# 折叠/展开与拖动分隔条：折叠后出现窄栏的「展开」，拖动后分隔条右移 100px。
-expect '展开'
+# 折叠/展开与拖动分隔条：折叠后出现窄栏的展开按钮「»」，拖动后分隔条右移 100px。
+expect '»'
 expect 'entry-splitter x=420'
 # 设置内容一定超过视口，滚动条应当存在且能滚。
 expect 'settings-scrollbar'

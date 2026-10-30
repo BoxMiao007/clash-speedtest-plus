@@ -1064,6 +1064,52 @@ func TestDetailPanelKeepsListRowsFilled(t *testing.T) {
 	}
 }
 
+// 单独测试一个节点时，该行固定在原位置并保持高亮，其余节点照常排序；
+// 点表头排序后解除固定。
+func TestSingleNodeTestPinsRowUntilSort(t *testing.T) {
+	dir := t.TempDir()
+	writeNodesFile(t, dir, "a.yaml", "A-01", "B-01", "C-01")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	runner := newFakeRunner(map[string]fakeResult{
+		"A-01": {ok: true, speed: 1 * 1024 * 1024},
+		"B-01": {ok: true, speed: 20 * 1024 * 1024},
+		"C-01": {ok: true, speed: 30 * 1024 * 1024},
+	})
+	application, driver := openTestApp(t, dir, runner)
+
+	pinned := application.groups[0].nodes[1]
+	rightClickID(t, driver, pinned.ids.row)
+	if !menuHasLabel(application.menu, "单独测试此节点") {
+		t.Fatalf("多选菜单缺少单独测试项：%+v", application.menu.items)
+	}
+	clickLabel(t, driver, "单独测试此节点")
+	waitUntilIdle(t, application, driver)
+
+	if application.pinNode != pinned {
+		t.Fatal("单独测试的节点应保持高亮并固定")
+	}
+	group := application.groups[0]
+	if len(group.nodes) != 3 || group.nodes[1] != pinned {
+		t.Fatalf("单独测试的节点不应被排到别处：%v", group.nodeNames())
+	}
+	if !hasHitID(driver.Snapshot(), pinned.ids.row) {
+		t.Fatal("固定行应仍在画面上")
+	}
+
+	clickID(t, driver, application.ids.sortLatency)
+	if application.pinNode != nil {
+		t.Fatal("点表头排序应解除单测固定")
+	}
+}
+
+func (group *groupState) nodeNames() []string {
+	names := make([]string, 0, len(group.nodes))
+	for _, node := range group.nodes {
+		names = append(names, node.name)
+	}
+	return names
+}
+
 func BenchmarkPaintNodeList(b *testing.B) {
 	benchmarkPaintNodes(b, 300)
 }

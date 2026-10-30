@@ -55,14 +55,17 @@ func TestEntriesPanelCollapsesAndResizesByDrag(t *testing.T) {
 		t.Fatal("点「折叠」后应进入折叠状态")
 	}
 	snapshot := driver.Snapshot()
-	if hasText(snapshot, "节点来源") {
-		t.Fatal("折叠后不应再显示面板标题")
+	if hasHitID(snapshot, application.ids.entryCollapse) {
+		t.Fatal("折叠后不应再显示折叠按钮")
 	}
-	if !hasText(snapshot, "展开") {
-		t.Fatalf("折叠后应显示展开入口；文本=%v", snapshot.Labels)
+	if !hasText(snapshot, "»") {
+		t.Fatalf("折叠后应显示展开按钮；文本=%v", snapshot.Labels)
+	}
+	if !hasHitID(snapshot, application.ids.entryExpand) {
+		t.Fatal("折叠后应保留展开按钮的命中")
 	}
 
-	clickLabel(t, driver, "展开")
+	clickID(t, driver, application.ids.entryExpand)
 	if application.entriesCollapsed {
 		t.Fatal("点「展开」后应恢复面板")
 	}
