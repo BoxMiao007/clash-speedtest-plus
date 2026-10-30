@@ -347,8 +347,12 @@ func TestRenameChangePathAndDeleteEntry(t *testing.T) {
 	}
 	clickLabel(t, driver, "选择文件…")
 	clickID(t, driver, application.ids.entrySave)
-	if !hasText(driver.Snapshot(), "软路径 · b.yaml") {
-		t.Fatalf("修改路径没有生效；文本=%v", driver.Snapshot().Labels)
+	entry = application.entryByID("e1")
+	if entry.pathBadge != "软路径" || !strings.HasSuffix(entry.pathText, "b.yaml") {
+		t.Fatalf("修改路径没有生效：徽标=%q 路径=%q", entry.pathBadge, entry.pathText)
+	}
+	if !hasText(driver.Snapshot(), "软路径") {
+		t.Fatalf("条目卡片应显示软路径徽标；文本=%v", driver.Snapshot().Labels)
 	}
 	if !hasText(driver.Snapshot(), "节点 主力机场 / JP-01") {
 		t.Fatal("修改路径后没有读取新文件的节点")
@@ -850,7 +854,8 @@ func TestContextMenuWordingSingleAndMulti(t *testing.T) {
 	dir := t.TempDir()
 	writeNodesFile(t, dir, "a.yaml", "HK-01", "HK-02")
 	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
-	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+	runner := newFakeRunner(nil)
+	application, driver := openTestApp(t, dir, runner)
 
 	first := application.nodes[0]
 	for _, node := range application.nodes {
@@ -885,6 +890,21 @@ func TestContextMenuWordingSingleAndMulti(t *testing.T) {
 	clipboard := driver.Clipboard()
 	if !strings.Contains(clipboard, "HK-01") || !strings.Contains(clipboard, "HK-02") {
 		t.Fatalf("多选复制内容不全：%q", clipboard)
+	}
+
+	// 多选语境下仍能只测右键指向的那个节点。
+	rightClickID(t, driver, first.ids.row)
+	if !menuHasLabel(application.menu, "单独测试此节点") {
+		t.Fatalf("多选菜单缺少单独测试项：%+v", application.menu.items)
+	}
+	clickLabel(t, driver, "单独测试此节点")
+	waitUntilIdle(t, application, driver)
+	batch := runner.lastBatch()
+	if len(batch) != 1 || batch[0].Proxy.Name() != first.name {
+		t.Fatalf("单独测试应只测右键节点 %q，实际 %d 个", first.name, len(batch))
+	}
+	if len(application.rounds) != 1 || len(application.rounds[0].nodes) != 1 {
+		t.Fatalf("单独测试应只生成一轮一个节点，实际 %d 轮", len(application.rounds))
 	}
 }
 
@@ -982,6 +1002,65 @@ func TestIdleAfterRun(t *testing.T) {
 	}
 	if application.running() {
 		t.Fatal("运行标记应已清零")
+	}
+}
+
+// 条目卡片只显示一条路径，软/硬路径用徽标区分，不再重复写两行。
+func TestEntryCardShowsPathBadgeAndSinglePath(t *testing.T) {
+	dir := t.TempDir()
+	softFile := writeNodesFile(t, dir, "a.yaml", "HK-01")
+	hardFile := writeNodesFile(t, dir, "b.yaml", "JP-01")
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "软条目", Path: "a.yaml"})
+	seedEntry(t, dir, store.Entry{ID: "e2", Name: "硬条目", Path: hardFile})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+
+	soft := application.entryByID("e1")
+	if soft.pathBadge != "软路径" || soft.pathText != softFile {
+		t.Fatalf("软路径条目 = 徽标 %q / 路径 %q", soft.pathBadge, soft.pathText)
+	}
+	hard := application.entryByID("e2")
+	if hard.pathBadge != "硬路径" || hard.pathText != hardFile {
+		t.Fatalf("硬路径条目 = 徽标 %q / 路径 %q", hard.pathBadge, hard.pathText)
+	}
+	snapshot := driver.Snapshot()
+	if !hasText(snapshot, "软路径") || !hasText(snapshot, "硬路径") {
+		t.Fatalf("缺少路径徽标；文本=%v", snapshot.Labels)
+	}
+	if hasText(snapshot, "软路径 · ") || hasText(snapshot, "硬路径 · ") {
+		t.Fatal("路径不应再带「软路径 ·」前缀（徽标已表达形态）")
+	}
+}
+
+// 打开详情后列表变矮，视口内的每一行都必须继续绘制，不能留出空白。
+func TestDetailPanelKeepsListRowsFilled(t *testing.T) {
+	dir := t.TempDir()
+	names := make([]string, 0, 30)
+	for index := 0; index < 30; index++ {
+		names = append(names, fmt.Sprintf("节点 %02d", index))
+	}
+	writeNodesFile(t, dir, "a.yaml", names...)
+	seedEntry(t, dir, store.Entry{ID: "e1", Name: "机场 A", Path: "a.yaml"})
+	application, driver := openTestApp(t, dir, newFakeRunner(nil))
+
+	first := application.nodes[0]
+	clickID(t, driver, first.ids.row)
+	snapshot := driver.Snapshot()
+	if !hasText(snapshot, "状态：尚未测试") {
+		t.Fatalf("详情面板没有打开；文本=%v", snapshot.Labels)
+	}
+	if application.nodeViewport.Height <= 0 {
+		t.Fatal("没有记录列表视口")
+	}
+	for _, item := range application.nodeItems {
+		if item.kind != itemNode {
+			continue
+		}
+		if item.y-application.nodeOffset >= application.nodeViewport.Height {
+			continue
+		}
+		if !hasHitID(snapshot, item.node.ids.row) {
+			t.Fatalf("详情打开后视口内的行 %q 没有被绘制", item.node.name)
+		}
 	}
 }
 
