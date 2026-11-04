@@ -90,6 +90,26 @@ go build -ldflags "-H=windowsgui" -o clash-speedtest-plus.exe .
 
 发布二进制由 `.goreleaser.yaml` 构建（Windows/Linux，`-tags=with_gvisor`、`CGO_ENABLED=0`、stripped）。macOS 需要本机 cgo：`CGO_ENABLED=1 go build -o clash-speedtest-plus .`。`main.version` / `main.commit` 由 ldflags 注入，本地构建显示 `dev`。
 
+### 图标
+
+应用图标是「深色圆角方块 + 蓝色表盘弧 + 白色闪电」：表盘弧表达「测速」，闪电表达「高速」，两个大形状在 16px 任务栏尺寸下仍然分得清。设计源与全套导出在 [assets/icon](assets/icon)：
+
+- `app-icon.svg`：设计源（改色/改比例后重新导出）。
+- `app-icon-16…1024.png`：各尺寸 PNG；`app-icon.ico`：16–256 多尺寸 Windows 图标。
+- 改图标只需一条命令（依赖 Pillow 与 numpy）：
+
+```bash
+python scripts/make-icon.py
+```
+
+脚本同时把 256px 与 48px 两档写进 `internal/gui/`，由 `icon.go` 用 `go:embed` 打进二进制：256px 作窗口/任务栏图标（`app.Config.Icon`），48px 作标题栏品牌块。exe 文件本身在资源管理器里的图标来自 `rsrc_windows_amd64.syso` / `rsrc_windows_arm64.syso`（按文件名自动只参与对应架构的构建），改图标后需要重新生成：
+
+```bash
+go install github.com/akavel/rsrc@latest
+rsrc -ico assets/icon/app-icon.ico -o rsrc_windows_amd64.syso -arch amd64
+rsrc -ico assets/icon/app-icon.ico -o rsrc_windows_arm64.syso -arch arm64
+```
+
 ## 验证
 
 ```bash

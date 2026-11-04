@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>订阅测速 · Clash/Mihomo 节点测速</title>
+  <!-- 表盘弧表达「测速」，闪电表达「高速」；两者在 16px 下仍是干净的大形状。 -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#171F2E"/>
+      <stop offset="1" stop-color="#080B11"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="42%" r="62%">
+      <stop offset="0" stop-color="#2E6BFF" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#2E6BFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="70%" y1="8%" x2="30%" y2="92%">
+      <stop offset="0" stop-color="#8BDCFF"/>
+      <stop offset="0.5" stop-color="#4C8DFF"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="223.2" fill="url(#tile)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="223.2" fill="url(#glow)"/>
+  <path d="M 339.4 788.2 A 325.6 325.6 0 1 1 684.6 788.2"
+        fill="none" stroke="url(#ring)" stroke-width="59.4" stroke-linecap="round"/>
+  <polygon points="588.7,314.9 409.8,523.8 501.4,523.8 446.0,709.1 614.2,500.2 522.6,500.2" fill="#F8FAFC"/>
+</svg>
