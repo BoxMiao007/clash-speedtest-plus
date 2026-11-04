@@ -17,8 +17,8 @@ const (
 
 // 合并视图（测速）的列宽。节点名列吃剩余宽度；状态与数值列定宽右对齐。
 const (
-	// groupBarHeight 是固定在列表顶部的分组标题高度（32px 标题 + 1px 分隔线）。
-	groupBarHeight float32 = 33
+	// groupBarHeight 是固定在列表顶部的分组标题高度（groupBarH 标题 + 1px 分隔线）。
+	groupBarHeight float32 = groupBarH + 1
 
 	colCheck   float32 = 40
 	colStatus  float32 = 52
@@ -98,7 +98,7 @@ func (a *App) paintTest(f *flex.Frame) {
 			// 被盖住的行已经按 33px 裁掉，固定标题空白处不会命中下面任何行。
 			bar := f.Column().Absolute().Top(0).Left(0).Right(0).Height(groupBarHeight).Background(a.theme.Background)
 			bar.Children(func() {
-				f.Column().Height(32).FillWidth().PadX(20).Children(func() {
+				f.Column().Height(groupBarH).FillWidth().PadX(pagePadX).Children(func() {
 					a.paintGroupHeader(f, sticky)
 				})
 				f.Column().Height(1).FillWidth().Background(a.theme.Border)
@@ -118,7 +118,12 @@ func (a *App) paintListRow(f *flex.Frame, top float32, item listItem) {
 		return
 	}
 	row.Children(func() {
-		a.paintNodeRow(f, item.node)
+		// 行与行之间留一条极细的分隔线：没有它，未勾选的行会连成一片，
+		// 数值列也不容易横向对齐着读。
+		f.Column().FillWidth().Height(item.height - 1).Children(func() {
+			a.paintNodeRow(f, item.node)
+		})
+		f.Column().FillWidth().Height(1).Background(a.palette.Grid)
 	})
 }
 
@@ -129,8 +134,9 @@ func (a *App) showResultBar() bool {
 }
 
 func (a *App) paintTestToolbar(f *flex.Frame) {
-	f.Row().Height(52).FillWidth().PadX(20).Items(flex.Center).Gap(8).Children(func() {
-		f.Text(a.countText).FontSize(12).Muted().Ellipsis()
+	f.Row().Height(52).FillWidth().PadX(pagePadX).Items(flex.Center).Gap(gapS).
+		Background(a.theme.Card).Children(func() {
+		pillBox(f, a.countText, a.theme.Muted, a.theme.MutedForeground)
 		if f.Button(a.ids.selectAll, "全选").XSmall().Ghost().Disabled(a.running() || a.selectedCount == a.totalCount).Clicked() {
 			a.setAllNodesSelected(true)
 		}
@@ -149,7 +155,7 @@ func (a *App) paintTestToolbar(f *flex.Frame) {
 				f.Canvas().AfterPaint(func() { a.togglePause() })
 			}
 			if f.Button(a.ids.stopTest, "停止测速").Small().Destructive().Clicked() {
-				a.stopTest()
+				a.requestStop()
 			}
 			return
 		}
@@ -158,10 +164,16 @@ func (a *App) paintTestToolbar(f *flex.Frame) {
 		}
 	})
 	if !a.showResultBar() {
+		f.Column().Height(1).FillWidth().Background(a.theme.Border)
 		return
 	}
-	f.Row().Height(40).FillWidth().PadX(20).Items(flex.Center).Gap(8).Children(func() {
-		f.Text(a.resultText).FontSize(11).Muted().Ellipsis().Grow(1)
+	f.Row().Height(40).FillWidth().PadX(pagePadX).Items(flex.Center).Gap(gapS).
+		Background(a.theme.Card).Children(func() {
+		// 测速进行中给一个转圈：长时间等待也能看出还在动。
+		if a.running() {
+			f.Spinner().Size(14, 14)
+		}
+		f.Text(a.resultText).FontSize(fontCaption).Muted().Ellipsis().Grow(1)
 		if len(a.rounds) > 1 {
 			if f.Button(a.ids.roundPrev, "上一轮").XSmall().Outline().Disabled(a.roundIndex == 0).Clicked() {
 				a.switchRound(-1)
@@ -185,7 +197,7 @@ func (a *App) paintTestToolbar(f *flex.Frame) {
 				f.Canvas().AfterPaint(func() { a.askClearResults() })
 			}
 		}
-		disabled := a.exporting > 0 || len(a.results) == 0
+		disabled := a.exporting > 0 || a.running() || len(a.results) == 0
 		if f.Button(a.ids.exportYAML, "导出配置").XSmall().Outline().Disabled(disabled).Clicked() {
 			f.Canvas().AfterPaint(func() { a.startManualExport(manualYAML) })
 		}
@@ -196,14 +208,16 @@ func (a *App) paintTestToolbar(f *flex.Frame) {
 			f.Canvas().AfterPaint(func() { a.startManualExport(manualTSV) })
 		}
 	})
+	f.Column().Height(1).FillWidth().Background(a.theme.Border)
 }
 
 func (a *App) paintTestHeader(f *flex.Frame) {
-	f.Row().Height(30).FillWidth().PadSides(0, 30, 0, 20).Items(flex.Center).Children(func() {
+	f.Row().Height(30).FillWidth().PadSides(0, 30, 0, 20).Items(flex.Center).
+		Background(a.palette.Sunken).Children(func() {
 		f.Row().FillWidth().PadX(8).Gap(8).Items(flex.Center).Children(func() {
 			f.Spacer().Width(colCheck).Grow(0)
-			f.Text("节点").FontSize(11).Muted().Grow(1).Basis(0)
-			f.Text("状态").FontSize(11).Muted().Width(colStatus)
+			f.Text("节点").FontSize(fontCaption).Muted().Grow(1).Basis(0)
+			f.Text("状态").FontSize(fontCaption).Muted().Width(colStatus)
 			a.sortHeaderCell(f, a.headerLatency, a.sortHitLatency, a.ids.sortLatency, sortByLatency, colLatency)
 			a.sortHeaderCell(f, a.headerJitter, a.sortHitJitter, a.ids.sortJitter, sortByJitter, colJitter)
 			a.sortHeaderCell(f, a.headerLoss, a.sortHitLoss, a.ids.sortLoss, sortByLoss, colLoss)
@@ -212,9 +226,12 @@ func (a *App) paintTestHeader(f *flex.Frame) {
 				a.sortHeaderCell(f, a.headerUpload, a.sortHitUpload, a.ids.sortUpload, sortByUpload, colUpload)
 			}
 			a.sortHeaderCell(f, a.headerTested, a.sortHitTested, a.ids.sortTested, sortByTested, colTested)
+			// 行尾 ⋮ 占位：数据行比表头多一个 20px 图标 + 一个 8px 间距，
+			// 表头补等宽占位，数值列才能与数据行右对齐。
+			f.Spacer().Width(20).Grow(0)
 		})
 	})
-	f.Column().Height(1).FillWidth().PadX(20).Children(func() {
+	f.Column().Height(1).FillWidth().PadX(pagePadX).Children(func() {
 		f.Column().FillWidth().Height(1).Background(a.theme.Border)
 	})
 }
@@ -222,8 +239,9 @@ func (a *App) paintTestHeader(f *flex.Frame) {
 func (a *App) sortHeaderCell(f *flex.Frame, label, hitLabel string, id ui.ID, key sortKey, width float32) {
 	// 右侧留 3px 内边距：平台字体与参考字宽对箭头字形有 1–2px 偏差，直接
 	// 右对齐会让文字顶出列边界；命中区仍是整列。hitLabel 预计算，绘制不拼串。
-	cell := f.Text(label).FontSize(11).Muted().Width(width).
-		PadSides(0, 3, 0, 0).TextEnd().Hit(id, hitLabel)
+	cell := f.Text(label).FontSize(fontCaption).Muted().Width(width).
+		PadSides(0, 3, 0, 0).TextEnd().Radius(a.theme.Metrics.RadiusItem()).
+		HoverBackground(a.theme.Hover).Hit(id, hitLabel)
 	if cell.Clicked() {
 		a.setSort(key)
 	}
@@ -280,84 +298,88 @@ func (s *state) refreshModeFlags() {
 }
 
 func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
-	row := f.Row().Height(40).FillWidth().PadX(8).Gap(8).Items(flex.Center).
+	row := f.Row().FillHeight().FillWidth().PadX(8).Gap(8).Items(flex.Center).
 		Radius(a.theme.Metrics.RadiusItem()).
 		Hit(node.ids.row, node.rowLabel)
 	// 手动单测的节点用主题色浅浅标出，并在结果到达后保持原位（不参与重排）。
 	pinned := node == a.pinNode
 	active := node == a.activeNode || node.marked
-	// 悬停只在当前底色上加深一点：不要用固定的灰底覆盖选中态，否则鼠标
-	// 一指过去，蓝色选中效果就像消失了一样。
-	hover := a.theme.Muted
+	// 焦点可视化：行或行尾三点被键盘聚焦时给淡主题色底，键盘用户能看到焦点。
+	focused := f.Canvas().Focused() == node.ids.row || f.Canvas().Focused() == node.ids.knob
+	// 悬停只在当前底色上叠一层强调色，不换底色：固定的灰底会把选中态盖掉，
+	// 鼠标一指过去蓝色就像消失了（ADR-0026）。
+	hover := mix(a.theme.Background, a.palette.Accent, 0.07)
 	switch {
 	case pinned:
-		tint := a.theme.Primary
-		tint.Alpha *= 0.20
-		row = row.Background(tint)
-		hover = a.theme.Primary
-		hover.Alpha *= 0.28
+		row = row.Background(a.palette.RowPin)
+		hover = mix(a.palette.RowPin, a.palette.Accent, 0.14)
 	case active:
-		// 单击或右键的那一行：主题色淡底 + 主题色节点名，位置一眼可见。
-		tint := a.theme.Primary
-		tint.Alpha *= 0.14
-		row = row.Background(tint)
-		hover = a.theme.Primary
-		hover.Alpha *= 0.22
+		// 单击或右键的那一行：强调色淡底 + 强调色节点名，位置一眼可见。
+		row = row.Background(a.palette.RowActive)
+		hover = mix(a.palette.RowActive, a.palette.Accent, 0.12)
+	case focused:
+		row = row.Background(alpha(a.palette.Accent, 0.08))
 	case node.selected || node.phase == phaseTesting:
-		row = row.Background(a.theme.Muted)
-		hover = a.theme.MutedForeground
-		hover.Alpha *= 0.10
+		row = row.Background(a.palette.RowMarked)
+		hover = mix(a.palette.RowMarked, a.palette.Accent, 0.10)
 	}
 	row = row.HoverBackground(hover)
 	canvas := f.Canvas()
 	row.Children(func() {
 		check := f.Checkbox(node.ids.check, node.selected).
-			Label(node.checkLabel)
+			Label(node.checkLabel).Disabled(a.running())
 		if check.Clicked() {
 			a.toggleNode(node)
 		}
 		f.Column().Gap(0).Grow(1).Basis(0).Children(func() {
 			nameColor := a.theme.Foreground
 			if pinned || active {
-				nameColor = a.theme.Primary
+				nameColor = a.palette.Accent
 			}
-			f.Text(node.name).Color(nameColor).Ellipsis()
-			f.Row().Gap(4).Items(flex.Center).Children(func() {
+			f.Text(node.name).FontSize(fontSubtitle).Color(nameColor).Ellipsis()
+			f.Row().Gap(gapXS).Items(flex.Center).Children(func() {
 				f.Text(node.serverText).FontSize(10).Muted().Ellipsis().MaxWidth(180)
-				if node.typ != "" {
+				// 窄窗口先丢协议徽标：保住 server:port 比徽标更重要。
+				if node.typ != "" && a.nodeTypeFits() {
 					a.paintPill(f, node.typ, 9)
 				}
-				f.Spacer()
+				// 占位不抢宽度：Grow(1) 会把 server:port 挤成省略号，窄窗口下
+				// 只剩协议徽标。
+				f.Spacer().Grow(0)
 			})
 		})
+		// 状态列用颜色表达结果：进行中=强调色，成功=绿，失败=红，未测=灰。
 		statusColor := a.theme.MutedForeground
 		switch {
 		case node.phase == phaseTesting:
-			statusColor = a.theme.Primary
+			statusColor = a.palette.Accent
 		case node.hasResult && !node.result.OK:
 			statusColor = a.theme.Danger
+		case node.hasResult:
+			statusColor = a.theme.Success
 		}
-		f.Text(node.statusText).FontSize(11).Color(statusColor).Width(colStatus).Ellipsis()
-		f.Text(node.latencyText).FontSize(11).Muted().Width(colLatency).TextEnd()
-		f.Text(node.jitterText).FontSize(11).Muted().Width(colJitter).TextEnd()
-		f.Text(node.lossText).FontSize(11).Muted().Width(colLoss).TextEnd()
+		f.Text(node.statusText).FontSize(fontCaption).Color(statusColor).Width(colStatus).Ellipsis()
+		// 数值列用等宽字：数字纵向对齐，扫一眼就能比较。
+		f.Text(node.latencyText).FontSize(fontCaption).Mono().Muted().Width(colLatency).TextEnd()
+		f.Text(node.jitterText).FontSize(fontCaption).Mono().Muted().Width(colJitter).TextEnd()
+		f.Text(node.lossText).FontSize(fontCaption).Mono().Muted().Width(colLoss).TextEnd()
 		speedColor := a.theme.Foreground
 		if node.hasResult && !node.result.OK {
 			speedColor = a.theme.Danger
 		}
-		f.Text(node.speedText).FontSize(11).Color(speedColor).Width(colSpeed).TextEnd()
+		f.Text(node.speedText).FontSize(fontCaption).Mono().Color(speedColor).Width(colSpeed).TextEnd()
 		if a.showUpload {
-			f.Text(node.uploadText).FontSize(11).Muted().Width(colUpload).TextEnd()
+			f.Text(node.uploadText).FontSize(fontCaption).Mono().Muted().Width(colUpload).TextEnd()
 		}
-		f.Text(node.lastTestText).FontSize(11).Muted().Width(colTested).Ellipsis()
+		f.Text(node.lastTestText).FontSize(fontCaption).Muted().Width(colTested).Ellipsis()
 		// 行尾竖向三点：打开详情的唯一入口。在 pointer 事件 pass 里处理，
 		// 才能拿到图标位置作为弹窗锚点；Consume 后不再走 click 事件 pass。
 		knobColor := a.theme.MutedForeground
 		if pinned || active {
-			knobColor = a.theme.Primary
+			knobColor = a.palette.Accent
 		}
 		f.Text("⋮").FontSize(16).Color(knobColor).Width(20).Height(24).
-			TextCenter().Radius(4).HoverBackground(a.theme.Muted).
+			TextCenter().Radius(a.theme.Metrics.RadiusItem()).HoverBackground(a.theme.Hover).
 			Hit(node.ids.knob, node.knobLabel)
 		if event, ok := canvas.PointerOn(node.ids.knob); ok &&
 			event.Kind == ui.PointerUp && event.Button == ui.PointerButtonPrimary && event.ClickCount == 1 {
@@ -374,12 +396,26 @@ func (a *App) paintNodeRow(f *flex.Frame, node *nodeState) {
 		a.handleRowClick(node, event.Modifiers)
 		canvas.Consume()
 	}
+	// 键盘激活：焦点在行上按 Enter/Space 等同于点击该行（标记行选择）。
+	if canvas.ClickedByKey(node.ids.row) {
+		a.handleRowClick(node, 0)
+	}
 	a.handleNodePointer(f.Canvas(), node.ids.row, node)
 	a.handleNodePointer(f.Canvas(), node.ids.check, node)
 	// 详情弹窗的锚点跟随目标行：行在本帧绘制过就刷新「还看得见」标记。
 	if a.detailNode == node {
 		a.detailSeen = true
 	}
+}
+
+// nodeTypeFits 判断节点行副标题是否放得下协议徽标：名称列 = 内容区宽度减去
+// 固定列与内边距。窗口或面板挤到放不下时先丢徽标，保住 server:port。
+func (a *App) nodeTypeFits() bool {
+	content := a.window.Width - entriesRailWidth
+	if !a.entriesCollapsed {
+		content = a.window.Width - a.entriesSplit.Pos
+	}
+	return content >= 820
 }
 
 // handleNodePointer 在行或复选框上处理右键；左键仍由 Clicked 处理。
@@ -455,6 +491,10 @@ func (a *App) paintDetailOverlay(canvas *ui.Canvas) {
 	width := detailPopupWidth
 	contentWidth := width - 24
 	lines := canvas.WrapLines(nil, a.detailText, 11, ui.WeightRegular, contentWidth, 14)
+	// 与 ADR-0029 一致：正文最多 14 行，超出不再撑高弹窗。
+	if len(lines) > 14 {
+		lines = lines[:14]
+	}
 	lineHeight := float32(18)
 	titleHeight := float32(24)
 	height := 24 + titleHeight + float32(len(lines))*lineHeight
@@ -471,10 +511,13 @@ func (a *App) paintDetailOverlay(canvas *ui.Canvas) {
 	// 弹窗面板的命中在 layer 1，盖过 layer 0 的 dismiss：点弹窗内部不关闭。
 	canvas.HitWithLabel(a.ids.detailClose, rect, "节点详情")
 	canvas.Elevate(rect, a.theme.Metrics.RadiusSurface, ui.ShadowMD)
-	canvas.RoundedBorder(rect, a.theme.Metrics.RadiusSurface, 1, a.theme.Border, a.theme.Background)
+	canvas.RoundedBorder(rect, a.theme.Metrics.RadiusSurface, 1, a.theme.Border, a.palette.Raised)
+	// 左侧一道强调色竖条：弹窗与列表同色系，靠它划出边界。
+	canvas.Rounded(ui.Rect{X: rect.X + 1, Y: rect.Y + 10, Width: 3, Height: titleHeight - 4},
+		1.5, a.palette.Accent)
 	canvas.Label(a.detailNode.name, ui.Rect{
-		X: rect.X + 12, Y: rect.Y + 12, Width: contentWidth, Height: titleHeight,
-	}, ui.TextStyle{Size: 13, Weight: ui.WeightMedium, Color: a.theme.Foreground})
+		X: rect.X + 14, Y: rect.Y + 12, Width: contentWidth - 2, Height: titleHeight,
+	}, ui.TextStyle{Size: fontSubtitle, Weight: ui.WeightMedium, Color: a.theme.Foreground})
 	textY := rect.Y + 12 + titleHeight
 	for _, line := range lines {
 		canvas.Label(line, ui.Rect{
@@ -509,9 +552,9 @@ func detailText(node *nodeState) string {
 }
 
 func (a *App) paintEntriesPanel(f *flex.Frame) {
-	f.Column().FillWidth().FillHeight().Children(func() {
-		f.Row().Height(54).PadX(16).Items(flex.Center).Gap(8).Children(func() {
-			f.Text("节点来源").Bold().MinWidth(78)
+	f.Column().FillWidth().FillHeight().Background(a.palette.Sunken).Children(func() {
+		f.Row().Height(48).PadX(gapL).Items(flex.Center).Gap(gapS).Children(func() {
+			f.Text("节点来源").FontSize(fontSubtitle).Bold().MinWidth(78)
 			f.Spacer()
 			if f.Button(a.ids.entryCollapse, "折叠").XSmall().Ghost().Clicked() {
 				a.entriesCollapsed = true
@@ -521,20 +564,20 @@ func (a *App) paintEntriesPanel(f *flex.Frame) {
 			}
 		})
 		if a.hasSubscription {
-			f.Row().Height(28).PadSides(0, 16, 0, 12).Items(flex.Center).Gap(8).Children(func() {
-				f.Text("订阅").FontSize(11).Muted()
+			f.Row().Height(28).PadSides(0, gapL, 0, gapM).Items(flex.Center).Gap(gapS).Children(func() {
+				f.Text("订阅").FontSize(fontCaption).Muted()
 				if f.Button(a.ids.refetchAll, "全部重新获取").XSmall().Outline().Disabled(a.running()).Clicked() {
 					f.Canvas().AfterPaint(func() { a.refetchAllSubscriptions() })
 				}
 			})
 		}
-		scroll := f.ScrollArea(a.ids.entryScroll).Grow(1).FillWidth().PadSides(12, 12, 12, 12).Gap(10)
+		scroll := f.ScrollArea(a.ids.entryScroll).Grow(1).FillWidth().PadSides(gapM, gapM, gapM, gapM).Gap(gapM)
 		a.entryScrollBox, a.entryScrollValid = scroll, true
 		scroll.Children(func() {
 			if len(a.entries) == 0 {
-				f.Column().Pad(10).Gap(6).Children(func() {
-					f.Text("还没有节点来源条目。").FontSize(13).Bold()
-					f.Text("点上方「新建条目」，选择本地配置文件或填订阅地址。").FontSize(12).Muted()
+				f.Column().Pad(gapM).Gap(gapS).Children(func() {
+					f.Text("还没有节点来源条目。").FontSize(fontSubtitle).Bold()
+					f.Text("点上方「新建条目」，选择本地配置文件或填订阅地址。").FontSize(fontBody).Muted()
 				})
 				return
 			}
@@ -548,18 +591,19 @@ func (a *App) paintEntriesPanel(f *flex.Frame) {
 // paintEntriesRail 是折叠后的窄栏：顶部一个「»」展开按钮，下面是竖排的
 // 「节点来源」四个字。竖排用逐字 Text 拼出来，不做文字旋转。
 func (a *App) paintEntriesRail(f *flex.Frame) {
-	f.Column().Width(entriesRailWidth).FillHeight().PadY(12).Items(flex.Center).Gap(12).Children(func() {
+	f.Column().Width(entriesRailWidth).FillHeight().PadY(gapM).Items(flex.Center).Gap(gapM).
+		Background(a.palette.Sunken).Children(func() {
 		expand := f.Text("»").FontSize(18).Muted().Width(32).PadY(2).
-			TextCenter().Radius(4).HoverBackground(a.theme.Muted).
+			TextCenter().Radius(a.theme.Metrics.RadiusItem()).HoverBackground(a.theme.Hover).
 			Hit(a.ids.entryExpand, "展开节点来源")
 		if expand.Clicked() {
 			a.entriesCollapsed = false
 		}
 		f.Column().Items(flex.Center).Gap(2).Children(func() {
-			f.Text("节").FontSize(11).Muted()
-			f.Text("点").FontSize(11).Muted()
-			f.Text("来").FontSize(11).Muted()
-			f.Text("源").FontSize(11).Muted()
+			f.Text("节").FontSize(fontCaption).Muted()
+			f.Text("点").FontSize(fontCaption).Muted()
+			f.Text("来").FontSize(fontCaption).Muted()
+			f.Text("源").FontSize(fontCaption).Muted()
 		})
 	})
 }
@@ -577,10 +621,8 @@ func (a *App) paintPill(f *flex.Frame, label string, size float32) {
 			width = minimum
 		}
 	}
-	background := a.theme.MutedForeground
-	background.Alpha *= 0.16
-	foreground := a.theme.Foreground
-	foreground.Alpha *= 0.85
+	background := a.theme.Muted
+	foreground := a.theme.MutedForeground
 	pill := f.Row().Width(width).Height(size + 10).Shrink(0).Background(background).Radius(4).Items(flex.Center)
 	pill.Children(func() {
 		f.Text(label).FontSize(size).Color(foreground).TextCenter().Grow(1)
@@ -590,37 +632,37 @@ func (a *App) paintPill(f *flex.Frame, label string, size float32) {
 func (a *App) paintEntryCard(f *flex.Frame, entry *entryState) {
 	// 整张卡片可点（点空白处切换勾选），视觉保持默认白底：选中与否由
 	// 复选框表达，不再给整卡上主题色。
-	card := f.Column().FillWidth().Pad(10).Gap(5).
+	card := f.Column().FillWidth().Pad(gapM).Gap(gapS).
 		Background(a.theme.Card).Border(1, a.theme.Border).
 		Radius(a.theme.Metrics.RadiusSurface).
-		HoverBackground(a.theme.Muted).
+		HoverBackground(a.theme.Hover).
 		Hit(entry.ids.card, entry.cardLabel)
 	if card.Clicked() && !a.running() && !entry.fetching {
 		f.Canvas().AfterPaint(func() { a.toggleEntry(entry) })
 	}
 	card.Children(func() {
-		f.Row().Items(flex.Center).Gap(8).Children(func() {
+		f.Row().Items(flex.Center).Gap(gapS).Children(func() {
 			check := f.Checkbox(entry.ids.check, entry.selected).
 				Label(entry.checkLabel).
 				Disabled(a.running())
 			if check.Clicked() {
 				f.Canvas().AfterPaint(func() { a.toggleEntry(entry) })
 			}
-			f.Text(entry.entry.Name).Bold().Ellipsis().Grow(1)
+			f.Text(entry.entry.Name).FontSize(fontBody).Bold().Ellipsis().Grow(1)
 		})
 		// 路径只显示一次；软/硬路径与订阅用徽标区分，不再「软路径 · xxx」+ xxx 两行。
-		f.Row().Items(flex.Center).Gap(6).Children(func() {
+		f.Row().Items(flex.Center).Gap(gapXS).Children(func() {
 			if entry.pathBadge != "" {
 				a.paintPill(f, entry.pathBadge, 10)
 			}
-			f.Text(entry.pathText).FontSize(11).Muted().Ellipsis().Grow(1)
+			f.Text(entry.pathText).FontSize(fontCaption).Muted().Ellipsis().Grow(1)
 		})
 		statusColor := a.theme.MutedForeground
 		if entry.loadErr != "" || entry.missing {
 			statusColor = a.theme.Danger
 		}
-		f.Text(entry.statusText).FontSize(11).Color(statusColor).Ellipsis()
-		f.Row().Gap(6).Children(func() {
+		f.Text(entry.statusText).FontSize(fontCaption).Color(statusColor).Ellipsis()
+		f.Row().Gap(gapXS).Children(func() {
 			if f.Button(entry.ids.read, entry.readLabel).XSmall().Outline().Disabled(a.running() || entry.fetching).Clicked() {
 				f.Canvas().AfterPaint(func() { a.readEntry(entry) })
 			}
@@ -628,7 +670,7 @@ func (a *App) paintEntryCard(f *flex.Frame, entry *entryState) {
 				f.Canvas().AfterPaint(func() { a.refetchEntry(entry) })
 			}
 		})
-		f.Row().Gap(6).Children(func() {
+		f.Row().Gap(gapXS).Children(func() {
 			if f.Button(entry.ids.edit, "编辑").XSmall().Ghost().Disabled(a.running()).Clicked() {
 				a.openEntryDialog(entry)
 			}
@@ -643,27 +685,27 @@ func (a *App) paintEntryCard(f *flex.Frame, entry *entryState) {
 }
 
 func (a *App) paintGroupHeader(f *flex.Frame, group *groupState) {
-	f.Row().Height(32).FillWidth().Items(flex.Center).Gap(8).Children(func() {
-		toggle := f.Text(group.arrow).FontSize(12).Muted().Width(18).TextCenter().
-			Radius(4).HoverBackground(a.theme.Muted).
+	f.Row().Height(groupBarH).FillWidth().Items(flex.Center).Gap(gapS).Children(func() {
+		toggle := f.Text(group.arrow).FontSize(fontBody).Muted().Width(18).TextCenter().
+			Radius(a.theme.Metrics.RadiusItem()).HoverBackground(a.theme.Hover).
 			Hit(group.entry.ids.groupToggle, group.toggleLabel)
 		if toggle.Clicked() {
 			// 重建 nodeItems 不能发生在遍历它的绘制回合里。
 			f.Canvas().AfterPaint(func() { a.toggleGroup(group) })
 		}
-		f.Text(group.entry.entry.Name).Bold()
-		f.Text(group.countText).FontSize(11).Muted()
+		f.Text(group.entry.entry.Name).FontSize(fontSubtitle).Bold()
+		pillBox(f, group.countText, a.theme.Muted, a.theme.MutedForeground)
 		if group.entry.loadErr != "" {
 			f.Text("读取失败").FontSize(10).Color(a.theme.Danger).Ellipsis()
 		}
 		if group.collapsed {
-			f.Text("已折叠").FontSize(11).Muted()
+			f.Text("已折叠").FontSize(fontCaption).Muted()
 		}
 		f.Spacer()
-		if f.Button(group.entry.ids.selectAll, "全选").XSmall().Ghost().Clicked() {
+		if f.Button(group.entry.ids.selectAll, "全选").XSmall().Ghost().Disabled(a.running()).Clicked() {
 			a.setGroupSelected(group, true)
 		}
-		if f.Button(group.entry.ids.selectNone, "全不选").XSmall().Ghost().Clicked() {
+		if f.Button(group.entry.ids.selectNone, "全不选").XSmall().Ghost().Disabled(a.running()).Clicked() {
 			a.setGroupSelected(group, false)
 		}
 	})
@@ -674,16 +716,27 @@ func (a *App) paintNodeEmpty(f *flex.Frame) {
 		a.paintNoEntries(f)
 		return
 	}
-	f.Column().Grow(1).FillWidth().PadSides(12, 20, 16, 20).PadY(24).Gap(6).Children(func() {
+	f.Column().Grow(1).FillWidth().PadSides(gapM, pagePadX, gapL, pagePadX).PadY(gapL).Gap(gapS).Children(func() {
+		anySelected := false
+		for _, entry := range a.entries {
+			if entry.selected {
+				anySelected = true
+				break
+			}
+		}
+		if len(a.entries) > 0 && !anySelected {
+			f.Text("没有勾选任何节点来源，请在左侧勾选条目。").FontSize(fontSubtitle).Muted()
+			return
+		}
 		if a.totalCount == 0 {
-			f.Text("当前条目还没有读取到节点。").FontSize(13).Muted()
+			f.Text("当前条目还没有读取到节点。").FontSize(fontSubtitle).Muted()
 			for _, entry := range a.entries {
 				if !entry.selected {
 					continue
 				}
-				f.Row().Height(36).FillWidth().Gap(8).Items(flex.Center).Children(func() {
-					f.Text(entry.entry.Name).Bold()
-					f.Text(entry.statusText).FontSize(11).Muted().Ellipsis().Grow(1)
+				f.Row().Height(36).FillWidth().Gap(gapS).Items(flex.Center).Children(func() {
+					f.Text(entry.entry.Name).FontSize(fontBody).Bold()
+					f.Text(entry.statusText).FontSize(fontCaption).Muted().Ellipsis().Grow(1)
 					if f.Button(entry.ids.emptyRead, "读取").Small().Outline().Clicked() {
 						f.Canvas().AfterPaint(func() { a.readEntry(entry) })
 					}
@@ -691,14 +744,16 @@ func (a *App) paintNodeEmpty(f *flex.Frame) {
 			}
 			return
 		}
-		f.Text("没有节点匹配当前过滤条件。").FontSize(13).Muted()
-		f.Text("清空过滤表达式或换一个关键词再试。").FontSize(12).Muted()
+		f.Text("没有节点匹配当前过滤条件。").FontSize(fontSubtitle).Muted()
+		f.Text("清空过滤表达式或换一个关键词再试。").FontSize(fontBody).Muted()
 	})
 }
 
 func (a *App) paintNoEntries(f *flex.Frame) {
-	f.Column().Grow(1).FillWidth().PadY(32).Items(flex.Center).Gap(8).Children(func() {
-		f.Text("欢迎使用订阅测速").FontSize(18).Bold()
-		f.Text("还没有节点来源条目。点左上角「新建条目」，添加本地配置文件或订阅地址。").FontSize(12).Muted()
+	f.Column().Grow(1).FillWidth().PadY(32).Center().Gap(gapS).Children(func() {
+		// 空态给一个淡强调色字形当视觉锚点，再是标题与一句怎么做。
+		f.Text("◍").FontSize(30).Color(alpha(a.palette.Accent, 0.55))
+		f.Text("欢迎使用订阅测速").FontSize(fontTitle).Bold()
+		f.Text("还没有节点来源条目。点左上角「新建条目」，添加本地配置文件或订阅地址。").FontSize(fontBody).Muted()
 	})
 }

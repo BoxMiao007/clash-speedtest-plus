@@ -66,11 +66,19 @@ func (s *state) refetchEntry(entry *entryState) {
 }
 
 func (s *state) toggleNode(node *nodeState) {
+	if s.running() {
+		s.status = "测速进行中，先停止再改勾选"
+		return
+	}
 	node.selected = !node.selected
 	s.rebuild()
 }
 
 func (s *state) setGroupSelected(group *groupState, selected bool) {
+	if s.running() {
+		s.status = "测速进行中，先停止再改勾选"
+		return
+	}
 	for _, node := range group.nodes {
 		node.selected = selected
 	}
@@ -202,6 +210,7 @@ func (s *state) clearResults() {
 	s.rounds = s.rounds[:0]
 	s.roundIndex = 0
 	s.pendingExport = nil
+	s.exportNotice = ""
 	s.exportText = ""
 	if s.detailNode != nil {
 		s.detailText = detailText(s.detailNode)
@@ -302,6 +311,8 @@ func (s *state) startRounds(rounds []*roundState) {
 	s.roundIndex = 0
 	s.earlyStopped = false
 	s.paused = false
+	s.stopGuardUntil = time.Now().Add(400 * time.Millisecond)
+	s.exportNotice = ""
 	s.detailKey = ""
 	s.detailNode = nil
 	s.exportSeq = output.NextImageSequence(s.baseDir)
@@ -382,6 +393,15 @@ func (s *state) stopTest() {
 	}
 	s.engine.Stop()
 	s.status = "正在停止测速…"
+}
+
+// requestStop 是「停止测速」按钮的入口：开测后极短时间内忽略点击，防止
+// 双击「下载速度」时第二击落到同位的「停止测速」上。
+func (s *state) requestStop() {
+	if time.Now().Before(s.stopGuardUntil) {
+		return
+	}
+	s.stopTest()
 }
 
 // togglePause 在测速过程中暂停/继续派发新节点；在测节点会跑完手头这一批。
@@ -791,18 +811,29 @@ func (s *state) applyExported(event runEvent) {
 
 // setExportStatus 把一次导出的结果写进状态栏。
 func (s *state) setExportStatus(event runEvent) {
-	if event.err == nil && strings.HasSuffix(strings.ToLower(event.path), ".png") {
-		// 记下最近一次写出的结果图，结果条上的「预览结果图」用它。
-		s.lastImage = event.path
+	// 结果图路径单独存放：自动导出同轮里配置与图片都会写，不能用「配置路径
+	// 拼图片路径」的复合串（那样预览会指向不存在的文件）。
+	image := event.imagePath
+	if image == "" && strings.HasSuffix(strings.ToLower(event.path), ".png") {
+		image = event.path
+	}
+	if event.err == nil && image != "" {
+		s.lastImage = image
+	}
+	main := event.path
+	if main == "" {
+		main = image
 	}
 	switch {
 	case event.err != nil:
 		s.status = "导出失败：" + event.err.Error()
 	case event.warning != "":
-		s.status = "已导出：" + event.path + "（" + event.warning + "）"
-	case event.path != "":
-		s.status = "已导出：" + event.path
+		s.status = "已导出：" + main + "（" + event.warning + "）"
+	case main != "":
+		s.status = "已导出：" + main
 	}
+	// 常驻结果条，避免多轮自动推进把本次导出/上传提示覆盖掉。
+	s.exportNotice = s.status
 }
 
 // roundPosition 返回轮次在队列里的位置；不在当前队列返回 -1。
@@ -1012,6 +1043,7 @@ func (s *state) confirmDelete() {
 			}
 		}
 		s.entries = kept
+		s.pruneRounds()
 		s.rebuild()
 		s.noteSaved("已删除条目")
 	case confirmDeletePreset:
@@ -1154,6 +1186,12 @@ func (s *state) openEntryDirectory(entry *entryState) {
 // （selected，复选框）完全分离：普通点击只选中该行并记为范围锚点；Ctrl
 // 点击把该行加入/移出选择；Shift 点击选中锚点到该行之间的可见节点。
 func (s *state) handleRowClick(node *nodeState, modifiers ui.Modifiers) {
+	// 点其它行时关闭详情浮层（点同一行保留），避免弹窗停在旧节点上。
+	if s.detailNode != nil && s.detailNode != node {
+		s.detailKey = ""
+		s.detailNode = nil
+		s.detailText = ""
+	}
 	s.activeNode = node
 	switch {
 	case modifiers&ui.ModifierShift != 0:

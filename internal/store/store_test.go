@@ -656,6 +656,7 @@ func TestDeleteEntryRemovesSubscriptionCache(t *testing.T) {
 
 func TestSettingsNormalizeFixesInvalidValues(t *testing.T) {
 	got := store.Settings{
+		Theme:           "neon",
 		Mode:            "turbo",
 		DownloadMB:      -1,
 		UploadMB:        0,
@@ -671,6 +672,7 @@ func TestSettingsNormalizeFixesInvalidValues(t *testing.T) {
 		OutputPath:      "   ",
 	}.Normalize()
 	want := store.Settings{
+		Theme:         store.DefaultTheme,
 		Mode:          store.DefaultMode,
 		DownloadMB:    store.DefaultDownloadMB,
 		UploadMB:      store.DefaultUploadMB,

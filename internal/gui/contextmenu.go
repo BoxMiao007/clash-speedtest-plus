@@ -19,7 +19,7 @@ func (a *App) openNodeMenu(canvas *ui.Canvas, node *nodeState, x, y float32) {
 	// 选择操作，否则对右键指向的行操作。
 	targets := []*nodeState{node}
 	multi := false
-	if node.marked && a.markedCount() > 1 {
+	if node.marked && len(a.markedNodes()) > 1 {
 		targets = a.markedNodes()
 		multi = true
 	}
@@ -52,7 +52,9 @@ func (a *App) openNodeMenu(canvas *ui.Canvas, node *nodeState, x, y float32) {
 			selectID, selectLabel = a.ids.menuUnselMulti, "取消选中所选节点"
 		}
 		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: selectID, Label: selectLabel}})
-		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: a.ids.menuExclMulti, Label: "排除所选节点"}})
+		entries = append(entries, menuEntry{item: components.ContextMenuItem{
+			ID: a.ids.menuExclMulti, Label: "排除所选节点", Variant: components.ContextMenuItemDestructive,
+		}})
 		entries = append(entries, menuEntry{separator: true})
 		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: a.ids.menuOpenDir, Label: dirLabel}})
 	} else {
@@ -68,7 +70,9 @@ func (a *App) openNodeMenu(canvas *ui.Canvas, node *nodeState, x, y float32) {
 			selectID, selectLabel = a.ids.menuUnselect, "取消选中此节点"
 		}
 		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: selectID, Label: selectLabel}})
-		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: a.ids.menuExclude, Label: "排除此节点"}})
+		entries = append(entries, menuEntry{item: components.ContextMenuItem{
+			ID: a.ids.menuExclude, Label: "排除此节点", Variant: components.ContextMenuItemDestructive,
+		}})
 		entries = append(entries, menuEntry{separator: true})
 		entries = append(entries, menuEntry{item: components.ContextMenuItem{ID: a.ids.menuOpenDir, Label: dirLabel}})
 	}
@@ -183,12 +187,29 @@ func (a *App) activateMenu(id ui.ID) {
 		// 多选语境下只测右键指向的那一个节点，不改动其它勾选。
 		a.startNodesTest([]*nodeState{single})
 	case a.ids.menuSelect, a.ids.menuUnselect:
+		if a.running() {
+			a.status = "测速进行中，先停止再改勾选"
+			return
+		}
 		selected := id == a.ids.menuSelect
 		for _, node := range nodes {
 			node.selected = selected
 		}
 		a.rebuild()
+	case a.ids.menuUnselMulti:
+		if a.running() {
+			a.status = "测速进行中，先停止再改勾选"
+			return
+		}
+		for _, node := range nodes {
+			node.selected = false
+		}
+		a.rebuild()
 	case a.ids.menuExclude, a.ids.menuExclMulti:
+		if a.running() {
+			a.status = "测速进行中，先停止再改勾选"
+			return
+		}
 		for _, node := range nodes {
 			node.selected = false
 		}

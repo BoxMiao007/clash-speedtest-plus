@@ -104,12 +104,24 @@ const (
 	DefaultMinUploadMBps   = 2
 )
 
+// 界面配色的默认值：与 store 的其它枚举一样，只认这几个字符串。
+const (
+	ThemeDark    = "dark"
+	ThemeLight   = "light"
+	ThemeSystem  = "system"
+	DefaultTheme = ThemeDark
+)
+
 // Settings 是窗口内可调的全部选项：过滤条、测速参数、阈值、输出与上传。
 // 零值经 Normalize 补齐成旧 TUI 的默认值，因此版本 1 的设置文件可以原样读取。
 type Settings struct {
 	FilterMode       string `json:"filter_mode"`
 	FilterExpression string `json:"filter_expression"`
 	FilterCombine    string `json:"filter_combine"`
+
+	// Theme 是界面配色：dark | light | system。空值按 dark 处理（首次启动、
+	// 旧版本数据文件都没有这个字段）。
+	Theme string `json:"theme,omitempty"`
 
 	Mode       string `json:"mode"`        // fast | download | full
 	DownloadMB int    `json:"download_mb"` // 下载测试大小
@@ -153,6 +165,7 @@ type Settings struct {
 // DefaultSettings 返回旧 TUI 的默认参数组合。
 func DefaultSettings() Settings {
 	return Settings{
+		Theme:           DefaultTheme,
 		Mode:            DefaultMode,
 		DownloadMB:      DefaultDownloadMB,
 		UploadMB:        DefaultUploadMB,
@@ -174,6 +187,11 @@ func DefaultSettings() Settings {
 // 只处理数值与枚举：过滤表达式由 internal/filter 自己归一化。
 func (s Settings) Normalize() Settings {
 	defaults := DefaultSettings()
+	switch s.Theme {
+	case "dark", "light", "system":
+	default:
+		s.Theme = defaults.Theme
+	}
 	switch s.Mode {
 	case "fast", "download", "full":
 	default:

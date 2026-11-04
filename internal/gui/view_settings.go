@@ -2,7 +2,9 @@ package gui
 
 import (
 	"fmt"
+	"math"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -113,31 +115,31 @@ func (form *settingsForm) fields() []*flex.Field {
 // collectSettings 校验并折算成设置；返回用户可读的第一条错误。
 func (s *state) collectSettings() (store.Settings, string) {
 	form := &s.settingsForm
-	downloadMB, msg := parseIntField(&form.downloadMB, "下载大小（MB）", 1)
+	downloadMB, msg := parseIntField(&form.downloadMB, "下载大小（MB）", 1, 102400)
 	if msg != "" {
 		return store.Settings{}, msg
 	}
-	uploadMB, msg := parseIntField(&form.uploadMB, "上传大小（MB）", 1)
+	uploadMB, msg := parseIntField(&form.uploadMB, "上传大小（MB）", 1, 102400)
 	if msg != "" {
 		return store.Settings{}, msg
 	}
-	timeoutMS, msg := parseIntField(&form.timeoutMS, "超时（毫秒）", 1)
+	timeoutMS, msg := parseIntField(&form.timeoutMS, "超时（毫秒）", 1, 3600000)
 	if msg != "" {
 		return store.Settings{}, msg
 	}
-	concurrent, msg := parseIntField(&form.concurrent, "单节点并发", 1)
+	concurrent, msg := parseIntField(&form.concurrent, "单节点并发", 1, 1024)
 	if msg != "" {
 		return store.Settings{}, msg
 	}
-	parallel, msg := parseIntField(&form.parallel, "节点并行", 1)
+	parallel, msg := parseIntField(&form.parallel, "节点并行", 1, 1024)
 	if msg != "" {
 		return store.Settings{}, msg
 	}
-	earlyStop, msg := parseIntField(&form.earlyStop, "提前结束", 0)
+	earlyStop, msg := parseIntField(&form.earlyStop, "提前结束", 0, 100000)
 	if msg != "" {
 		return store.Settings{}, msg
 	}
-	maxLatency, msg := parseIntField(&form.maxLatency, "最高延迟（毫秒）", 0)
+	maxLatency, msg := parseIntField(&form.maxLatency, "最高延迟（毫秒）", 0, 3600000)
 	if msg != "" {
 		return store.Settings{}, msg
 	}
@@ -148,11 +150,11 @@ func (s *state) collectSettings() (store.Settings, string) {
 	if maxPacketLoss < -1 || maxPacketLoss > 100 {
 		return store.Settings{}, "最高丢包必须在 -1 到 100 之间（-1 表示不限制）"
 	}
-	minDownload, msg := parseFloatField(&form.minDownload, "最低下载（MB/s）")
+	minDownload, msg := parseFloatField(&form.minDownload, "最低下载（MB/s）", 1000000)
 	if msg != "" {
 		return store.Settings{}, msg
 	}
-	minUpload, msg := parseFloatField(&form.minUpload, "最低上传（MB/s）")
+	minUpload, msg := parseFloatField(&form.minUpload, "最低上传（MB/s）", 1000000)
 	if msg != "" {
 		return store.Settings{}, msg
 	}
@@ -160,6 +162,17 @@ func (s *state) collectSettings() (store.Settings, string) {
 	outputPath := strings.TrimSpace(form.outputPath.Text())
 	if outputMode == store.OutputModeCustom && outputPath == "" {
 		return store.Settings{}, "输出模式为「自定义」时必须填输出路径"
+	}
+	if outputMode == store.OutputModeCustom {
+		// 只判空不够：目录不存在或填成目录时，错误会延后到后台导出才暴露。
+		abs, _ := s.resolvePath(outputPath)
+		if abs == "" {
+			return store.Settings{}, "输出路径无效"
+		}
+		dir := filepath.Dir(abs)
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			return store.Settings{}, "输出目录不存在：" + dir
+		}
 	}
 	serverURL := strings.TrimSpace(form.serverURL.Text())
 	if serverURL == "" {
@@ -186,6 +199,8 @@ func (s *state) collectSettings() (store.Settings, string) {
 	}
 
 	settings := store.Settings{
+		// 配色不在表单里，但保存设置不能把用户选的深色/浅色清掉。
+		Theme:            s.themeMode.key(),
 		FilterMode:       string(s.filterMode),
 		FilterExpression: s.filterField.Text(),
 		FilterCombine:    string(s.filterCombine),
@@ -229,7 +244,7 @@ func (s *state) collectSettings() (store.Settings, string) {
 	return settings.Normalize(), ""
 }
 
-func parseIntField(field *flex.Field, label string, minimum int) (int, string) {
+func parseIntField(field *flex.Field, label string, minimum, maximum int) (int, string) {
 	text := strings.TrimSpace(field.Text())
 	value, err := strconv.Atoi(text)
 	if err != nil {
@@ -238,17 +253,23 @@ func parseIntField(field *flex.Field, label string, minimum int) (int, string) {
 	if value < minimum {
 		return 0, fmt.Sprintf("%s不能小于 %d", label, minimum)
 	}
+	if value > maximum {
+		return 0, fmt.Sprintf("%s不能大于 %d", label, maximum)
+	}
 	return value, ""
 }
 
-func parseFloatField(field *flex.Field, label string) (float64, string) {
+func parseFloatField(field *flex.Field, label string, maximum float64) (float64, string) {
 	text := strings.TrimSpace(field.Text())
 	value, err := strconv.ParseFloat(text, 64)
-	if err != nil {
-		return 0, label + "必须是数字"
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, label + "必须是有效数字"
 	}
 	if value < 0 {
 		return 0, label + "不能为负数"
+	}
+	if value > maximum {
+		return 0, label + "不能大于 " + strconv.FormatFloat(maximum, 'f', -1, 64)
 	}
 	return value, ""
 }
@@ -256,8 +277,8 @@ func parseFloatField(field *flex.Field, label string) (float64, string) {
 // parseFloatFieldAllowNegative 用于丢包阈值：-1 是「不限制」的既有口径。
 func parseFloatFieldAllowNegative(field *flex.Field, label string) (float64, string) {
 	value, err := strconv.ParseFloat(strings.TrimSpace(field.Text()), 64)
-	if err != nil {
-		return 0, label + "必须是数字"
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, label + "必须是有效数字"
 	}
 	return value, ""
 }
@@ -323,9 +344,9 @@ func (s *state) saveSettingsForm() {
 
 // paintSettings 画设置视图：顶部工具条 + 可滚动分区表单。
 func (a *App) paintSettings(f *flex.Frame) {
-	f.Row().Height(52).PadX(20).Items(flex.Center).Gap(10).Children(func() {
-		f.Text("测速与输出设置").Bold()
-		f.Text("保存后下一轮测速生效").FontSize(11).Muted()
+	f.Row().Height(52).PadX(pagePadX).Items(flex.Center).Gap(gapM).Children(func() {
+		f.Text("测速与输出设置").FontSize(fontSubtitle).Bold()
+		f.Text("保存后下一轮测速生效").FontSize(fontCaption).Muted()
 		f.Spacer()
 		if f.Button(a.ids.settingsReset, "恢复默认").Small().Outline().Clicked() {
 			a.resetSettingsForm()
@@ -335,16 +356,29 @@ func (a *App) paintSettings(f *flex.Frame) {
 		}
 	})
 	if a.settingsForm.err != "" {
-		f.Row().Height(24).FillWidth().PadX(20).Items(flex.Center).Children(func() {
-			f.Text(a.settingsForm.err).FontSize(11).Color(a.theme.Danger).Ellipsis()
+		// 校验失败时在工具条下面挂一条红底提示，滚动到哪儿都看得见。
+		f.Row().Height(26).FillWidth().PadX(pagePadX).Items(flex.Center).Children(func() {
+			f.Row().FillHeight().PadX(gapS).Radius(a.theme.Metrics.RadiusControl).
+				Background(alpha(a.theme.Danger, 0.12)).Items(flex.Center).Children(func() {
+				f.Text(a.settingsForm.err).FontSize(fontCaption).Color(a.theme.Danger).Ellipsis()
+			})
 		})
 	}
 	scroll := f.ScrollArea(a.ids.settingsScroll).Grow(1).FillWidth().PadSides(20, 20, 12, 12).Gap(2)
 	a.settingsScrollBox, a.settingsScrollValid = scroll, true
 	scroll.Children(func() {
+		a.settingsSection(f, "界面")
+		f.Row().Height(44).FillWidth().Items(flex.Center).Gap(10).Children(func() {
+			f.Text("配色").FontSize(fontBody).Muted().Width(150)
+			if index, ok := f.Choice(a.ids.settingsTheme, themeModeLabels, a.themeMode.index()).ChosenIndex(); ok {
+				a.setThemeMode(themeModeAt(index))
+			}
+			f.Text("深色适合长时间看测速表；跟随系统随后续系统深浅色切换").FontSize(10).Muted().Ellipsis().Grow(1)
+		})
+
 		a.settingsSection(f, "测速模式")
 		f.Row().Height(44).FillWidth().Items(flex.Center).Gap(10).Children(func() {
-			f.Text("模式").FontSize(12).Muted().Width(150)
+			f.Text("模式").FontSize(fontBody).Muted().Width(150)
 			if index, ok := f.Choice(a.ids.settingsMode, modeChoiceLabels, a.settingsForm.modeIdx).ChosenIndex(); ok {
 				a.settingsForm.modeIdx = index
 			}
@@ -369,15 +403,15 @@ func (a *App) paintSettings(f *flex.Frame) {
 
 		a.settingsSection(f, "输出")
 		f.Row().Height(44).FillWidth().Items(flex.Center).Gap(10).Children(func() {
-			f.Text("输出模式").FontSize(12).Muted().Width(150)
+			f.Text("输出模式").FontSize(fontBody).Muted().Width(150)
 			if index, ok := f.Choice(a.ids.settingsOutput, outputChoiceLabels, a.settingsForm.outputIdx).ChosenIndex(); ok {
 				a.settingsForm.outputIdx = index
 			}
 			f.Text("每轮测完是否自动写配置文件：关闭 = 不写；其余见下方开关").FontSize(10).Muted().Ellipsis().Grow(1)
 		})
-		f.Row().Height(46).FillWidth().Gap(12).Items(flex.Center).Children(func() {
+		f.Row().Height(46).FillWidth().Gap(gapM).Items(flex.Center).Children(func() {
 			f.Column().Width(150).Gap(1).Children(func() {
-				f.Text("输出路径").FontSize(12)
+				f.Text("输出路径").FontSize(fontBody)
 				f.Text("自定义模式的词干；自动补 .yaml").FontSize(10).Muted().Ellipsis()
 			})
 			f.Field(&a.settingsForm.outputPath, a.ids.setOutputPath, "输出路径", "例如 D:/订阅/导出.yaml").Grow(1)
@@ -412,17 +446,19 @@ func (a *App) paintSettings(f *flex.Frame) {
 	})
 }
 
+// settingsSection 是分区标题：上留白 + 小号大写感的分组名 + 分隔线，滚动时
+// 让每组有明确的边界。
 func (a *App) settingsSection(f *flex.Frame, title string) {
-	f.Row().Height(34).FillWidth().Items(flex.End).Children(func() {
-		f.Text(title).FontSize(12).Bold()
+	f.Row().Height(38).FillWidth().Items(flex.End).Children(func() {
+		f.Text(title).FontSize(fontBody).Bold().Color(a.palette.Accent)
 	})
 	f.Divider().FillWidth()
 }
 
 func (a *App) settingsFieldRow(f *flex.Frame, label, hint string, field *flex.Field, id ui.ID, placeholder string) {
-	f.Row().Height(46).FillWidth().Gap(12).Items(flex.Center).Children(func() {
+	f.Row().Height(46).FillWidth().Gap(gapM).Items(flex.Center).Children(func() {
 		f.Column().Width(150).Gap(1).Children(func() {
-			f.Text(label).FontSize(12)
+			f.Text(label).FontSize(fontBody)
 			if hint != "" {
 				f.Text(hint).FontSize(10).Muted().Ellipsis()
 			}
@@ -437,12 +473,12 @@ func (a *App) settingsFieldRow(f *flex.Frame, label, hint string, field *flex.Fi
 func (a *App) settingsToggleRow(f *flex.Frame, id ui.ID, on bool, label, hint string) bool {
 	clicked := false
 	f.Row().Height(42).FillWidth().Gap(10).Items(flex.Center).Children(func() {
-		labelWidth := f.Canvas().TextWidth(label, 12)
+		labelWidth := f.Canvas().TextWidth(label, fontBody)
 		box := f.Checkbox(id, on).Label(label).HitOutset(0, labelWidth+8, 0, 0)
 		if box.Clicked() {
 			clicked = true
 		}
-		f.Text(label).FontSize(12)
+		f.Text(label).FontSize(fontBody)
 		f.Text(hint).FontSize(10).Muted().Ellipsis().Grow(1)
 	})
 	return clicked

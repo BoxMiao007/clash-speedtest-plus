@@ -22,3 +22,7 @@ data/
 结果表-*.tsv
 [0-9]*.png
 clash-speedtest-plus-*.png
+
+# QA 证据截图与图标设计对比图体积大，只在本地保留；报告与复现脚本入库
+qa/shots/
+qa/icon-preview/

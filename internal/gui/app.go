@@ -17,14 +17,15 @@ var (
 )
 
 // Options 是 GUI 的启动参数。生产代码只传程序目录、版本与构建提交；测试注入
-// 临时目录与假引擎。
+// 临时目录与假引擎。ThemeMode 只在测试里固定配色（"dark"/"light"/"system"），
+// 正常启动从 settings.json 读。
 type Options struct {
-	BaseDir string
-	DataDir string
-	Version string
-	Commit  string
-	Theme   ui.Theme
-	Runner  Runner
+	BaseDir   string
+	DataDir   string
+	Version   string
+	Commit    string
+	ThemeMode string
+	Runner    Runner
 }
 
 // App 是 Viva 应用外壳：拥有身份树、视图缓存和唯一的窗口配置。
@@ -38,7 +39,14 @@ type App struct {
 	// previewArea 是预览对话框内容区上一帧的几何：位图在 view.Draw 之后
 	// 画上去，避免遮住对话框自己的标题与按钮。
 	previewArea flex.Box
-	closed      bool
+	// brand 是标题栏品牌图标位图，brandBox 是它在上一帧布局里的占位矩形。
+	brand    ui.Bitmap
+	brandBox flex.Box
+	closed   bool
+	// stopWatch 解除系统外观订阅；themeStale 表示系统刚换了深浅色，
+	// 下一次绘制开始时重算一次 token（绘制路径本身不做分配）。
+	stopWatch  func()
+	themeStale bool
 }
 
 // New 装配应用：打开数据目录、读取条目、预计算首帧要显示的所有文案。
@@ -55,6 +63,8 @@ func New(opts Options) (*App, error) {
 		version: versionBadge(opts.Version),
 	}
 	model.commit = opts.Commit
+	// 图标只在启动时解码一次：任务栏图标与标题栏品牌块共用同一份设计。
+	application.brand = brandBitmap()
 	// 页面与输入框集合都只装配一次：每帧新建捕获变量的闭包或切片会把分配
 	// 带进绘制路径。
 	application.paintRoot = func(f *flex.Frame) { application.paintPage(f) }
@@ -74,6 +84,7 @@ func New(opts Options) (*App, error) {
 		MinHeight:   640,
 		Origin:      origin,
 		Tree:        model.tree,
+		Icon:        windowIcon(),
 		Paint:       application.paint,
 		OnWake:      model.applyPending,
 		Invalidator: &application.invalidator,
@@ -88,7 +99,55 @@ func New(opts Options) (*App, error) {
 		ClearColor:    appColor(model.theme.Background),
 	}
 	model.invalidator = &application.invalidator
+	application.applyNativeAppearance()
+	application.stopWatch = app.WatchSystemAppearance(application.onSystemAppearance)
 	return application, nil
+}
+
+// onSystemAppearance 由事件循环线程调用：只记标记并请求重绘。
+func (a *App) onSystemAppearance() {
+	a.themeStale = true
+	if a.state.invalidator != nil {
+		a.state.invalidator.Invalidate()
+	}
+}
+
+// applyNativeAppearance 让系统自己画的部件（macOS 标题栏、文件对话框）跟界面一致。
+func (a *App) applyNativeAppearance() {
+	app.SetNativeAppearance(a.nativeAppearance())
+}
+
+func (a *App) nativeAppearance() app.Appearance {
+	if a.themeMode == themeSystem {
+		return app.AppearanceUnknown
+	}
+	if a.themeMode == themeLight {
+		return app.AppearanceLight
+	}
+	return app.AppearanceDark
+}
+
+// setThemeMode 切换配色：重算 token、同步原生外观、落盘并重绘。
+func (a *App) setThemeMode(mode themeMode) {
+	if mode == a.themeMode {
+		return
+	}
+	a.applyThemeMode(mode)
+	a.applyNativeAppearance()
+	a.config.ClearColor = appColor(a.theme.Background)
+	a.persistSettings()
+	if a.state.invalidator != nil {
+		a.state.invalidator.Invalidate()
+	}
+}
+
+// refreshTheme 在系统外观变化后重算一次 token；非跟随系统时什么都不做。
+func (a *App) refreshTheme() {
+	if a.themeMode != themeSystem {
+		return
+	}
+	a.theme, a.palette = resolveTheme(themeSystem)
+	a.config.ClearColor = appColor(a.theme.Background)
 }
 
 // Config 返回窗口配置，测试把它交给 app.Driver。
@@ -100,10 +159,18 @@ func (a *App) Close() {
 		return
 	}
 	a.closed = true
+	if a.stopWatch != nil {
+		a.stopWatch()
+		a.stopWatch = nil
+	}
 	a.state.close()
 }
 
 func (a *App) onScroll(event ui.ScrollEvent) ui.EventResult {
+	// 模态对话框打开时不把滚轮传给背景列表/表单。
+	if a.dialog != dialogNone {
+		return ui.EventResult{}
+	}
 	if a.presetOpen.Open {
 		return a.presetOpen.Wheel(event)
 	}
@@ -142,6 +209,10 @@ func scrollList(offset *float32, content, viewport, delta float32) ui.EventResul
 }
 
 func (a *App) paint(canvas *ui.Canvas, size ui.Size) {
+	if a.themeStale {
+		a.themeStale = false
+		a.refreshTheme()
+	}
 	a.window = size
 	a.nodeListValid = false
 	a.entryScrollValid = false
@@ -152,6 +223,8 @@ func (a *App) paint(canvas *ui.Canvas, size ui.Size) {
 	bounds := ui.Rect{X: 0, Y: 0, Width: size.Width, Height: size.Height}
 	canvas.Fill(bounds, a.theme.Background)
 	a.view.Draw(canvas, a.theme, bounds, a.paintRoot)
+	// 标题栏品牌图标：flex 里只有占位，位图按本帧矩形画（与结果图预览同理）。
+	a.paintBrand(canvas)
 	// 结果图预览的位图最后画：它只覆盖对话框内容区（上一帧记录的几何），
 	// 标题与按钮已经在 flex 里画好了。
 	a.paintPreviewImage(canvas)
@@ -198,12 +271,21 @@ func (a *App) paintPage(f *flex.Frame) {
 }
 
 func (a *App) paintHeader(f *flex.Frame) {
-	f.Row().Height(58).FillWidth().PadSides(0, 20, 0, 20).Items(flex.Center).Gap(12).Children(func() {
-		f.Text("订阅测速").FontSize(20).Bold()
+	f.Row().Height(headerH).FillWidth().PadSides(0, pagePadX, 0, pagePadX).Items(flex.Center).Gap(gapM).
+		Background(a.theme.Card).Children(func() {
+		// 品牌块：与应用任务栏图标同一份设计，flex 只占 24×24 的位置，
+		// 位图在 view.Draw 之后画进这个矩形（见 paintBrand）。
+		a.brandBox = f.Column().Size(24, 24)
+		f.Text("订阅测速").FontSize(fontTitle).Bold()
 		if a.version != "" {
-			f.Text(a.version).FontSize(12).Muted()
+			pillBox(f, a.version, a.theme.Muted, a.theme.MutedForeground)
 		}
 		f.Spacer()
+		// 主题放在标题栏：换深浅色是一眼的事，不用进设置页。
+		if index, ok := f.Choice(a.ids.themeScope, themeModeLabels, a.themeMode.index()).ChosenIndex(); ok {
+			a.setThemeMode(themeModeAt(index))
+		}
+		f.Column().Width(1).Height(20).Background(a.theme.Border)
 		if index, ok := f.Choice(a.ids.viewScope, viewLabels, a.ids.viewIndex(a.active)).ChosenIndex(); ok {
 			a.active = viewKind(index)
 		}
@@ -212,8 +294,8 @@ func (a *App) paintHeader(f *flex.Frame) {
 }
 
 func (a *App) paintFilterBar(f *flex.Frame) {
-	f.Row().Height(52).FillWidth().PadX(20).Items(flex.Center).Gap(8).Children(func() {
-		f.Text("过滤").FontSize(12).Muted()
+	f.Row().Height(filterBarH).FillWidth().PadX(pagePadX).Items(flex.Center).Gap(gapS).Children(func() {
+		f.Text("过滤").FontSize(fontBody).Muted()
 		modeIndex := 0
 		if a.filterMode == filter.ModeAdvanced {
 			modeIndex = 1
@@ -243,12 +325,12 @@ func (a *App) paintFilterBar(f *flex.Frame) {
 				}
 			}
 			if a.filterCombine == filter.CombineAnd {
-				f.Text("每个关键词都要出现").FontSize(10).Muted().Ellipsis()
+				f.Text("每个关键词都要出现").FontSize(fontCaption).Muted().Ellipsis()
 			} else {
-				f.Text("任一关键词出现即可").FontSize(10).Muted().Ellipsis()
+				f.Text("任一关键词出现即可").FontSize(fontCaption).Muted().Ellipsis()
 			}
 		} else {
-			f.Text("完整正则，区分大小写").FontSize(11).Muted()
+			f.Text("完整正则，区分大小写").FontSize(fontCaption).Muted()
 		}
 		if f.Button(a.ids.filterApply, "应用").XSmall().Outline().Clicked() {
 			a.compileFilter()
@@ -277,13 +359,17 @@ func (a *App) paintFilterBar(f *flex.Frame) {
 		}
 	})
 	if a.filterErr != "" {
-		f.Row().Height(24).FillWidth().PadX(20).Items(flex.Center).Children(func() {
-			f.Text(a.filterErr).FontSize(11).Color(a.theme.Danger).Ellipsis()
+		// 错误用带底色的条，位置和语法提示一致，视线不用重新找。
+		f.Row().Height(26).FillWidth().PadSides(0, pagePadX, 0, pagePadX).Items(flex.Center).Children(func() {
+			f.Row().FillHeight().PadX(gapS).Radius(a.theme.Metrics.RadiusControl).
+				Background(alpha(a.theme.Danger, 0.12)).Items(flex.Center).Children(func() {
+				f.Text(a.filterErr).FontSize(fontCaption).Color(a.theme.Danger).Ellipsis()
+			})
 		})
 	} else if a.filterMode == filter.ModeSimple {
 		// 占位符在输入后消失；语法提示要常驻，随时能查 ! 与通配符。
-		f.Row().Height(20).FillWidth().PadX(20).Items(flex.Center).Children(func() {
-			f.Text("语法：空格分隔；! 排除；* 任意长度；? 一个字符；例：香港 *IPLC !试用").FontSize(10).Muted().Ellipsis()
+		f.Row().Height(22).FillWidth().PadX(pagePadX).Items(flex.Center).Children(func() {
+			f.Text("语法：空格分隔；! 排除；* 任意长度；? 一个字符；例：香港 *IPLC !试用").FontSize(fontCaption).Muted().Ellipsis()
 		})
 	}
 	f.Column().Height(1).FillWidth().Background(a.theme.Border)
@@ -298,17 +384,32 @@ func (a *App) filterPlaceholder() string {
 
 func (a *App) paintFooter(f *flex.Frame) {
 	f.Column().Height(1).FillWidth().Background(a.theme.Border)
-	f.Row().Height(30).FillWidth().PadX(20).Items(flex.Center).Gap(12).Children(func() {
-		f.Text(a.status).FontSize(11).Color(a.theme.MutedForeground).Ellipsis().Grow(1)
+	f.Row().Height(footerH).FillWidth().PadX(pagePadX).Items(flex.Center).Gap(gapS).
+		Background(a.theme.Card).Children(func() {
+		// 状态灯把「就绪 / 测速中 / 出错」压成一眼能分辨的颜色。
+		statusDot(f, a.statusColor())
+		f.Text(a.status).FontSize(fontCaption).Color(a.theme.MutedForeground).Ellipsis().Grow(1)
 		dataColor := a.theme.MutedForeground
 		if a.storeErr != "" {
 			dataColor = a.theme.Danger
 		}
-		f.Text(a.dataText).FontSize(11).Color(dataColor).Ellipsis().MaxWidthPercent(45)
+		f.Text(a.dataText).FontSize(fontCaption).Color(dataColor).Ellipsis().MaxWidthPercent(45)
 		if f.Button(a.ids.about, "关于").XSmall().Ghost().Clicked() {
 			a.openAbout()
 		}
 	})
+}
+
+// statusColor 是页脚状态灯的颜色：只读数据目录或出错时红，测速/导出进行中时
+// 用强调色，其余中性。
+func (a *App) statusColor() ui.Color {
+	if a.storeErr != "" {
+		return a.theme.Danger
+	}
+	if a.running() {
+		return a.palette.Accent
+	}
+	return a.theme.MutedForeground
 }
 
 func (a *App) paintContent(f *flex.Frame) {

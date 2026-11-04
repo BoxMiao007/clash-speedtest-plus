@@ -73,10 +73,13 @@ type state struct {
 	store    *store.Store
 	storeErr string
 
-	theme  ui.Theme
-	status string
-	active viewKind
-	window ui.Size
+	// theme 与 palette 由 themeMode 一次性折算，绘制路径只读不改。
+	theme     ui.Theme
+	palette   palette
+	themeMode themeMode
+	status    string
+	active    viewKind
+	window    ui.Size
 
 	entries []*entryState
 	nodes   []*nodeState
@@ -214,7 +217,13 @@ type state struct {
 	windowPlaced bool
 	// lastImage 是最近一次成功写出的结果图路径，用于「预览结果图」。
 	lastImage string
-	preview   previewState
+	// stopGuardUntil 在开测后极短时间内忽略「停止测速」按钮点击，避免双击
+	// 「下载速度」时第二击落到同位的「停止测速」上把刚开始的测速停掉。
+	stopGuardUntil time.Time
+	// exportNotice 是最近一次导出结果文案，常驻结果条，避免多轮自动推进时
+	// 被「第 N/M 轮开始」覆盖而看不到「已导出 / 上传失败」。
+	exportNotice string
+	preview      previewState
 	// dropActive 表示正有文件拖进窗口；dropText 是预览文案。
 	dropActive bool
 	dropText   string
@@ -415,17 +424,18 @@ const (
 )
 
 type runEvent struct {
-	kind     runEventKind
-	key      string
-	progress speedtester.Progress
-	result   *speedtester.Result
-	err      error
-	round    int
-	roundRef *roundState
-	path     string
-	warning  string
-	body     []byte
-	proxies  []map[string]any
+	kind      runEventKind
+	key       string
+	progress  speedtester.Progress
+	result    *speedtester.Result
+	err       error
+	round     int
+	roundRef  *roundState
+	path      string
+	imagePath string
+	warning   string
+	body      []byte
+	proxies   []map[string]any
 	// seq 是订阅拉取的代次：拉取途中地址被改过时，旧请求的结果直接丢弃。
 	seq int
 	// bitmap 是结果图预览解码出的位图（预乘 BGRA）。
@@ -487,10 +497,8 @@ func newState(opts Options) (*state, error) {
 		return nil, fmt.Errorf("数据目录：%w", err)
 	}
 
-	theme := opts.Theme
-	if theme.Background == (ui.Color{}) {
-		theme = ui.LightTheme()
-	}
+	themeMode := parseThemeMode(opts.ThemeMode)
+	theme, colors := resolveTheme(themeMode)
 
 	window := &ui.Tree{}
 	value := &state{
@@ -499,6 +507,8 @@ func newState(opts Options) (*state, error) {
 		baseDir:      baseDir,
 		dataDir:      dataDir,
 		theme:        theme,
+		palette:      colors,
+		themeMode:    themeMode,
 		active:       viewTest,
 		presetSel:    -1,
 		byKey:        make(map[string]*nodeState),
@@ -560,6 +570,10 @@ func newState(opts Options) (*state, error) {
 		value.settings = store.DefaultSettings()
 	}
 	value.settings = value.settings.Normalize()
+	if opts.ThemeMode == "" {
+		// 配色跟着设置走；只读打开时也照常生效（纯界面状态，不写盘）。
+		value.applyThemeMode(parseThemeMode(value.settings.Theme))
+	}
 	value.settingsForm.load(value.settings)
 	value.resetSort()
 	value.refreshSortHeaders()
@@ -803,7 +817,59 @@ func (s *state) applyNodes(entry *entryState, proxies []*speedtester.CProxy) {
 	entry.loadErr = ""
 	entry.missing = false
 	entry.statusText = fmt.Sprintf("已读取 %d 个节点", len(next))
+	// 重读/编辑后节点集合可能变化，裁剪轮次账本，别让结果条与导出继续引用
+	// 已经消失的节点。
+	s.pruneRounds()
 	s.rebuild()
+}
+
+// pruneRounds 在条目删除/重读/编辑后裁剪轮次账本：去掉已不存在的条目，并把
+// 每轮节点重映射到当前条目里仍存在的节点（按稳定身份）。避免结果条与手动
+// 导出继续引用已删除/已消失的节点。
+func (s *state) pruneRounds() {
+	if len(s.rounds) == 0 {
+		return
+	}
+	kept := s.rounds[:0]
+	for _, round := range s.rounds {
+		entry := s.entryByID(round.entry.entry.ID)
+		if entry == nil {
+			continue
+		}
+		round.entry = entry
+		nodes := round.nodes[:0]
+		for _, old := range round.nodes {
+			if current := nodeInEntry(entry, old.key); current != nil {
+				nodes = append(nodes, current)
+			}
+		}
+		round.nodes = nodes
+		if len(round.nodes) == 0 {
+			continue
+		}
+		kept = append(kept, round)
+	}
+	s.rounds = kept
+	if s.roundIndex >= len(s.rounds) {
+		s.roundIndex = len(s.rounds) - 1
+	}
+	if s.roundIndex < 0 {
+		s.roundIndex = 0
+	}
+	s.pendingExport = nil
+	if len(s.rounds) == 0 {
+		s.exportNotice = ""
+	}
+}
+
+// nodeInEntry 按稳定身份 key 在条目当前节点里查找。
+func nodeInEntry(entry *entryState, key string) *nodeState {
+	for _, node := range entry.nodes {
+		if node.key == key {
+			return node
+		}
+	}
+	return nil
 }
 
 // readSubscription 读取订阅条目。force 为真时无条件重新拉取；否则有缓存
@@ -889,12 +955,34 @@ func (s *state) compileFilter() {
 	spec := filter.Normalize(filter.Spec{Mode: s.filterMode, Expression: s.filterField.Text(), Combine: s.filterCombine})
 	matcher, err := filter.Compile(spec)
 	if err != nil {
-		s.filterErr = err.Error()
+		s.filterErr = localizeRegexError(err)
 		return
 	}
 	s.matcher = matcher
 	s.filterErr = ""
 	s.rebuild()
+}
+
+// localizeRegexError 把 Go 正则编译错误里的英文短语换成中文提示，避免界面
+// 里混入「error parsing regexp: ...」这类开发者文案。
+func localizeRegexError(err error) string {
+	msg := strings.ReplaceAll(err.Error(), "error parsing regexp: ", "")
+	replacements := [][2]string{
+		{"missing closing )", "缺少右括号 )"},
+		{"missing closing ]", "缺少右方括号 ]"},
+		{"unexpected )", "多余的右括号 )"},
+		{"unexpected ]", "多余的右方括号 ]"},
+		{"invalid escape sequence", "转义序列无效"},
+		{"invalid character class", "字符组无效"},
+		{"invalid repeat count", "重复次数无效"},
+		{"invalid nested repetition operator", "重复操作符嵌套无效"},
+	}
+	for _, replace := range replacements {
+		if strings.Contains(msg, replace[0]) {
+			msg = strings.ReplaceAll(msg, replace[0], replace[1])
+		}
+	}
+	return msg
 }
 
 func (s *state) setFilterMode(mode filter.Mode) {
@@ -911,6 +999,7 @@ func (s *state) setFilterCombine(combine filter.Combine) {
 
 func (s *state) persistSettings() {
 	settings := s.settings
+	settings.Theme = s.themeMode.key()
 	settings.FilterMode = string(s.filterMode)
 	settings.FilterExpression = s.filterField.Text()
 	settings.FilterCombine = string(s.filterCombine)
@@ -942,8 +1031,18 @@ func (s *state) rebuild() {
 
 	visible := s.visible[:0]
 	groups := s.groups[:0]
-	selectedCount, total := 0, 0
 	s.hasSubscription = false
+	// 「已选 x / 共 y」统计所有条目的所有节点（与工具条全选/全不选同口径），
+	// 不受条目是否勾选、过滤是否命中影响。
+	selectedCount, total := 0, 0
+	for _, entry := range s.entries {
+		for _, node := range entry.nodes {
+			total++
+			if node.selected {
+				selectedCount++
+			}
+		}
+	}
 	for _, entry := range s.entries {
 		if entry.entry.IsSubscription() && entry.entry.URL != "" {
 			s.hasSubscription = true
@@ -954,10 +1053,6 @@ func (s *state) rebuild() {
 		}
 		group := &groupState{entry: entry, collapsed: entry.collapsed}
 		for _, node := range entry.nodes {
-			total++
-			if node.selected {
-				selectedCount++
-			}
 			if !s.match(node.name) {
 				continue
 			}
@@ -1007,6 +1102,12 @@ func (s *state) pruneTransientAnchors() {
 	}
 	if s.activeNode != nil && !s.nodeInGroups(s.activeNode) {
 		s.activeNode = nil
+	}
+	// 行被过滤/隐藏后清掉 marked，避免多选口径把不可见行也算进去。
+	for _, node := range s.nodes {
+		if node.marked && !s.nodeInGroups(node) {
+			node.marked = false
+		}
 	}
 }
 
@@ -1070,15 +1171,15 @@ func (s *state) buildNodeItems() {
 	items := s.nodeItems[:0]
 	y := float32(8)
 	for _, group := range s.groups {
-		items = append(items, listItem{kind: itemHeader, y: y, height: 32, group: group})
-		y += 32
+		items = append(items, listItem{kind: itemHeader, y: y, height: groupBarH, group: group})
+		y += groupBarH
 		if group.collapsed {
 			y += 10
 			continue
 		}
 		for _, node := range group.nodes {
-			items = append(items, listItem{kind: itemNode, y: y, height: 40, node: node})
-			y += 40
+			items = append(items, listItem{kind: itemNode, y: y, height: rowH, node: node})
+			y += rowH
 		}
 		y += 10
 	}
@@ -1256,6 +1357,16 @@ func (s *state) refreshRunText() {
 	}
 	if s.run == nil || !s.run.running {
 		switch {
+		case len(s.rounds) > 0 && s.roundIndex >= 0 && s.roundIndex < len(s.rounds):
+			// 查看哪一轮就用哪一轮的节点数与已完成数，避免用最后一轮的数字。
+			round := s.rounds[s.roundIndex]
+			doneCount := 0
+			for _, node := range round.nodes {
+				if node.hasResult {
+					doneCount++
+				}
+			}
+			s.resultText = fmt.Sprintf("%s已完成 %d/%d", roundPrefix, doneCount, len(round.nodes))
 		case s.run != nil && s.run.total > 0:
 			s.resultText = fmt.Sprintf("%s已完成 %d/%d", roundPrefix, s.run.done, s.run.total)
 		case len(s.results) > 0:
@@ -1276,6 +1387,9 @@ func (s *state) refreshRunText() {
 			s.resultText += " · " + s.exportText
 		}
 		s.appendRoundError()
+		if s.exportNotice != "" && s.exporting == 0 {
+			s.resultText += " · " + s.exportNotice
+		}
 		return
 	}
 	s.run.text = fmt.Sprintf("%s已完成 %d/%d · 在测 %d", roundPrefix, s.run.done, s.run.total, s.run.active)
@@ -1312,7 +1426,12 @@ func (s *state) refreshNodeDisplay(node *nodeState) {
 	node.lastTestText = formatTested(node.result.TestedAt)
 	node.latencyText = formatLatency(durationMillis(node.result.LatencyMS))
 	node.jitterText = formatLatency(durationMillis(node.result.JitterMS))
-	node.lossText = formatLoss(node.result.PacketLoss)
+	if node.hasResult {
+		node.lossText = formatLoss(node.result.PacketLoss)
+	} else {
+		// 未测速时不要显示 0.0%，与延迟/抖动/下载的破折号口径保持一致。
+		node.lossText = "—"
+	}
 	node.uploadText = formatSpeed(node.result.UploadBps)
 	node.summaryText = ""
 	switch {

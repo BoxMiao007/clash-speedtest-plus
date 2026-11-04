@@ -7,11 +7,14 @@ import "github.com/vivaui/viva/ui"
 type ids struct {
 	page      ui.Scope
 	viewScope ui.Scope
-	modeScope ui.Scope
-	combScope ui.Scope
-	preset    ui.Scope
-	dialogs   ui.Scope
-	menu      ui.Scope
+	// themeScope 是标题栏里的快捷主题开关；settingsTheme 是设置页里的同一选项。
+	themeScope    ui.Scope
+	settingsTheme ui.Scope
+	modeScope     ui.Scope
+	combScope     ui.Scope
+	preset        ui.Scope
+	dialogs       ui.Scope
+	menu          ui.Scope
 
 	newEntry      ui.ID
 	entryScroll   ui.ID
@@ -141,6 +144,8 @@ func newIDs(tree *ui.Tree) ids {
 	var value ids
 	value.page = page
 	value.viewScope = tree.Sub(page, tree.Name("view-switch"))
+	value.themeScope = tree.Sub(page, tree.Name("theme-switch"))
+	value.settingsTheme = tree.Sub(page, tree.Name("settings-theme"))
 	value.modeScope = tree.Sub(page, tree.Name("filter-mode"))
 	value.combScope = tree.Sub(page, tree.Name("filter-combine"))
 	value.preset = tree.Sub(page, tree.Name("preset-select"))

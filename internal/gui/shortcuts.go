@@ -6,6 +6,10 @@ import "github.com/vivaui/viva/ui"
 // 和弦先被平台文本系统消费（Ctrl+A 在输入框里是全选文本），因此这些动作
 // 只在列表等位置生效。Alt/Meta 组合留给系统，不抢。
 func (a *App) onShortcut(event ui.KeyEvent) ui.EventResult {
+	// 模态对话框打开时，全局快捷键不生效，避免在录入/确认中被后台动作打断。
+	if a.dialog != dialogNone {
+		return ui.EventResult{}
+	}
 	if event.Release || event.Modifiers&ui.ModifierControl == 0 {
 		return ui.EventResult{}
 	}
@@ -32,6 +36,20 @@ func (a *App) onShortcut(event ui.KeyEvent) ui.EventResult {
 func (a *App) onKey(event ui.KeyEvent) ui.EventResult {
 	if event.Release {
 		return ui.EventResult{}
+	}
+	// 模态对话框独占键盘：F1/Ctrl+Enter/Esc 等应用级动作不得穿透到背景。
+	// 对话框自身的关闭由 flex.Dialog 的 DismissID 处理，不经过这里。
+	if a.dialog != dialogNone {
+		return ui.EventResult{}
+	}
+	// 键盘翻页：测速列表支持 PageUp/PageDown，纯键盘用户也能访问视口外的节点。
+	if a.active == viewTest && !a.menu.open && !a.presetOpen.Open &&
+		(event.Key == ui.KeyPageUp || event.Key == ui.KeyPageDown) {
+		delta := a.nodeViewport.Height * 0.9
+		if event.Key == ui.KeyPageUp {
+			delta = -delta
+		}
+		return scrollList(&a.nodeOffset, a.nodeContent, a.nodeViewport.Height, delta)
 	}
 	if event.Key == ui.KeyF1 {
 		a.openAbout()

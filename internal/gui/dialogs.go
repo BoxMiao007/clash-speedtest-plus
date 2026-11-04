@@ -56,14 +56,15 @@ func (a *App) openAbout() {
 
 func (a *App) paintAboutDialog(f *flex.Frame) {
 	dialog := f.Dialog(flex.DialogSpec{
-		Title:     "关于与帮助",
-		Width:     580,
-		Scope:     a.ids.aboutScope,
-		DismissID: a.ids.aboutClose,
-		CloseID:   a.ids.aboutClose,
+		Title:          "关于与帮助",
+		Width:          580,
+		Scope:          a.ids.aboutScope,
+		DismissID:      a.ids.aboutClose,
+		CloseID:        a.ids.aboutClose,
+		InitialFocusID: a.ids.aboutClose,
 	})
 	dialog.Body(func() {
-		f.Paragraph(a.aboutText, 24).FontSize(12)
+		f.Paragraph(a.aboutText, 24).FontSize(fontBody)
 	})
 	dialog.Footer(func() {
 		f.Spacer()
@@ -78,18 +79,21 @@ func (a *App) paintAboutDialog(f *flex.Frame) {
 
 func (a *App) paintPreviewDialog(f *flex.Frame) {
 	dialog := f.Dialog(flex.DialogSpec{
-		Title:     "结果图预览",
-		Width:     960,
-		Scope:     a.ids.previewScope,
-		DismissID: a.ids.previewClose,
-		CloseID:   a.ids.previewClose,
+		Title:          "结果图预览",
+		Width:          960,
+		Scope:          a.ids.previewScope,
+		DismissID:      a.ids.previewClose,
+		CloseID:        a.ids.previewClose,
+		InitialFocusID: a.ids.previewClose,
 	})
 	dialog.Body(func() {
 		// 位图在 view.Draw 之后按这个区域绘制；区域几何来自上一帧布局。
-		a.previewArea = f.Stack().Height(480).FillWidth().Clip()
+		// 底板用凹陷色，图片没铺满时也能看出内容区边界。
+		a.previewArea = f.Stack().Height(480).FillWidth().Clip().
+			Background(a.palette.Sunken).Radius(a.theme.Metrics.RadiusControl)
 	})
 	dialog.Footer(func() {
-		f.Text(a.preview.text).FontSize(11).Muted().Ellipsis().Grow(1)
+		f.Text(a.preview.text).FontSize(fontCaption).Muted().Ellipsis().Grow(1)
 		if a.preview.bitmap.Width > 0 {
 			if f.Button(a.ids.previewZoom, a.previewZoomLabel()).Outline().Clicked() {
 				f.Canvas().AfterPaint(func() { a.togglePreviewZoom() })
@@ -120,31 +124,33 @@ func (a *App) paintEntryDialog(f *flex.Frame) {
 		InitialFocusID: a.ids.entryName,
 	})
 	dialog.Body(func() {
-		f.Column().Gap(10).Children(func() {
+		f.Column().Gap(gapM).Children(func() {
 			f.Field(&a.entryForm.name, a.ids.entryName, "名称", "例如：机场 A")
-			f.Row().Gap(10).Items(flex.Center).Children(func() {
-				f.Text("类型").FontSize(12).Muted().Width(48)
+			f.Row().Gap(gapM).Items(flex.Center).Children(func() {
+				f.Text("类型").FontSize(fontBody).Muted().Width(48)
 				if index, ok := f.Choice(a.ids.entryKind, entryKindLabels, a.entryForm.kind).ChosenIndex(); ok {
 					a.entryForm.kind = index
 				}
 			})
 			if a.entryForm.kind == 1 {
 				f.Field(&a.entryForm.url, a.ids.entryURL, "订阅链接", "https://example.com/subscribe")
-				f.Text("支持 Clash/Mihomo 配置、整段 base64 与需要补 flag=meta 的订阅。").FontSize(11).Muted()
+				f.Text("支持 Clash/Mihomo 配置、整段 base64 与需要补 flag=meta 的订阅。").FontSize(fontCaption).Muted()
 			} else {
-				f.Row().Gap(8).Items(flex.Center).Children(func() {
-					f.Text(a.entryForm.pathText).FontSize(12).Muted().Ellipsis().Grow(1)
+				f.Row().Gap(gapS).Items(flex.Center).Children(func() {
+					f.Text(a.entryForm.pathText).FontSize(fontBody).Muted().Ellipsis().Grow(1)
 					if f.Button(a.ids.entryChoose, "选择文件…").Small().Outline().Clicked() {
 						f.Canvas().AfterPaint(func() { a.chooseEntryPath() })
 					}
 				})
 			}
 			if a.entryForm.err != "" {
-				f.Text(a.entryForm.err).FontSize(12).Color(a.theme.Danger)
+				noticeChip(f, a.entryForm.err, a.theme.Danger, alpha(a.theme.Danger, 0.12))
 			}
 		})
 	})
 	dialog.Footer(func() {
+		// 主次操作靠右排：取消在左、保存在右，和系统对话框的习惯一致。
+		f.Spacer()
 		if f.Button(a.ids.entryCancel, "取消").Outline().Clicked() {
 			a.dialog = dialogNone
 		}
@@ -167,15 +173,16 @@ func (a *App) paintPresetDialog(f *flex.Frame) {
 		InitialFocusID: a.ids.presetName,
 	})
 	dialog.Body(func() {
-		f.Column().Gap(10).Children(func() {
+		f.Column().Gap(gapM).Children(func() {
 			f.Field(&a.presetForm.name, a.ids.presetName, "预设名称", "例如：香港 IPLC")
 			if a.presetForm.err != "" {
-				f.Text(a.presetForm.err).FontSize(12).Color(a.theme.Danger)
+				noticeChip(f, a.presetForm.err, a.theme.Danger, alpha(a.theme.Danger, 0.12))
 			}
-			f.Text("预设保存当前过滤模式、表达式和与/或组合，可跨条目使用。").FontSize(11).Muted()
+			f.Text("预设保存当前过滤模式、表达式和与/或组合，可跨条目使用。").FontSize(fontCaption).Muted()
 		})
 	})
 	dialog.Footer(func() {
+		f.Spacer()
 		if f.Button(a.ids.presetCancel, "取消").Outline().Clicked() {
 			a.dialog = dialogNone
 		}
@@ -190,20 +197,26 @@ func (a *App) paintPresetDialog(f *flex.Frame) {
 
 func (a *App) paintConfirmDialog(f *flex.Frame) {
 	dialog := f.Dialog(flex.DialogSpec{
-		Title:     a.confirm.title,
-		Width:     460,
-		Scope:     a.ids.confirmScope,
-		DismissID: a.ids.confirmCancel,
-		CloseID:   a.ids.confirmCancel,
+		Title:          a.confirm.title,
+		Width:          460,
+		Scope:          a.ids.confirmScope,
+		DismissID:      a.ids.confirmCancel,
+		CloseID:        a.ids.confirmCancel,
+		InitialFocusID: a.ids.confirmCancel,
 	})
 	dialog.Body(func() {
-		f.Paragraph(a.confirm.body, 6).FontSize(12).Muted()
+		f.Paragraph(a.confirm.body, 6).FontSize(fontBody).Muted()
 	})
 	dialog.Footer(func() {
+		f.Spacer()
 		if f.Button(a.ids.confirmCancel, "取消").Outline().Clicked() {
 			a.dialog = dialogNone
 		}
-		if f.Button(a.ids.confirmOK, "删除").Destructive().Clicked() {
+		confirmLabel := "删除"
+		if a.confirm.kind == confirmClearResults {
+			confirmLabel = "清空"
+		}
+		if f.Button(a.ids.confirmOK, confirmLabel).Destructive().Clicked() {
 			f.Canvas().AfterPaint(func() { a.confirmDelete() })
 		}
 	})
@@ -214,17 +227,19 @@ func (a *App) paintConfirmDialog(f *flex.Frame) {
 
 func (a *App) paintAlertDialog(f *flex.Frame) {
 	dialog := f.Dialog(flex.DialogSpec{
-		Title:     a.alert.title,
-		Width:     540,
-		Scope:     a.ids.alertScope,
-		DismissID: a.ids.alertOK,
-		CloseID:   a.ids.alertOK,
-		NoClose:   true,
+		Title:          a.alert.title,
+		Width:          540,
+		Scope:          a.ids.alertScope,
+		DismissID:      a.ids.alertOK,
+		CloseID:        a.ids.alertOK,
+		NoClose:        true,
+		InitialFocusID: a.ids.alertOK,
 	})
 	dialog.Body(func() {
-		f.Paragraph(a.alert.body, 8).FontSize(12).Muted()
+		f.Paragraph(a.alert.body, 8).FontSize(fontBody).Muted()
 	})
 	dialog.Footer(func() {
+		f.Spacer()
 		if f.Button(a.ids.alertOK, "确定").Clicked() {
 			a.alert.open = false
 			a.dialog = dialogNone

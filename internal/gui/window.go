@@ -33,6 +33,10 @@ func (s *state) captureWindowFrame() {
 // onFileDrop 处理系统拖入的文件：移动经过时提示可松开，松开后把每个 YAML
 // 配置添加成本地条目；其它类型忽略并说明原因。
 func (a *App) onFileDrop(event ui.FileDropEvent) ui.EventResult {
+	// 模态对话框打开时忽略文件拖放，避免在录入时后台添加条目。
+	if a.dialog != dialogNone {
+		return ui.EventResult{}
+	}
 	switch event.Phase {
 	case ui.FileDropOver:
 		if a.dropActive {
@@ -72,6 +76,24 @@ func (s *state) addDroppedFiles(paths []string) {
 		if err != nil || info.IsDir() || !isConfigFile(path) {
 			skipped++
 			continue
+		}
+		// 同一路径重复拖入不再生成重复条目。
+		if absolute, absErr := filepath.Abs(path); absErr == nil {
+			absolute = filepath.Clean(absolute)
+			duplicated := false
+			for _, entry := range s.entries {
+				if entry.entry.IsSubscription() {
+					continue
+				}
+				if existing, ok := s.resolvePath(entry.entry.Path); ok && existing == absolute {
+					duplicated = true
+					break
+				}
+			}
+			if duplicated {
+				skipped++
+				continue
+			}
 		}
 		if err := s.addLocalEntry(path); err != nil {
 			s.status = "添加条目失败：" + err.Error()
@@ -157,17 +179,19 @@ func (a *App) paintDropHint(canvas *ui.Canvas) {
 	if width <= 0 || height <= 0 {
 		return
 	}
-	tint := a.theme.Primary
-	tint.Alpha *= 0.10
-	canvas.Fill(ui.Rect{Width: width, Height: height}, tint)
-	boxWidth := canvas.TextWidth(a.dropText, 15) + 56
+	// 蒙层压暗整窗：拖动时注意力只留在提示卡片上。
+	canvas.Fill(ui.Rect{Width: width, Height: height}, alpha(a.theme.Background, 0.72))
+	boxWidth := canvas.TextWidth(a.dropText, 15) + 72
 	if boxWidth > width-48 {
 		boxWidth = width - 48
 	}
-	if boxWidth < 200 {
-		boxWidth = 200
+	if boxWidth < 220 {
+		boxWidth = 220
 	}
-	box := ui.Rect{X: (width - boxWidth) / 2, Y: height/2 - 36, Width: boxWidth, Height: 72}
-	canvas.RoundedBorder(box, a.theme.Metrics.RadiusSurface, 1, a.theme.Border, a.theme.Card)
+	box := ui.Rect{X: (width - boxWidth) / 2, Y: height/2 - 38, Width: boxWidth, Height: 76}
+	// 外圈淡强调色当光晕：深色底上卡片边界更清楚，也不依赖阴影层级。
+	canvas.Rounded(ui.Rect{X: box.X - 2, Y: box.Y - 2, Width: box.Width + 4, Height: box.Height + 4},
+		a.theme.Metrics.RadiusSurface+2, alpha(a.palette.Accent, 0.35))
+	canvas.RoundedBorder(box, a.theme.Metrics.RadiusSurface, 1, a.theme.Border, a.palette.Raised)
 	canvas.LabelCenter(a.dropText, box, ui.TextStyle{Size: 15, Weight: ui.WeightMedium, Color: a.theme.Foreground})
 }

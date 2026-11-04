@@ -132,7 +132,7 @@ type roundExport struct {
 // runRoundExport 写一轮的全部产物：配置 yaml、结果图、Gist/仓库上传。
 // 返回写出的主路径、图片/上传的附加提示、过筛后的节点（供合并导出）和错误。
 // 配置或图片写失败才算错误；上传失败只进提示，不阻塞后续轮次。
-func runRoundExport(job roundExport) (path string, warning string, proxies []map[string]any, err error) {
+func runRoundExport(job roundExport) (path string, imagePath string, warning string, proxies []map[string]any, err error) {
 	mode, modeErr := speedtester.ParseSpeedMode(job.Settings.Mode)
 	if modeErr != nil {
 		mode = speedtester.SpeedModeDownload
@@ -143,17 +143,17 @@ func runRoundExport(job roundExport) (path string, warning string, proxies []map
 		filter := testFilter(testConfigFromSettings(job.Settings))
 		proxies = buildProxies(job.Results, filter, job.Settings.RenameEnabled, job.Settings.RenameTemplate)
 		if err := export.WriteYAML(job.Path, proxies); err != nil {
-			return "", "", proxies, fmt.Errorf("保存配置失败：%w", err)
+			return "", "", "", proxies, fmt.Errorf("保存配置失败：%w", err)
 		}
 		path = job.Path
 	}
 	if job.Settings.ImageEnabled {
-		imagePath, imageWarning, imageErr := writeResultImage(job, mode)
+		image, imageWarning, imageErr := writeResultImage(job, mode)
 		if imageErr != nil {
 			// 结果图是附加产物：失败只提示，不拖住后续轮次；配置写入失败才算错误。
 			warning = output.JoinStatus(warning, "保存结果图失败："+imageErr.Error())
 		} else {
-			path = output.JoinStatus(path, imagePath)
+			imagePath = image
 			warning = output.JoinStatus(warning, imageWarning)
 		}
 	}
@@ -162,7 +162,7 @@ func runRoundExport(job roundExport) (path string, warning string, proxies []map
 			warning = output.JoinStatus(warning, uploadErr.Error())
 		}
 	}
-	return path, warning, proxies, nil
+	return path, imagePath, warning, proxies, nil
 }
 
 // writeResultImage 按旧 TUI 的口径生成结果图：完成状态、汇总行、阈值配色；
@@ -290,8 +290,8 @@ func (s *state) startRoundExport(round *roundState) {
 	s.exportText = "正在导出…"
 	s.refreshRunText()
 	go func() {
-		path, warning, proxies, err := runRoundExport(job)
-		s.enqueue(runEvent{kind: eventExported, round: index, roundRef: round, path: path, warning: warning, err: err, proxies: proxies})
+		path, imagePath, warning, proxies, err := runRoundExport(job)
+		s.enqueue(runEvent{kind: eventExported, round: index, roundRef: round, path: path, imagePath: imagePath, warning: warning, err: err, proxies: proxies})
 	}()
 }
 
